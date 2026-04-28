@@ -87,7 +87,7 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
 var verifyBtn=document.getElementById('verify-submit');
 if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     var code=document.getElementById('verify-code').value.trim();
-    if(!code||code.length<6){showMsg('请输入6位验证码',true);return;}
+    if(!code||code.length<4){showMsg('请输入6位验证码',true);return;}
     hideMsg();
     verifyBtn.textContent='验证中...';verifyBtn.disabled=true;
 
