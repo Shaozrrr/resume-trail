@@ -37,23 +37,16 @@ const AI_CFG={gemini:{url:'https://generativelanguage.googleapis.com/v1beta/mode
 
 class Store{
     constructor(){
-        // 云端唯一真源：本地只保留运行时内存，不再从 localStorage 读取业务数据
-        this.apps=[];
-        this.resumes=[];
-        this.refs=[];
-        this.logs=[];
-        this.settings={intlMode:false};
-        this.categories=[];
-        this.painPoints=[...DEFAULT_PP];
-        this.tableCols=[...DEFAULT_COLS];
+        this.apps=JSON.parse(localStorage.getItem('rt_apps')||'[]');
+        this.resumes=JSON.parse(localStorage.getItem('rt_resumes')||'[]');
+        this.refs=JSON.parse(localStorage.getItem('rt_refs')||'[]');
+        this.logs=JSON.parse(localStorage.getItem('rt_logs')||'[]');
+        this.settings=JSON.parse(localStorage.getItem('rt_set')||'{"intlMode":false}');
+        this.categories=JSON.parse(localStorage.getItem('rt_cats')||'[]');
+        this.painPoints=JSON.parse(localStorage.getItem('rt_pp')||JSON.stringify(DEFAULT_PP));
+        this.tableCols=JSON.parse(localStorage.getItem('rt_cols')||JSON.stringify(DEFAULT_COLS));
     }
-    save(){
-        // 不再把业务数据写入 localStorage，只同步到云端
-        if(typeof cloudStore!=='undefined'){
-            clearTimeout(this._saveTimer);
-            this._saveTimer=setTimeout(function(){cloudStore.save();},300);
-        }
-    }
+    save(){localStorage.setItem('rt_apps',JSON.stringify(this.apps));localStorage.setItem('rt_resumes',JSON.stringify(this.resumes));localStorage.setItem('rt_refs',JSON.stringify(this.refs));localStorage.setItem('rt_logs',JSON.stringify(this.logs));localStorage.setItem('rt_set',JSON.stringify(this.settings));localStorage.setItem('rt_cats',JSON.stringify(this.categories));localStorage.setItem('rt_pp',JSON.stringify(this.painPoints));localStorage.setItem('rt_cols',JSON.stringify(this.tableCols));}
     addApp(a){a.id=crypto.randomUUID();a.created_at=new Date().toISOString();a.updated_at=a.created_at;if(!a.timeline)a.timeline=[];this.apps.push(a);this.addLog(a.id,null,a.status);this.save();return a;}
     updateApp(id,u){const i=this.apps.findIndex(a=>a.id===id);if(i<0)return null;const o=this.apps[i];if(u.status&&u.status!==o.status)this.addLog(id,o.status,u.status,u._rej);delete u._rej;Object.assign(this.apps[i],u,{updated_at:new Date().toISOString()});this.save();return this.apps[i];}
     delApp(id){this.apps=this.apps.filter(a=>a.id!==id);this.refs=this.refs.filter(r=>r.app_id!==id);this.logs=this.logs.filter(l=>l.app_id!==id);this.save();}
@@ -475,12 +468,5 @@ function addSample(){
     if(ga)store.addRef({app_id:ga.id,interview_round:'ROUND_1',input_type:'TEXT',raw_content:'产品设计题：为老年人设计社交App。用了用户画像+场景分析，但商业模式不够深入。',cleaned_content:'产品设计题：为老年人设计社交App。用了用户画像+场景分析，但商业模式不够深入。',pain_points:['准备不足','知识盲区'],self_rating:3});
     store.save();initFilters();
 }
-function init(){
-    initFilters();
-    updIntl();
-    // 只有在未登录且明确需要演示数据时才使用样例
-    var hasSession=!!localStorage.getItem('rt_session');
-    if(!hasSession&& !store.apps.length) addSample();
-    switchView('pipeline');
-}
+function init(){initFilters();updIntl();if(!store.apps.length)addSample();switchView('pipeline');}
 init();
