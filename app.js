@@ -47,31 +47,37 @@ class Store{
         this.painPoints=[...DEFAULT_PP];
         this.tableCols=[...DEFAULT_COLS];
     }
-    save(){
-        // 不再把业务数据写入 localStorage，只同步到云端
+    async save(){
         if(typeof cloudStore!=='undefined'){
-            clearTimeout(this._saveTimer);
-            this._saveTimer=setTimeout(function(){cloudStore.save();},300);
+            try{
+                await cloudStore.saveFrom(this);
+                return true;
+            }catch(e){
+                console.error(e);
+                if(typeof toast==='function')toast('保存失败，请重试','error');
+                return false;
+            }
         }
+        return true;
     }
-    addApp(a){a.id=crypto.randomUUID();a.created_at=new Date().toISOString();a.updated_at=a.created_at;if(!a.timeline)a.timeline=[];this.apps.push(a);this.addLog(a.id,null,a.status);this.save();return a;}
-    updateApp(id,u){const i=this.apps.findIndex(a=>a.id===id);if(i<0)return null;const o=this.apps[i];if(u.status&&u.status!==o.status)this.addLog(id,o.status,u.status,u._rej);delete u._rej;Object.assign(this.apps[i],u,{updated_at:new Date().toISOString()});this.save();return this.apps[i];}
-    delApp(id){this.apps=this.apps.filter(a=>a.id!==id);this.refs=this.refs.filter(r=>r.app_id!==id);this.logs=this.logs.filter(l=>l.app_id!==id);this.save();}
+    async addApp(a){a.id=crypto.randomUUID();a.created_at=new Date().toISOString();a.updated_at=a.created_at;if(!a.timeline)a.timeline=[];this.apps.push(a);this.addLog(a.id,null,a.status);await this.save();return a;}
+    async updateApp(id,u){const i=this.apps.findIndex(a=>a.id===id);if(i<0)return null;const o=this.apps[i];if(u.status&&u.status!==o.status)this.addLog(id,o.status,u.status,u._rej);delete u._rej;Object.assign(this.apps[i],u,{updated_at:new Date().toISOString()});await this.save();return this.apps[i];}
+    async delApp(id){this.apps=this.apps.filter(a=>a.id!==id);this.refs=this.refs.filter(r=>r.app_id!==id);this.logs=this.logs.filter(l=>l.app_id!==id);await this.save();}
     addLog(aid,from,to,rej){this.logs.push({id:crypto.randomUUID(),app_id:aid,from:from,to:to,rej:rej||null,at:new Date().toISOString()});}
-    addResume(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.resumes.push(r);this.save();return r;}
-    delResume(id){this.resumes=this.resumes.filter(r=>r.id!==id);this.save();}
-    addRef(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.refs.push(r);this.save();return r;}
-    updateRef(id,u){const i=this.refs.findIndex(r=>r.id===id);if(i<0)return;Object.assign(this.refs[i],u);this.save();}
+    async addResume(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.resumes.push(r);await this.save();return r;}
+    async delResume(id){this.resumes=this.resumes.filter(r=>r.id!==id);await this.save();}
+    async addRef(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.refs.push(r);await this.save();return r;}
+    async updateRef(id,u){const i=this.refs.findIndex(r=>r.id===id);if(i<0)return;Object.assign(this.refs[i],u);await this.save();}
     getApp(id){return this.apps.find(a=>a.id===id);}
     getResume(id){return this.resumes.find(r=>r.id===id);}
     getAppRefs(aid){return this.refs.filter(r=>r.app_id===aid);}
     getAppLogs(aid){return this.logs.filter(l=>l.app_id===aid).sort((a,b)=>new Date(b.at)-new Date(a.at));}
-    addCat(c){c=c.trim();if(c&&!this.categories.includes(c)){this.categories.push(c);this.save();}return c;}
-    rmCat(c){this.categories=this.categories.filter(x=>x!==c);this.save();}
-    addPP(p){p=p.trim();if(p&&!this.painPoints.includes(p)){this.painPoints.push(p);this.save();}return p;}
-    rmPP(p){this.painPoints=this.painPoints.filter(x=>x!==p);this.save();}
-    addCol(name){const id='custom_'+Date.now();const actIdx=this.tableCols.findIndex(c=>c.id==='actions');if(actIdx>=0)this.tableCols.splice(actIdx,0,{id,label:name,show:true,system:false,custom:true});else this.tableCols.push({id,label:name,show:true,system:false,custom:true});this.save();return id;}
-    rmCol(id){this.tableCols=this.tableCols.filter(c=>c.id!==id);this.apps.forEach(a=>{if(a.customFields)delete a.customFields[id];});this.save();}
+    async addCat(c){c=c.trim();if(c&&!this.categories.includes(c)){this.categories.push(c);await this.save();}return c;}
+    async rmCat(c){this.categories=this.categories.filter(x=>x!==c);await this.save();}
+    async addPP(p){p=p.trim();if(p&&!this.painPoints.includes(p)){this.painPoints.push(p);await this.save();}return p;}
+    async rmPP(p){this.painPoints=this.painPoints.filter(x=>x!==p);await this.save();}
+    async addCol(name){const id='custom_'+Date.now();const actIdx=this.tableCols.findIndex(c=>c.id==='actions');if(actIdx>=0)this.tableCols.splice(actIdx,0,{id,label:name,show:true,system:false,custom:true});else this.tableCols.push({id,label:name,show:true,system:false,custom:true});await this.save();return id;}
+    async rmCol(id){this.tableCols=this.tableCols.filter(c=>c.id!==id);this.apps.forEach(a=>{if(a.customFields)delete a.customFields[id];});await this.save();}
 }
 const store=new Store();
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
@@ -218,13 +224,13 @@ const cfa=$('#custom-fields-area');cfa.innerHTML='';
 const customCols=store.tableCols.filter(c=>c.custom);
 if(customCols.length){customCols.forEach(col=>{const val=a?.customFields?.[col.id]||'';cfa.innerHTML+=`<div class="form-group"><label>${col.label}</label><input type="text" class="custom-field-input" data-col-id="${col.id}" value="${val}" placeholder="输入${col.label}..."></div>`;});}
 updIntl();$('#modal-overlay').classList.add('active');}
-function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const appliedDate=$('#form-date').value;const d={company_name:co,position_title:po,position_category:ca,applied_date:appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:$('#form-visa').value,source_channel:$('#form-channel').value,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value};
+async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const appliedDate=$('#form-date').value;const d={company_name:co,position_title:po,position_category:ca,applied_date:appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:$('#form-visa').value,source_channel:$('#form-channel').value,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value};
 // 收集自定义字段
 const cf={};$$('.custom-field-input').forEach(inp=>{cf[inp.dataset.colId]=inp.value.trim();});if(Object.keys(cf).length)d.customFields=cf;
 if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.customFields||{},cf);
 // 同步投递日期到时间线
 if(old.timeline&&old.timeline.length){const ae=old.timeline.find(t=>t.name==='已投递');if(ae)ae.date=appliedDate;d.timeline=old.timeline;}
-store.updateApp(editId,d);toast('已更新','success');}else{d.timeline=[{name:'已投递',date:appliedDate}];d.status='APPLIED';d.customFields=cf;store.addApp(d);toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
+const ok=await store.updateApp(editId,d);if(!ok){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{d.timeline=[{name:'已投递',date:appliedDate}];d.status='APPLIED';d.customFields=cf;const ok=await store.addApp(d);if(!ok){toast('保存失败，请重试','error');return;}toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
 $('#add-application-btn').addEventListener('click',()=>openAppModal());
 $('#modal-save').addEventListener('click',()=>saveApp(false));
 $('#modal-save-continue').addEventListener('click',()=>saveApp(true));
@@ -323,7 +329,7 @@ $('#upload-zone').addEventListener('drop',e=>{e.preventDefault();e.currentTarget
 let selFile=null;
 $('#resume-file-input').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);});
 function handleFile(f){if(f.size>10485760){toast('超过10MB','error');return;}if(!f.name.match(/\.(pdf|docx)$/i)){toast('仅PDF/DOCX','error');return;}selFile=f;$('#resume-name').value=f.name.replace(/\.(pdf|docx)$/i,'');$('#upload-zone').querySelector('p').textContent=`已选: ${f.name}`;}
-$('#resume-save').addEventListener('click',()=>{const n=$('#resume-name').value.trim();if(!n){toast('请输入名称','error');return;}const tags=$('#resume-tags').value.split(',').map(t=>t.trim()).filter(Boolean);const rd={file_name:n,orig:selFile?.name||n,file_type:selFile?.name?.endsWith('.pdf')?'PDF':'DOCX',size:selFile?.size||0,tags,data_url:null};if(selFile){const reader=new FileReader();reader.onload=e=>{rd.data_url=e.target.result;store.addResume(rd);toast('已上传','success');$('#resume-modal-overlay').classList.remove('active');selFile=null;renderResumes();};reader.readAsDataURL(selFile);}else{store.addResume(rd);toast('已保存','success');$('#resume-modal-overlay').classList.remove('active');renderResumes();}});
+$('#resume-save').addEventListener('click',async ()=>{const n=$('#resume-name').value.trim();if(!n){toast('请输入名称','error');return;}const tags=$('#resume-tags').value.split(',').map(t=>t.trim()).filter(Boolean);const rd={file_name:n,orig:selFile?.name||n,file_type:selFile?.name?.endsWith('.pdf')?'PDF':'DOCX',size:selFile?.size||0,tags,data_url:null};if(selFile){const reader=new FileReader();reader.onload=async e=>{rd.data_url=e.target.result;const ok=await store.addResume(rd);if(!ok){toast('保存失败，请重试','error');return;}toast('已上传','success');$('#resume-modal-overlay').classList.remove('active');selFile=null;renderResumes();};reader.readAsDataURL(selFile);}else{const ok=await store.addResume(rd);if(!ok){toast('保存失败，请重试','error');return;}toast('已保存','success');$('#resume-modal-overlay').classList.remove('active');renderResumes();}});
 $('#resume-cancel').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');selFile=null;});
 $('#resume-modal-close').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');selFile=null;});
 
@@ -375,7 +381,7 @@ let mediaRec=null,audioChunks=[],recTimer=null,recSec=0;
 $('#record-btn').addEventListener('click',async()=>{const btn=$('#record-btn');if(mediaRec?.state==='recording'){mediaRec.stop();btn.classList.remove('recording');$('#record-label').textContent='处理中...';clearInterval(recTimer);return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});mediaRec=new MediaRecorder(stream);audioChunks=[];recSec=0;mediaRec.ondataavailable=e=>audioChunks.push(e.data);mediaRec.onstop=()=>{stream.getTracks().forEach(t=>t.stop());$('#voice-result').style.display='';$('#voice-result').textContent='录音完成';$('#reflection-content').value='（录音完成，请编辑）';$('#reflection-content').style.display='';$('#record-label').textContent='重新录音';};mediaRec.start();btn.classList.add('recording');$('#record-label').textContent='录音中...';recTimer=setInterval(()=>{recSec++;$('#record-timer').textContent=`${String(Math.floor(recSec/60)).padStart(2,'0')}:${String(recSec%60).padStart(2,'0')}`;},1000);}catch(e){toast('无法访问麦克风','error');}});
 $$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
 $('#reflection-ai-btn').addEventListener('click',async()=>{const c=$('#reflection-content').value.trim();if(!c||c.length<10){toast('请先输入内容','error');return;}$('#ai-analysis-section').style.display='';$('#ai-analysis-content').innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';$('#ai-analysis-content').textContent=await callAI(`求职面试教练。分析：1.考点 2.回答 3.改进\n\n${c}\n\n简洁中文。`);});
-$('#reflection-save').addEventListener('click',()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const aiC=$('#ai-analysis-content').textContent,aiOk=aiC&&!aiC.includes('分析中');const d={app_id:aid,interview_round:round,input_type:'TEXT',raw_content:content,cleaned_content:content,ai_extracted:aiOk?aiC:null,pain_points:pp,self_rating:sr||null};if(editRefId){store.updateRef(editRefId,d);toast('已更新','success');}else{store.addRef(d);toast('已保存','success');}$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
+$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const aiC=$('#ai-analysis-content').textContent,aiOk=aiC&&!aiC.includes('分析中');const d={app_id:aid,interview_round:round,input_type:'TEXT',raw_content:content,cleaned_content:content,ai_extracted:aiOk?aiC:null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
 $('#reflection-cancel').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 $('#reflection-modal-close').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 

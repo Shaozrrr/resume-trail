@@ -1,4 +1,4 @@
-// 认证 - 登录直接进，注册需验证邮箱
+// 认证 - 登录直接进，注册需邮箱验证码（云端优先）
 var rtSession=JSON.parse(localStorage.getItem('rt_session')||'null');
 var pendingEmail='',pendingPwd='';
 
@@ -7,8 +7,13 @@ function checkAuth(){
         document.getElementById('login-page').style.display='none';
         document.getElementById('app').style.display='flex';
         updateAvatar();
-        sb.syncFromCloud().then(function(synced){
-            if(synced&&typeof initFilters==='function'){initFilters();if(typeof switchView==='function')switchView('pipeline');}
+        // 强制从云端加载当前账号数据
+        cloudStore.loadInto(store).then(function(){
+            if(typeof initFilters==='function')initFilters();
+            if(typeof switchView==='function')switchView('pipeline');
+        }).catch(function(err){
+            console.error(err);
+            toast('云端数据加载失败，请刷新重试','error');
         });
         return true;
     }
@@ -27,16 +32,25 @@ function showMsg(text,isErr){
     var el=document.getElementById('login-msg');
     if(el){el.style.display='block';el.style.color=isErr?'var(--red)':'var(--green)';el.textContent=text;}
 }
-
 function hideMsg(){var el=document.getElementById('login-msg');if(el)el.style.display='none';}
 
+function clearLocalBusinessData(){
+    if(typeof store==='undefined')return;
+    store.apps=[];
+    store.resumes=[];
+    store.refs=[];
+    store.logs=[];
+    store.categories=[];
+    store.painPoints=(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]);
+    store.settings={intlMode:false};
+    store.tableCols=(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[]);
+}
+
+// 登录成功：清空旧数据，保存 session，刷新后拉云端
 function onSuccess(result){
-    // 清除上一个用户的本地数据
-    var keysToKeep=['rt_session','rt_nickname'];
-    var allKeys=Object.keys(localStorage);
-    allKeys.forEach(function(k){if(k.startsWith('rt_')&&keysToKeep.indexOf(k)<0)localStorage.removeItem(k);});
-    // 保存新 session
-    rtSession=result;localStorage.setItem('rt_session',JSON.stringify(result));
+    clearLocalBusinessData();
+    localStorage.setItem('rt_session',JSON.stringify(result));
+    rtSession=result;
     showMsg('欢迎！正在进入...',false);
     setTimeout(function(){location.reload();},600);
 }
@@ -58,22 +72,16 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         return;
     }
 
-    // 登录失败，判断原因
     var errMsg=loginRes.error_description||loginRes.msg||'';
     if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0){
-        // 可能是密码错误或用户不存在
-        // 尝试注册 → 发送验证码
+        // 尝试走注册验证码流程
         pendingEmail=email;pendingPwd=pwd;
-
-        // 先用 OTP 发送验证码
         var otpRes=await sb.signInOTP(email);
         if(otpRes.error){
             showMsg('发送验证码失败：'+(otpRes.error.message||''),true);
             submitBtn.textContent='开始使用';submitBtn.disabled=false;
             return;
         }
-
-        // 切换到验证码输入界面
         document.getElementById('login-step1').style.display='none';
         document.getElementById('login-step2').style.display='';
         document.getElementById('login-hint').style.display='none';
@@ -92,15 +100,13 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
 var verifyBtn=document.getElementById('verify-submit');
 if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     var code=document.getElementById('verify-code').value.trim();
-    if(!code||code.length<4){showMsg('请输入6位验证码',true);return;}
+    if(!code||code.length<4){showMsg('请输入验证码',true);return;}
     hideMsg();
     verifyBtn.textContent='验证中...';verifyBtn.disabled=true;
 
-    // 验证 OTP
     var verifyRes=await sb.verifyOTP(pendingEmail,code);
     if(verifyRes.access_token){
-        // OTP 验证成功，用户已创建
-        // 现在设置密码（更新用户密码）
+        // 设置密码
         var token=verifyRes.access_token;
         await fetch(SUPABASE_URL+'/auth/v1/user',{
             method:'PUT',
@@ -115,7 +121,7 @@ if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     verifyBtn.textContent='验证并注册';verifyBtn.disabled=false;
 });
 
-// 返回按钮
+// 返回
 var backBtn=document.getElementById('verify-back');
 if(backBtn)backBtn.addEventListener('click',function(){
     document.getElementById('login-step1').style.display='';
@@ -124,18 +130,16 @@ if(backBtn)backBtn.addEventListener('click',function(){
     hideMsg();
 });
 
-// Enter 键
 var codeInput=document.getElementById('verify-code');
 if(codeInput)codeInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&verifyBtn)verifyBtn.click();});
 var pwdInput=document.getElementById('login-password');
 if(pwdInput)pwdInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&submitBtn)submitBtn.click();});
-var emailInput=document.getElementById('login-email');
-if(emailInput)emailInput.addEventListener('keydown',function(e){if(e.key==='Enter'){if(pwdInput)pwdInput.focus();}});
 
 // 用户资料
 var profileBtn=document.getElementById('profile-btn');
 if(profileBtn)profileBtn.addEventListener('click',function(){
-    if(!rtSession)return;var u=rtSession.user||{};
+    if(!rtSession)return;
+    var u=rtSession.user||{};
     var nick=localStorage.getItem('rt_nickname')||u.email&&u.email.split('@')[0]||'';
     document.getElementById('profile-nickname').value=nick;
     document.getElementById('profile-email').value=u.email||'';
@@ -145,19 +149,26 @@ if(profileBtn)profileBtn.addEventListener('click',function(){
     document.getElementById('profile-login-method').textContent=u.email||'';
     document.getElementById('profile-modal-overlay').classList.add('active');
 });
+
 var profileSave=document.getElementById('profile-save');
-if(profileSave)profileSave.addEventListener('click',function(){
+if(profileSave)profileSave.addEventListener('click',async function(){
     localStorage.setItem('rt_nickname',document.getElementById('profile-nickname').value.trim());
     document.getElementById('profile-modal-overlay').classList.remove('active');
     updateAvatar();toast('已保存','success');
 });
+
 var profileLogout=document.getElementById('profile-logout');
 if(profileLogout)profileLogout.addEventListener('click',async function(){
     if(!confirm('确定退出登录？'))return;
     if(rtSession)await sb.signOut(rtSession.access_token);
-    localStorage.removeItem('rt_session');location.reload();
+    localStorage.removeItem('rt_session');
+    clearLocalBusinessData();
+    location.reload();
 });
+
 var profileClose=document.getElementById('profile-modal-close');
-if(profileClose)profileClose.addEventListener('click',function(){document.getElementById('profile-modal-overlay').classList.remove('active');});
+if(profileClose)profileClose.addEventListener('click',function(){
+    document.getElementById('profile-modal-overlay').classList.remove('active');
+});
 
 checkAuth();
