@@ -31,6 +31,11 @@ function showMsg(text,isErr){
 function hideMsg(){var el=document.getElementById('login-msg');if(el)el.style.display='none';}
 
 function onSuccess(result){
+    // 清除上一个用户的本地数据
+    var keysToKeep=['rt_session','rt_nickname'];
+    var allKeys=Object.keys(localStorage);
+    allKeys.forEach(function(k){if(k.startsWith('rt_')&&keysToKeep.indexOf(k)<0)localStorage.removeItem(k);});
+    // 保存新 session
     rtSession=result;localStorage.setItem('rt_session',JSON.stringify(result));
     showMsg('欢迎！正在进入...',false);
     setTimeout(function(){location.reload();},600);
