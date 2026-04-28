@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>履迹 Resume Trail</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="particles-canvas"></canvas>
+
+    <!-- 登录页 -->
+    <div id="login-page" class="login-page">
+        <div class="login-card">
+            <div class="login-logo"><svg width="40" height="40" viewBox="0 0 28 28" fill="none"><path d="M4 8L14 3L24 8V20L14 25L4 20V8Z" stroke="currentColor" stroke-width="1.5"/><path d="M4 8L14 13M14 13L24 8M14 13V25" stroke="currentColor" stroke-width="1.5" opacity="0.5"/></svg><h1>履迹</h1><p>Resume Trail</p></div>
+            <div class="login-tabs"><button class="login-tab active" data-method="phone">手机登录</button><button class="login-tab" data-method="email">邮箱登录</button><button class="login-tab" data-method="wechat">微信登录</button></div>
+            <div class="login-form" id="login-phone-form">
+                <div class="form-group"><input type="tel" id="login-phone" placeholder="请输入手机号" maxlength="11"></div>
+                <div class="form-group" style="display:flex;gap:8px"><input type="text" id="login-phone-code" placeholder="验证码" maxlength="6" style="flex:1"><button class="btn-secondary btn-sm" id="send-phone-code">发送验证码</button></div>
+                <button class="btn-primary" style="width:100%;justify-content:center;padding:10px" id="login-phone-btn">登录 / 注册</button>
+            </div>
+            <div class="login-form" id="login-email-form" style="display:none">
+                <div class="form-group"><input type="email" id="login-email" placeholder="请输入邮箱"></div>
+                <div class="form-group" style="display:flex;gap:8px"><input type="text" id="login-email-code" placeholder="验证码" maxlength="6" style="flex:1"><button class="btn-secondary btn-sm" id="send-email-code">发送验证码</button></div>
+                <button class="btn-primary" style="width:100%;justify-content:center;padding:10px" id="login-email-btn">登录 / 注册</button>
+            </div>
+            <div class="login-form" id="login-wechat-form" style="display:none">
+                <div class="wechat-qr"><div class="qr-placeholder">📱</div><p>请使用微信扫码登录</p><span style="font-size:11px;color:var(--text-muted)">（演示模式：点击下方按钮模拟登录）</span></div>
+                <button class="btn-primary" style="width:100%;justify-content:center;padding:10px;margin-top:12px;background:#07c160;color:#fff" id="login-wechat-btn">模拟微信登录</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="app" style="display:none">
+        <nav id="sidebar">
+            <div class="sidebar-logo">
+                <div class="logo-icon"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M4 8L14 3L24 8V20L14 25L4 20V8Z" stroke="currentColor" stroke-width="1.5"/><path d="M4 8L14 13M14 13L24 8M14 13V25" stroke="currentColor" stroke-width="1.5" opacity="0.5"/></svg></div>
+                <span class="logo-text">履迹</span>
+            </div>
+            <div class="nav-items">
+                <button class="nav-item active" data-view="pipeline" title="投递看板"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
+                <button class="nav-item" data-view="table" title="表格视图"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M9 3v18"/></svg><span>表格</span></button>
+                <button class="nav-item" data-view="resumes" title="简历文件舱"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg><span>简历</span></button>
+                <button class="nav-item" data-view="reflections" title="复盘记录"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8"/></svg><span>复盘</span></button>
+                <button class="nav-item" data-view="calendar" title="日历"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>日历</span></button>
+                <button class="nav-item" data-view="analytics" title="数据大屏"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><span>数据</span></button>
+            </div>
+            <div class="sidebar-bottom">
+                <button class="nav-item" id="profile-btn" title="我的"><div id="sidebar-avatar" style="width:24px;height:24px;border-radius:50%;background:var(--bg-tertiary);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted)">👤</div><span>我</span></button>
+                <button class="nav-item" id="settings-btn" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span>设置</span></button>
+            </div>
+        </nav>
+        <main id="main-content">
+            <header id="top-bar">
+                <div class="top-bar-left"><h1 id="view-title">投递看板</h1><span id="view-subtitle" class="subtitle"></span></div>
+                <div class="top-bar-right">
+                    <div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input type="text" id="global-search" placeholder="搜索公司或岗位..."></div>
+                    <button id="import-btn" class="btn-ghost btn-sm" title="批量导入">📥 导入</button>
+                    <button id="add-application-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建投递</button>
+                </div>
+            </header>
+            <div id="view-pipeline" class="view active">
+                <div class="kanban-filters">
+                    <select id="filter-category" class="filter-select"><option value="">全部类别</option></select>
+                    <select id="filter-visa" class="filter-select"><option value="">全部工签</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option><option value="UNKNOWN">❓ 未知</option></select>
+                    <div style="flex:1"></div>
+                    <select id="kanban-sort" class="filter-select"><option value="">默认排序</option><option value="preference">按偏好度</option><option value="waiting">按等待天数</option><option value="deadline">按DDL紧急</option></select>
+                    <label class="toggle-label"><input type="checkbox" id="toggle-intl-mode"><span class="toggle-slider"></span><span>留学生模式</span></label>
+                </div>
+                <div class="kanban-board" id="kanban-board"></div>
+            </div>
+            <div id="view-table" class="view">
+                <div class="table-toolbar">
+                    <select id="table-group-by" class="filter-select"><option value="">不分组</option><option value="position_category">按类别</option><option value="status">按状态</option><option value="source_channel">按渠道</option></select>
+                    <select id="table-filter-status" class="filter-select"><option value="">全部状态</option></select>
+                    <div style="flex:1"></div>
+                    <button class="btn-ghost btn-sm" id="table-edit-mode-btn">⚙ 编辑行列</button>
+                </div>
+                <div class="table-container"><table id="applications-table"><thead><tr id="table-header"></tr></thead><tbody id="table-body"></tbody></table><div id="table-add-row" style="padding:8px 0;text-align:center;border-top:1px dashed var(--border);margin-top:4px;cursor:pointer;color:var(--text-muted);font-size:12px;transition:all .2s;border-radius:0 0 8px 8px" onmouseover="this.style.color='var(--text-secondary)';this.style.background='var(--accent-dim)'" onmouseout="this.style.color='var(--text-muted)';this.style.background='transparent'">+ 新增一行</div></div>
+            </div>
+            <div id="view-resumes" class="view">
+                <div class="resumes-header"><button id="upload-resume-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>上传简历</button></div>
+                <div class="resumes-grid" id="resumes-grid"></div>
+            </div>
+            <div id="view-reflections" class="view">
+                <div class="reflections-header"><button id="new-reflection-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建复盘</button></div>
+                <div class="reflections-list" id="reflections-list"></div>
+            </div>
+            <!-- 日历视图 -->
+            <div id="view-calendar" class="view">
+                <div class="calendar-toolbar">
+                    <button class="btn-ghost btn-sm" id="cal-prev">◀</button>
+                    <span id="cal-title" style="font-size:15px;font-weight:600;min-width:140px;text-align:center"></span>
+                    <button class="btn-ghost btn-sm" id="cal-next">▶</button>
+                    <div style="flex:1"></div>
+                    <button class="btn-ghost btn-sm cal-view-btn active" data-calview="month">月</button>
+                    <button class="btn-ghost btn-sm cal-view-btn" data-calview="week">周</button>
+                </div>
+                <div id="calendar-grid" class="calendar-grid"></div>
+                <div id="cal-upcoming" style="padding:16px 24px"><h3 style="font-size:13px;color:var(--text-tertiary);margin-bottom:10px">即将到来</h3><div id="cal-upcoming-list"></div></div>
+            </div>
+            <!-- 数据大屏 -->
+            <div id="view-analytics" class="view">
+                <div class="analytics-grid">
+                    <div class="stat-cards" id="stat-cards"></div>
+                    <div class="chart-card" style="padding:14px 18px" id="goal-card"><h3 style="font-size:12px;font-weight:600;color:var(--text-tertiary);margin-bottom:8px">本周投递目标</h3><div id="goal-body"></div></div>
+                    <div class="chart-row"><div class="chart-card"><h3>全链路漏斗</h3><div class="chart-body" id="funnel-chart"></div></div><div class="chart-card"><h3>岗位类别转化率</h3><div class="chart-body" id="category-chart"></div></div></div>
+                    <div class="chart-row"><div class="chart-card"><h3>归因图谱</h3><div class="chart-body" id="attribution-chart"></div></div><div class="chart-card"><h3>AI 洞察</h3><div class="chart-body" id="insight-content"></div></div></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 新建投递弹窗 -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="application-modal">
+            <div class="modal-header"><h2 id="modal-title">新建投递</h2><button class="modal-close" id="modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>公司名称 <span class="required">*</span></label><input type="text" id="form-company" placeholder="输入公司名称..." autocomplete="off"><div class="autocomplete-list" id="company-autocomplete"></div></div>
+                <div class="form-row"><div class="form-group"><label>岗位名称 <span class="required">*</span></label><input type="text" id="form-position" placeholder="如：产品经理"></div><div class="form-group"><label>岗位类别 <span class="required">*</span></label><select id="form-category"><option value="">选择类别</option></select><div style="margin-top:4px"><button class="btn-ghost btn-sm" id="add-category-inline" type="button">+ 新类别</button></div></div></div>
+                <div class="form-row"><div class="form-group"><label>当前状态</label><select id="form-status"><option value="WATCHING">观望中</option><option value="APPLIED" selected>已投递</option><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="OFFER">Offer</option></select></div><div class="form-group"><label>投递日期</label><input type="date" id="form-date"></div></div>
+                <div class="form-row"><div class="form-group"><label>绑定简历</label><select id="form-resume"><option value="">不绑定</option></select></div><div class="form-group"><label>偏好度</label><select id="form-preference"><option value="1">⭐ 保底</option><option value="2">⭐⭐ 一般</option><option value="3" selected>⭐⭐⭐ 心仪</option><option value="4">⭐⭐⭐⭐ 梦想</option></select></div></div>
+                <div class="form-group intl-field" style="display:none"><label>工签要求</label><select id="form-visa"><option value="UNKNOWN">❓ 未知</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option></select></div>
+                <div class="form-row"><div class="form-group"><label>投递渠道</label><select id="form-channel"><option value="">未选择</option><option value="官网">官网</option><option value="Boss直聘">Boss直聘</option><option value="内推">内推</option><option value="猎头">猎头</option><option value="LinkedIn">LinkedIn</option><option value="牛客">牛客</option><option value="其他">其他</option></select></div><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div></div>
+                <div class="form-group"><label>下一步行动</label><input type="text" id="form-next-action" placeholder="如：准备行为面试题"></div>
+                <div class="form-row"><div class="form-group"><label>下一步 DDL</label><input type="datetime-local" id="form-deadline"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
+                <div class="form-group"><label>JD 截图 <span style="font-weight:normal;color:var(--text-muted)">Ctrl+V 粘贴</span></label><div class="jd-paste-zone" id="jd-paste-zone" tabindex="0"><span class="jd-paste-hint" id="jd-paste-hint">点击后粘贴截图或拖拽图片</span></div></div>
+                <div class="form-group"><label>备注</label><textarea id="form-notes" rows="3" placeholder="其他备注..."></textarea></div>
+                <div id="custom-fields-area"></div>
+            </div>
+            <div class="modal-footer"><button class="btn-secondary" id="modal-cancel">取消</button><button class="btn-primary" id="modal-save">保存</button><button class="btn-ghost" id="modal-save-continue">保存并继续</button></div>
+        </div>
+    </div>
+
+    <!-- 归因弹窗 -->
+    <div class="modal-overlay" id="rejection-modal-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header"><h2>标记失败原因</h2><button class="modal-close" id="rejection-modal-close">&times;</button></div>
+            <div class="modal-body"><p class="modal-desc">请选择挂在哪个环节：</p><div class="rejection-options" id="rejection-options"><label class="radio-card"><input type="radio" name="rejection" value="RESUME_SCREEN"><span>📄 简历筛选挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="OA_FAIL"><span>📝 笔试挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="ROUND1_BIZ"><span>💼 一面业务挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="GROUP_INTERVIEW"><span>👥 群面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="FINAL_FAIL"><span>🎯 终面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="HR_FAIL"><span>🤝 HR面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="OTHER"><span>❓ 其他</span></label></div></div>
+            <div class="modal-footer"><button class="btn-primary" id="rejection-confirm">确认</button></div>
+        </div>
+    </div>
+
+    <!-- 详情侧边栏 -->
+    <div class="drawer-overlay" id="drawer-overlay">
+        <div class="drawer" id="detail-drawer">
+            <div class="drawer-header"><div class="drawer-title-area"><div class="drawer-company-logo" id="drawer-logo"></div><div><h2 id="drawer-company"></h2><p id="drawer-position"></p></div></div><button class="drawer-close" id="drawer-close">&times;</button></div>
+            <div class="drawer-status-bar"><div class="status-badge" id="drawer-status"></div><div class="drawer-meta" id="drawer-meta"></div></div>
+            <div class="drawer-tabs"><button class="drawer-tab active" data-tab="info">详情</button><button class="drawer-tab" data-tab="timeline">时间线</button><button class="drawer-tab" data-tab="reflections">复盘</button></div>
+            <div class="drawer-content"><div class="drawer-tab-content active" id="tab-info"></div><div class="drawer-tab-content" id="tab-timeline"></div><div class="drawer-tab-content" id="tab-reflections"></div></div>
+            <div class="drawer-actions" id="drawer-actions"><button class="btn-secondary" id="drawer-edit">编辑</button><button class="btn-danger" id="drawer-delete">删除</button></div>
+        </div>
+    </div>
+
+    <!-- 复盘弹窗 -->
+    <div class="modal-overlay" id="reflection-modal-overlay">
+        <div class="modal modal-lg">
+            <div class="modal-header"><h2 id="reflection-modal-title">新建复盘</h2><button class="modal-close" id="reflection-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option></select></div></div>
+                <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始录音</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
+                <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
+                <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
+                <div id="ai-analysis-section" style="display:none"><div class="ai-badge">✨ AI 分析</div><div id="ai-analysis-content" class="ai-analysis-content"></div></div>
+            </div>
+            <div class="modal-footer"><button class="btn-ghost" id="reflection-ai-btn">✨ AI 分析</button><button class="btn-secondary" id="reflection-cancel">取消</button><button class="btn-primary" id="reflection-save">保存</button></div>
+        </div>
+    </div>
+
+    <!-- 简历上传弹窗 -->
+    <div class="modal-overlay" id="resume-modal-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header"><h2>上传简历</h2><button class="modal-close" id="resume-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="upload-zone" id="upload-zone"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg><p>拖拽或点击选择</p><span class="upload-hint">PDF/DOCX ≤ 10MB</span><input type="file" id="resume-file-input" accept=".pdf,.docx" style="display:none"></div>
+                <div class="form-group" style="margin-top:16px"><label>简历名称</label><input type="text" id="resume-name" placeholder="如：产品经理_v2"></div>
+                <div class="form-group"><label>标签</label><input type="text" id="resume-tags" placeholder="逗号分隔，如：中文,产品方向"></div>
+            </div>
+            <div class="modal-footer"><button class="btn-secondary" id="resume-cancel">取消</button><button class="btn-primary" id="resume-save">保存</button></div>
+        </div>
+    </div>
+
+    <!-- 设置弹窗 -->
+    <div class="modal-overlay" id="settings-modal-overlay">
+        <div class="modal">
+            <div class="modal-header"><h2>⚙ 设置</h2><button class="modal-close" id="settings-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--border-light);margin-bottom:12px"><div><div style="font-size:13px;font-weight:500;color:var(--text-primary)">每周投递目标</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">用于数据看板的进度追踪</div></div><input type="number" id="settings-weekly-goal" value="10" min="1" max="100" style="width:60px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px;text-align:center;font-family:var(--font);outline:none"></div>
+                <div class="form-group"><label style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:8px">岗位类别</label><div id="settings-categories" class="settings-tag-list"></div><div class="add-tag-row"><input type="text" id="settings-new-cat" placeholder="输入新类别..." class="add-tag-input"><button class="btn-ghost btn-sm" id="settings-add-cat">+ 添加</button></div></div>
+                <div class="form-group" style="padding-top:8px"><label style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:8px">失分点标签</label><div id="settings-painpoints" class="settings-tag-list"></div><div class="add-tag-row"><input type="text" id="settings-new-pp" placeholder="输入新失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="settings-add-pp">+ 添加</button></div></div>
+                <div class="form-group" style="border-top:1px solid var(--border-light);padding-top:14px;margin-top:12px"><label style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:8px">数据管理</label><div style="display:flex;gap:8px"><button class="btn-secondary btn-sm" id="settings-export">📤 导出 Excel</button><button class="btn-danger btn-sm" id="settings-clear">🗑 清除所有数据</button></div></div>
+                <div id="clear-confirm-area" style="display:none;margin-top:10px;padding:12px;background:var(--red-dim);border:1px solid rgba(248,113,113,.2);border-radius:8px"><p style="font-size:12px;color:var(--red);margin-bottom:8px">请输入「确定清除数据」以确认：</p><input type="text" id="clear-confirm-input" placeholder="确定清除数据" style="width:100%;padding:7px 11px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"><button class="btn-danger btn-sm" id="clear-confirm-btn" style="margin-top:8px;width:100%">确认清除</button></div>
+            </div>
+            <div class="modal-footer"><button class="btn-primary" id="settings-done">完成</button></div>
+        </div>
+    </div>
+
+    <!-- JD图片预览弹窗 -->
+    <div class="modal-overlay" id="jd-preview-overlay">
+        <div class="modal" style="width:auto;max-width:90vw"><div class="modal-header"><h2>JD 截图</h2><button class="modal-close" id="jd-preview-close">&times;</button></div><div class="modal-body" style="text-align:center"><img id="jd-preview-img" style="max-width:100%;max-height:70vh;border-radius:8px"></div></div>
+    </div>
+
+    <!-- 编辑行列弹窗 -->
+    <div class="modal-overlay" id="columns-modal-overlay">
+        <div class="modal modal-lg">
+            <div class="modal-header"><h2>编辑行列</h2><button class="modal-close" id="columns-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div style="margin-bottom:16px"><div style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:8px">列管理</div><div id="columns-list" class="columns-checklist"></div><div class="add-tag-row" style="margin-top:8px"><input type="text" id="new-col-name" placeholder="新列名称..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-col-btn">+ 添加自定义列</button></div></div>
+                <div style="border-top:1px solid var(--border-light);padding-top:14px"><div style="font-size:13px;font-weight:500;color:var(--text-primary);margin-bottom:8px">行管理</div><div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><button class="btn-primary btn-sm" id="rows-add-btn">+ 新建投递</button><button class="btn-danger btn-sm" id="rows-batch-del-btn">🗑 批量删除</button><span id="rows-selected-count" style="font-size:11px;color:var(--text-muted)"></span></div><div id="rows-batch-list" style="max-height:200px;overflow-y:auto"></div></div>
+            </div>
+            <div class="modal-footer"><button class="btn-primary" id="columns-done">完成</button></div>
+        </div>
+    </div>
+
+    <!-- 用户资料弹窗 -->
+    <div class="modal-overlay" id="profile-modal-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header"><h2>👤 我的资料</h2><button class="modal-close" id="profile-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div style="text-align:center;margin-bottom:16px"><div id="profile-avatar-display" style="width:64px;height:64px;border-radius:50%;background:var(--bg-tertiary);border:2px solid var(--border);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer" title="点击更换头像">👤</div><div id="profile-nickname-display" style="font-size:15px;font-weight:600">用户</div><div id="profile-login-method" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div></div>
+                <div class="form-group"><label>昵称</label><input type="text" id="profile-nickname" placeholder="设置昵称"></div>
+                <div class="form-group"><label>手机号 <span id="phone-verified-badge" style="font-size:10px;color:var(--green);display:none">✓ 已验证</span></label><div style="display:flex;gap:8px"><input type="tel" id="profile-phone" placeholder="绑定手机号" maxlength="11" style="flex:1"><button class="btn-ghost btn-sm" id="profile-verify-phone">验证</button></div><div id="phone-verify-area" style="display:none;margin-top:6px;display:flex;gap:6px"><input type="text" id="profile-phone-code" placeholder="验证码" maxlength="6" class="add-tag-input" style="flex:1"><button class="btn-primary btn-sm" id="profile-confirm-phone">确认</button></div></div>
+                <div class="form-group"><label>邮箱 <span id="email-verified-badge" style="font-size:10px;color:var(--green);display:none">✓ 已验证</span></label><div style="display:flex;gap:8px"><input type="email" id="profile-email" placeholder="绑定邮箱" style="flex:1"><button class="btn-ghost btn-sm" id="profile-verify-email">验证</button></div><div id="email-verify-area" style="display:none;margin-top:6px;display:flex;gap:6px"><input type="text" id="profile-email-code" placeholder="验证码" maxlength="6" class="add-tag-input" style="flex:1"><button class="btn-primary btn-sm" id="profile-confirm-email">确认</button></div></div>
+            </div>
+            <div class="modal-footer"><button class="btn-danger btn-sm" id="profile-logout">退出登录</button><button class="btn-primary" id="profile-save">保存</button></div>
+        </div>
+    </div>
+
+    <!-- 导入弹窗 -->
+    <div class="modal-overlay" id="import-modal-overlay">
+        <div class="modal">
+            <div class="modal-header"><h2>📥 批量导入</h2><button class="modal-close" id="import-modal-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label style="font-size:13px;font-weight:500;color:var(--text-primary)">从 CSV 导入</label><div class="upload-zone" id="import-upload-zone" style="padding:20px"><p>拖拽 CSV 文件或点击选择</p><span class="upload-hint">格式：公司,岗位,类别,投递日期</span><input type="file" id="import-file-input" accept=".csv" style="display:none"></div></div>
+                <div class="form-group" style="border-top:1px solid var(--border-light);padding-top:12px"><label style="font-size:13px;font-weight:500;color:var(--text-primary)">粘贴导入</label><textarea id="import-paste" rows="5" placeholder="从招聘平台复制粘贴，支持：&#10;公司 | 岗位 | 类别&#10;或 Tab/逗号 分隔"></textarea></div>
+                <div id="import-preview" style="display:none;margin-top:8px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">预览 <span id="import-count">0</span> 条</div><div id="import-preview-list" style="max-height:120px;overflow-y:auto;font-size:11px;color:var(--text-muted)"></div></div>
+            </div>
+            <div class="modal-footer"><button class="btn-secondary" id="import-cancel">取消</button><button class="btn-primary" id="import-confirm">导入</button></div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+    <script src="particles.js"></script>
+    <script src="app.js"></script>
+    <script src="features.js"></script>
+    <script src="goal.js"></script>
+    <script src="auth.js"></script>
+</body>
+</html>
