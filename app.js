@@ -187,7 +187,7 @@ function mkRow(a,cols){
 }
 function inlineEdit(td,a,f,custom=false){const old=custom?(a.customFields?.[f]||''):(a[f]||'');const inp=document.createElement('input');inp.type='text';inp.className='inline-edit';inp.value=old;td.textContent='';td.appendChild(inp);inp.focus();inp.select();const sv=()=>{const v=inp.value.trim();if(custom){if(!a.customFields)a.customFields={};a.customFields[f]=v;store.updateApp(a.id,{customFields:a.customFields});}else if(v!==old){store.updateApp(a.id,{[f]:v});if(f==='position_category'&&v)store.addCat(v);}renderTable($('#global-search').value.toLowerCase().trim());};inp.addEventListener('blur',sv);inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sv();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
 function inlineCatSel(td,a){const sel=document.createElement('select');sel.className='inline-select';sel.innerHTML='<option value="">选择</option>';store.categories.forEach(c=>{sel.innerHTML+=`<option value="${c}" ${a.position_category===c?'selected':''}>${c}</option>`;});sel.innerHTML+='<option value="__NEW__">+ 新增类别...</option>';td.textContent='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{if(sel.value==='__NEW__'){const name=prompt('输入新类别名称：');if(name&&name.trim()){store.addCat(name.trim());store.updateApp(a.id,{position_category:name.trim()});initFilters();}renderTable($('#global-search').value.toLowerCase().trim());}else if(sel.value){store.updateApp(a.id,{position_category:sel.value});renderTable($('#global-search').value.toLowerCase().trim());}});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const ae=a.timeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=a.timeline;}store.updateApp(a.id,updates);renderTable($('#global-search').value.toLowerCase().trim());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
+function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',async ()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const ae=a.timeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=a.timeline;}await store.updateApp(a.id,updates);renderTable($('#global-search').value.toLowerCase().trim());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
 function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{chgStatus(a.id,sel.value);renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
 function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{store.updateApp(a.id,{preference_level:sel.value});renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
 $('#table-group-by').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
@@ -207,8 +207,8 @@ $('#table-edit-mode-btn').addEventListener('click',()=>{
 });
 $('#rows-add-btn')?.addEventListener('click',()=>{$('#columns-modal-overlay').classList.remove('active');openAppModal();});
 $('#rows-batch-del-btn')?.addEventListener('click',()=>{const ids=[];$$('.row-check:checked').forEach(c=>ids.push(c.dataset.id));if(!ids.length){toast('请先勾选要删除的行','error');return;}if(!confirm(`确定删除 ${ids.length} 条投递？`))return;ids.forEach(id=>store.delApp(id));toast(`已删除 ${ids.length} 条`,'success');$('#table-edit-mode-btn').click();refresh();});
-$('#add-col-btn').addEventListener('click',()=>{const n=$('#new-col-name').value.trim();if(!n)return;store.addCol(n);$('#new-col-name').value='';$('#table-edit-mode-btn').click();});
-$('#columns-done').addEventListener('click',()=>{$$('#columns-list input[type="checkbox"]').forEach(inp=>{const i=parseInt(inp.dataset.idx);if(!isNaN(i))store.tableCols[i].show=inp.checked;});store.save();$('#columns-modal-overlay').classList.remove('active');renderTable($('#global-search').value.toLowerCase().trim());});
+$('#add-col-btn').addEventListener('click',async ()=>{const n=$('#new-col-name').value.trim();if(!n)return;await store.addCol(n);$('#new-col-name').value='';$('#table-edit-mode-btn').click();});
+$('#columns-done').addEventListener('click',async ()=>{$$('#columns-list input[type="checkbox"]').forEach(inp=>{const i=parseInt(inp.dataset.idx);if(!isNaN(i))store.tableCols[i].show=inp.checked;});await store.save();$('#columns-modal-overlay').classList.remove('active');renderTable($('#global-search').value.toLowerCase().trim());});
 $('#columns-modal-close').addEventListener('click',()=>$('#columns-modal-overlay').classList.remove('active'));
 $('#jd-preview-close').addEventListener('click',()=>$('#jd-preview-overlay').classList.remove('active'));
 $('#jd-preview-overlay').addEventListener('click',e=>{if(e.target===$('#jd-preview-overlay'))$('#jd-preview-overlay').classList.remove('active');});
@@ -262,7 +262,7 @@ function renderDTL(a,edit=false){
         btns.innerHTML=`<button class="btn-ghost btn-sm" id="tl-add">+ 添加轮次</button><button class="btn-primary btn-sm" id="tl-save">保存</button>`;
         tl.appendChild(btns);
         $('#tl-add').addEventListener('click',()=>{timeline.push({name:'一面',date:''});store.updateApp(a.id,{timeline});renderDTL(a,true);});
-        $('#tl-save').addEventListener('click',()=>{
+        $('#tl-save').addEventListener('click',async ()=>{
             $$('#tl-edit select, #tl-edit input').forEach(el=>{const i=parseInt(el.dataset.i),f=el.dataset.f;if(!isNaN(i)&&timeline[i])timeline[i][f]=el.value;});
             // 从时间线推导状态
             const newStatus=deriveStatus(timeline);
@@ -270,7 +270,7 @@ function renderDTL(a,edit=false){
             const appliedEntry=timeline.find(t=>t.name==='已投递');
             const updates={timeline,status:newStatus};
             if(appliedEntry&&appliedEntry.date)updates.applied_date=appliedEntry.date;
-            store.updateApp(a.id,updates);
+            await store.updateApp(a.id,updates);
             tlEditing=false;
             // 刷新侧边栏头部状态
             const si=getSI(newStatus);$('#drawer-status').className=`status-badge ${si.cls}`;$('#drawer-status').textContent=si.label;
@@ -407,9 +407,9 @@ async function doInsight(ap,cs,rs){const el=$('#insight-content');if(ap.length<3
 $('#settings-btn').addEventListener('click',()=>{renderSetCats();renderSetPPs();$('#clear-confirm-area').style.display='none';$('#clear-confirm-input').value='';$('#settings-modal-overlay').classList.add('active');});
 function renderSetCats(){const el=$('#settings-categories');el.innerHTML='';store.categories.forEach(c=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${c} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',()=>{store.rmCat(c);renderSetCats();initFilters();});el.appendChild(t);});}
 function renderSetPPs(){const el=$('#settings-painpoints');el.innerHTML='';store.painPoints.forEach(p=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${p} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',()=>{store.rmPP(p);renderSetPPs();});el.appendChild(t);});}
-$('#settings-add-cat').addEventListener('click',()=>{const v=$('#settings-new-cat').value.trim();if(v){store.addCat(v);$('#settings-new-cat').value='';renderSetCats();initFilters();}});
+$('#settings-add-cat').addEventListener('click',async ()=>{const v=$('#settings-new-cat').value.trim();if(v){await store.addCat(v);$('#settings-new-cat').value='';renderSetCats();initFilters();}});
 $('#settings-new-cat').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#settings-add-cat').click();}});
-$('#settings-add-pp').addEventListener('click',()=>{const v=$('#settings-new-pp').value.trim();if(v){store.addPP(v);$('#settings-new-pp').value='';renderSetPPs();}});
+$('#settings-add-pp').addEventListener('click',async ()=>{const v=$('#settings-new-pp').value.trim();if(v){await store.addPP(v);$('#settings-new-pp').value='';renderSetPPs();}});
 $('#settings-new-pp').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#settings-add-pp').click();}});
 $('#settings-export').addEventListener('click',()=>{
     // 导出为 CSV (Excel 兼容)
