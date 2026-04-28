@@ -89,14 +89,14 @@ const sb={
     if(!token||!uid)throw new Error('未登录');
     const body=Object.assign({
       user_id:uid,
-      apps:[],
-      resumes:[],
-      refs:[],
-      logs:[],
-      categories:[],
-      pain_points:[],
-      settings:{},
-      table_cols:[],
+      apps:'[]',
+      resumes:'[]',
+      refs:'[]',
+      logs:'[]',
+      categories:'[]',
+      pain_points:'[]',
+      settings:'{}',
+      table_cols:'[]',
       updated_at:new Date().toISOString()
     },payload||{});
     const r=await fetch(SUPABASE_URL+'/rest/v1/user_data',{
@@ -134,14 +134,14 @@ const cloudStore={
     const row=await sb.getUserData();
     if(!row){
       const created=await sb.createUserData({
-        apps:[],
-        resumes:[],
-        refs:[],
-        logs:[],
-        categories:[],
-        pain_points:(typeof DEFAULT_PP!=='undefined'?DEFAULT_PP:[]),
-        settings:{intlMode:false},
-        table_cols:(typeof DEFAULT_COLS!=='undefined'?DEFAULT_COLS:[])
+        apps:'[]',
+        resumes:'[]',
+        refs:'[]',
+        logs:'[]',
+        categories:'[]',
+        pain_points:JSON.stringify((typeof DEFAULT_PP!=='undefined'?DEFAULT_PP:[])),
+        settings:JSON.stringify({intlMode:false}),
+        table_cols:JSON.stringify((typeof DEFAULT_COLS!=='undefined'?DEFAULT_COLS:[]))
       });
       const newRow=Array.isArray(created)&&created.length?created[0]:null;
       this.rowId=newRow?newRow.id:null;
@@ -158,14 +158,14 @@ const cloudStore={
     }
 
     this.rowId=row.id;
-    store.apps=Array.isArray(row.apps)?row.apps:[];
-    store.resumes=Array.isArray(row.resumes)?row.resumes:[];
-    store.refs=Array.isArray(row.refs)?row.refs:[];
-    store.logs=Array.isArray(row.logs)?row.logs:[];
-    store.categories=Array.isArray(row.categories)?row.categories:[];
-    store.painPoints=Array.isArray(row.pain_points)?row.pain_points:[];
-    store.settings=row.settings||{intlMode:false};
-    store.tableCols=Array.isArray(row.table_cols)?row.table_cols:[];
+    store.apps=typeof row.apps==='string'?JSON.parse(row.apps||'[]'):(Array.isArray(row.apps)?row.apps:[]);
+    store.resumes=typeof row.resumes==='string'?JSON.parse(row.resumes||'[]'):(Array.isArray(row.resumes)?row.resumes:[]);
+    store.refs=typeof row.refs==='string'?JSON.parse(row.refs||'[]'):(Array.isArray(row.refs)?row.refs:[]);
+    store.logs=typeof row.logs==='string'?JSON.parse(row.logs||'[]'):(Array.isArray(row.logs)?row.logs:[]);
+    store.categories=typeof row.categories==='string'?JSON.parse(row.categories||'[]'):(Array.isArray(row.categories)?row.categories:[]);
+    store.painPoints=typeof row.pain_points==='string'?JSON.parse(row.pain_points||'[]'):(Array.isArray(row.pain_points)?row.pain_points:[]);
+    store.settings=typeof row.settings==='string'?JSON.parse(row.settings||'{}'):(row.settings||{intlMode:false});
+    store.tableCols=typeof row.table_cols==='string'?JSON.parse(row.table_cols||'[]'):(Array.isArray(row.table_cols)?row.table_cols:[]);
     this.loaded=true;
     return true;
   },
@@ -185,14 +185,14 @@ const cloudStore={
     if(!this.rowId)throw new Error('无法初始化用户数据记录');
 
     await sb.updateUserData(this.rowId,{
-      apps:store.apps,
-      resumes:store.resumes,
-      refs:store.refs,
-      logs:store.logs,
-      categories:store.categories,
-      pain_points:store.painPoints,
-      settings:store.settings,
-      table_cols:store.tableCols
+      apps:JSON.stringify(store.apps),
+      resumes:JSON.stringify(store.resumes),
+      refs:JSON.stringify(store.refs),
+      logs:JSON.stringify(store.logs),
+      categories:JSON.stringify(store.categories),
+      pain_points:JSON.stringify(store.painPoints),
+      settings:JSON.stringify(store.settings),
+      table_cols:JSON.stringify(store.tableCols)
     });
     return true;
   }
