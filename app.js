@@ -80,7 +80,7 @@ function getDefaultSettings(){
         var oldSettings=JSON.parse(localStorage.getItem('rt_set')||'{}');
         if(oldSettings&&oldSettings.weeklyGoal)legacy=parseInt(oldSettings.weeklyGoal)||10;
     }catch(err){}
-    return {intlMode:false,weeklyGoal:legacy,profileNickname:''};
+    return {intlMode:false,weeklyGoal:legacy,profileNickname:'',profileAvatar:''};
 }
 
 class Store{
@@ -355,6 +355,7 @@ const fmtD=d=>{const t=parseDateSafe(d);if(!t)return'—';return`${t.getMonth()+
 const fmtDT=d=>{const t=parseDateSafe(d);if(!t)return'—';return`${t.getFullYear()}/${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;};
 const getSI=k=>STATUSES.find(s=>s.key===k)||STATUSES[0];
 const getWait=a=>['OFFER','REJECTED','WITHDRAWN'].includes(a.status)||!a.applied_date?null:daysBtw(a.applied_date,new Date().toISOString().split('T')[0]);
+const getAppliedDays=a=>a&&a.applied_date?daysBtw(a.applied_date,new Date().toISOString().split('T')[0]):null;
 const stars=n=>'⭐'.repeat(parseInt(n)||1);
 const ini=n=>(n||'?')[0].toUpperCase();
 function toast(m,t='info'){const c=$('#toast-container'),e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;c.appendChild(e);setTimeout(()=>{e.style.opacity='0';e.style.transform='translateX(120%)';e.style.transition='all .3s var(--ease)';setTimeout(()=>e.remove(),300);},3000);}
@@ -383,6 +384,47 @@ function syncIntlToggles(){
     if(document.getElementById('toggle-intl-mode'))document.getElementById('toggle-intl-mode').checked=!!store.settings.intlMode;
     if(document.getElementById('profile-toggle-intl-mode'))document.getElementById('profile-toggle-intl-mode').checked=!!store.settings.intlMode;
 }
+
+function buildConicGradient(entries){
+    const total=Math.max(entries.reduce(function(sum,entry){return sum+entry.value;},0),1);
+    let cursor=0;
+    return entries.map(function(entry,index){
+        const start=cursor/total*360;
+        cursor+=entry.value;
+        const end=cursor/total*360;
+        return `${entry.color||COLORS[index%COLORS.length]} ${start}deg ${end}deg`;
+    }).join(', ');
+}
+
+function renderBaseDistributionChart(entries,total){
+    const target=document.getElementById('base-chart');
+    if(!target)return;
+    if(!entries.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无</p></div>';
+        return;
+    }
+    const legend=entries.map(function(entry,index){
+        const color=COLORS[index%COLORS.length];
+        const share=total?Math.round(entry.value/total*100):0;
+        return `<div class="legend-item"><span class="legend-dot" style="background:${color}"></span><span class="legend-label">${entry.label}</span><span class="legend-value">${entry.value} · ${share}%</span></div>`;
+    }).join('');
+    target.innerHTML=`<div class="base-chart-wrap"><div class="base-donut" style="background:conic-gradient(${buildConicGradient(entries.map(function(entry,index){return {value:entry.value,color:COLORS[index%COLORS.length]};}))})"><div class="base-donut-center"><div class="base-donut-total">${total}</div><div class="base-donut-label">岗位</div></div></div><div class="chart-legend">${legend}</div></div>`;
+}
+
+function renderSourcePerformanceChart(entries){
+    const target=document.getElementById('source-chart');
+    if(!target)return;
+    if(!entries.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无</p></div>';
+        return;
+    }
+    const maxTotal=Math.max(...entries.map(function(entry){return entry.total;}),1);
+    target.innerHTML=`<div class="source-chart-list">${entries.map(function(entry,index){
+        const barWidth=Math.max(Math.round(entry.total/maxTotal*100),10);
+        const color=COLORS[index%COLORS.length];
+        return `<div class="source-chart-row"><div class="source-chart-label">${entry.label}</div><div class="source-chart-track"><div class="source-chart-fill" style="width:${barWidth}%;background:${color}"></div></div><div class="source-chart-metric"><span>投递 ${entry.total}</span><span>推进 ${entry.progress}</span><strong>${entry.rate}%</strong></div></div>`;
+    }).join('')}</div>`;
+}
 function sanitizeAIText(text){
     return String(text||'')
         .replace(/\*/g,'')
@@ -408,40 +450,39 @@ function buildAnalyticsFallback(ap,cs,rs){
         const br=b[1].t?b[1].r/b[1].t:0;
         return br-ar||b[1].t-a[1].t;
     })[0];
-    const weakestCategory=Object.entries(cs).filter(([,v])=>v.t>=2).sort((a,b)=>{
-        const ar=a[1].t?a[1].r/a[1].t:0;
-        const br=b[1].t?b[1].r/b[1].t:0;
-        return ar-br||b[1].t-a[1].t;
-    })[0];
+    const sourceStats={};
+    ap.forEach(function(app){
+        const key=app.source_channel||'未填写';
+        if(!sourceStats[key])sourceStats[key]={total:0,progress:0};
+        sourceStats[key].total++;
+        if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(app.status))sourceStats[key].progress++;
+    });
+    const topSource=Object.entries(sourceStats).sort((a,b)=>b[1].progress-a[1].progress||b[1].total-a[1].total)[0];
     const rejectTop=Object.entries(rs).sort((a,b)=>b[1]-a[1])[0];
     const responseCount=ap.filter(a=>['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length;
     const responseRate=ap.length?Math.round(responseCount/ap.length*100):0;
     const offerCount=ap.filter(a=>a.status==='OFFER').length;
     const topCategoryRate=topCategory&&topCategory[1].t?Math.round(topCategory[1].r/topCategory[1].t*100):0;
-    const weakestCategoryRate=weakestCategory&&weakestCategory[1].t?Math.round(weakestCategory[1].r/weakestCategory[1].t*100):0;
+    const topSourceRate=topSource&&topSource[1].total?Math.round(topSource[1].progress/topSource[1].total*100):0;
     const rejectLabel=rejectTop?(REJECTION_STAGES[rejectTop[0]]||rejectTop[0]):'暂无稳定失分样本';
-    const categoryGap=topCategory&&weakestCategory?Math.max(topCategoryRate-weakestCategoryRate,0):0;
     const interviewCount=ap.filter(a=>['ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length;
     const interviewRate=ap.length?Math.round(interviewCount/ap.length*100):0;
     const rejectionShare=rejectTop&&Object.keys(rs).length?Math.round(rejectTop[1]/Math.max(Object.values(rs).reduce((sum,val)=>sum+val,0),1)*100):0;
     return [
         '整体概况',
         `当前共跟踪 ${ap.length} 条投递，收到推进 ${responseCount} 条，整体回复率约 ${responseRate}%，进入面试阶段的占比约 ${interviewRate}%，已获得 ${offerCount} 条 Offer。现阶段需要重点关注的不是投递规模，而是投递到推进之间的转化效率。`,
-        topCategory?`${topCategory[0]} 当前推进率约 ${topCategoryRate}%，已经构成现阶段最有价值的主方向；如果资源继续平均分配到所有岗位，整体效率会被明显稀释。`:'样本量仍偏少，建议继续积累 1 到 2 轮完整投递数据后再做判断。',
-        '',
-        '方向表现',
-        topCategory&&weakestCategory
-            ?`${topCategory[0]} 与 ${weakestCategory[0]} 的推进率差距约为 ${categoryGap} 个点，说明不同方向之间已经出现可辨识的表现分层。高推进方向通常意味着经历匹配、简历呈现和面试表达至少有两项是对齐的；低推进方向则提示其中至少一项仍需要调整。`
+        topCategory
+            ?`${topCategory[0]} 是当前推进最稳定的岗位方向，已投递 ${topCategory[1].t} 条，推进 ${topCategory[1].r} 条，推进率约 ${topCategoryRate}%。${topSource?`与之对应，${topSource[0]} 是当前贡献推进最多的渠道，已投递 ${topSource[1].total} 条，推进 ${topSource[1].progress} 条，转化约 ${topSourceRate}%。`:''}`
             :active.length
-                ?`当前尚未形成非常清晰的方向分层，但活跃岗位与推进岗位的占比已经可以作为第一层参考。后续分析应重点观察哪些方向能够稳定进入笔试、面试及后续轮次。`
-                :'当前样本仍不足，建议先完整记录投递、推进与拒绝节点，再做更稳健的比较。',
-        `最近的主要失分点集中在 ${rejectLabel}${rejectTop?`，约占已记录失分的 ${rejectionShare}%`:''}。这说明当前需要优先处理的是高频失分环节，而不是笼统提升所谓“整体状态”。`,
+                ?'当前样本还在形成过程中，但已经可以从推进记录里观察到部分方向开始出现稳定反馈。后续应继续跟踪哪些岗位与渠道组合能够持续进入笔试和面试阶段。'
+                :'当前样本仍不足，建议先完整记录投递、推进与拒绝节点，再做更稳健的判断。',
+        `最近的主要失分点集中在 ${rejectLabel}${rejectTop?`，约占已记录失分的 ${rejectionShare}%`:''}。这说明当前最需要处理的不是全面铺开式优化，而是针对高频失分环节做更细致的准备与校正。`,
         '',
         '优化建议',
         rejectTop
-            ?`后续应继续提高 ${topCategory?topCategory[0]:'高匹配方向'} 的投递占比，同时针对 ${REJECTION_STAGES[rejectTop[0]]||rejectTop[0]} 做专项复盘，将问题定义、案例展开、结果表达和收束逻辑整理成稳定模板。这样做的目的不是增加动作数量，而是提升单次投递与单次面试的产出效率。`
-            :'建议继续积累更完整的推进与失分样本，再对比不同方向的推进表现。分析目标不在于填满表格，而在于识别哪一种岗位叙事更容易形成稳定转化。',
-        '更有效的做法，是将有限资源持续配置到回报更高的方向。'
+            ?`后续应优先提高 ${topCategory?topCategory[0]:'高匹配方向'} 的投递占比，并延续 ${topSource?topSource[0]:'当前有效渠道'} 这类已经证明更容易形成推进的入口。针对 ${REJECTION_STAGES[rejectTop[0]]||rejectTop[0]}，需要把问题拆解、案例展开、结果表达和追问承接整理成更稳定的应答框架，从而提高后续轮次的通过把握。`
+            :'建议继续积累更完整的推进与失分样本，再对比不同岗位方向与投递渠道的表现。分析目标不在于填满表格，而在于识别哪一种组合最容易形成稳定推进。',
+        '更稳妥的做法，是把时间持续投入到已经出现正反馈的岗位方向和投递渠道，而不是平均分配给所有机会。'
     ].join('\n');
 }
 
@@ -567,10 +608,20 @@ let curView='pipeline',curTab='info';
 let tableQuickEdit=false;
 let tableSortColumn='created_at';
 let tableSortDirection='desc';
+let kanbanSortDirection='desc';
 const tableSelectedRows=new Set();
 
 function getProfileNickname(){
     return (store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||'';
+}
+
+function getProfileAvatar(){
+    return store&&store.settings&&store.settings.profileAvatar||'';
+}
+
+function syncKanbanSortDirection(){
+    const btn=document.getElementById('kanban-sort-direction');
+    if(btn)btn.textContent=kanbanSortDirection==='desc'?'从大到小':'从小到大';
 }
 
 function setTableSort(columnId){
@@ -706,14 +757,11 @@ function renderKanban(q=''){
     const b=$('#kanban-board'),fc=$('#filter-category').value,fv=$('#filter-visa').value,ks=$('#kanban-sort').value;
     let apps=store.apps.filter(a=>{if(q&&!a.company_name.toLowerCase().includes(q)&&!a.position_title.toLowerCase().includes(q))return false;if(fc&&a.position_category!==fc)return false;if(fv&&a.visa_requirement!==fv)return false;return true;});
     apps=apps.slice().sort(function(a,b){
-        if(ks==='preference')return(parseInt(b.preference_level)||0)-(parseInt(a.preference_level)||0);
-        if(ks==='waiting')return(getWait(b)||-1)-(getWait(a)||-1);
-        if(ks==='deadline'){
-            const ad=a.next_deadline?new Date(a.next_deadline).getTime():Number.MAX_SAFE_INTEGER;
-            const bd=b.next_deadline?new Date(b.next_deadline).getTime():Number.MAX_SAFE_INTEGER;
-            return ad-bd;
-        }
-        return(new Date(b.created_at||0).getTime())-(new Date(a.created_at||0).getTime());
+        const direction=kanbanSortDirection==='asc'?1:-1;
+        if(ks==='preference')return((parseInt(a.preference_level)||0)-(parseInt(b.preference_level)||0))*direction;
+        if(ks==='waiting')return(((getWait(a)||-1)-(getWait(b)||-1))*direction);
+        if(ks==='applied_days')return(((getAppliedDays(a)||-1)-(getAppliedDays(b)||-1))*direction);
+        return((new Date(a.created_at||0).getTime())-(new Date(b.created_at||0).getTime()))*direction;
     });
     b.innerHTML='';
     getKanbanStatuses().forEach(st=>{
@@ -897,6 +945,7 @@ $('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tabl
 $('#filter-category').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#filter-visa').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#kanban-sort').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
+$('#kanban-sort-direction').addEventListener('click',()=>{kanbanSortDirection=kanbanSortDirection==='asc'?'desc':'asc';syncKanbanSortDirection();renderKanban($('#global-search').value.toLowerCase().trim());});
 $('#table-add-row').addEventListener('click',()=>openAppModal());
 $('#table-edit-mode-btn').addEventListener('click',()=>{
     tableQuickEdit=!tableQuickEdit;
@@ -1126,11 +1175,25 @@ function renderAnalytics(){
     const fd=[{l:'投递',c:ap.length,co:'#60a5fa'},{l:'笔试',c:apps.filter(a=>['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#a78bfa'},{l:'一面+',c:apps.filter(a=>['ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#818cf8'},{l:'二面+',c:apps.filter(a=>['ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#fb923c'},{l:'Offer',c:of.length,co:'#4ade80'}];
     const mf=Math.max(fd[0].c,1);$('#funnel-chart').innerHTML=fd.map(d=>`<div class="funnel-stage"><span class="funnel-label">${d.l}</span><div class="funnel-bar-wrap"><div class="funnel-bar" style="width:${Math.max(Math.round(d.c/mf*100),5)}%;background:${d.co}">${d.c}</div></div><span class="funnel-value">${fd[0].c?Math.round(d.c/fd[0].c*100):0}%</span></div>`).join('');
     const cs={};ap.forEach(a=>{const c=a.position_category||'其他';if(!cs[c])cs[c]={t:0,r:0};cs[c].t++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))cs[c].r++;});
-    const ce=Object.entries(cs).sort((a,b)=>(b[1].r/b[1].t)-(a[1].r/a[1].t)),mc=Math.max(...ce.map(([,v])=>v.t),1);
-    $('#category-chart').innerHTML=ce.length?ce.map(([c,v],i)=>`<div class="category-bar-item"><span class="category-name">${c}</span><div class="category-bar-wrap"><div class="category-bar" style="width:${Math.max(Math.round(v.t/mc*100),8)}%;background:${COLORS[i%COLORS.length]};opacity:.7"></div></div><span class="category-rate">${Math.round(v.r/v.t*100)}%(${v.t})</span></div>`).join(''):'<div class="empty-state"><p>暂无</p></div>';
+    const ce=Object.entries(cs).sort((a,b)=>b[1].t-a[1].t||b[1].r-a[1].r||a[0].localeCompare(b[0],'zh-CN')),mc=Math.max(...ce.map(([,v])=>v.t),1);
+    $('#category-chart').innerHTML=ce.length?ce.map(([c,v],i)=>`<div class="category-bar-item"><span class="category-name">${c}</span><div class="category-bar-wrap"><div class="category-bar" style="width:${Math.max(Math.round(v.t/mc*100),8)}%;background:${COLORS[i%COLORS.length]};opacity:.78"></div></div><span class="category-rate"><span class="category-rate-meta">${v.t} 投递 / ${v.r} 推进</span><strong>${Math.round(v.r/v.t*100)}%</strong></span></div>`).join(''):'<div class="empty-state"><p>暂无</p></div>';
     const rs={};store.logs.filter(l=>l.to==='REJECTED'&&l.rej).forEach(l=>{rs[l.rej]=(rs[l.rej]||0)+1;});
     const re=Object.entries(rs).sort((a,b)=>b[1]-a[1]),mr=Math.max(...re.map(([,v])=>v),1);
     $('#attribution-chart').innerHTML=re.length?re.map(([s,c])=>`<div class="attribution-item"><span class="attribution-label">${REJECTION_STAGES[s]||s}</span><div class="attribution-bar-wrap"><div class="attribution-bar" style="width:${Math.max(Math.round(c/mr*100),8)}%"></div></div><span class="attribution-count">${c}</span></div>`).join(''):'<div class="empty-state"><p>暂无归因</p></div>';
+    const baseStats={};ap.forEach(a=>{const key=a.base_location||'未填写';baseStats[key]=(baseStats[key]||0)+1;});
+    const baseEntries=Object.entries(baseStats).sort((a,b)=>b[1]-a[1]).map(function(entry){return{label:entry[0],value:entry[1]};});
+    renderBaseDistributionChart(baseEntries,ap.length);
+    const sourceStats={};ap.forEach(a=>{const key=a.source_channel||'未填写';if(!sourceStats[key])sourceStats[key]={total:0,progress:0};sourceStats[key].total++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))sourceStats[key].progress++;});
+    const sourceEntries=Object.entries(sourceStats).sort((a,b)=>{
+        const ar=a[1].total? a[1].progress/a[1].total:0;
+        const br=b[1].total? b[1].progress/b[1].total:0;
+        return b[1].total-a[1].total||b[1].progress-a[1].progress||br-ar;
+    }).map(function(entry){
+        const name=entry[0],stats=entry[1];
+        const rate=stats.total?Math.round(stats.progress/stats.total*100):0;
+        return {label:name,total:stats.total,progress:stats.progress,rate:rate};
+    });
+    renderSourcePerformanceChart(sourceEntries);
     doInsight(ap,cs,rs);
 }
 async function doInsight(ap,cs,rs){
@@ -1141,9 +1204,11 @@ async function doInsight(ap,cs,rs){
     }
     el.innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';
     const cS=Object.entries(cs).map(([c,v])=>`${c}:投递${v.t}，推进${v.r}`).join('；');
+    const sourceStats={};ap.forEach(a=>{const c=a.source_channel||'未填写';if(!sourceStats[c])sourceStats[c]={total:0,progress:0};sourceStats[c].total++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))sourceStats[c].progress++;});
+    const sS=Object.entries(sourceStats).map(([c,v])=>`${c}:投递${v.total}，推进${v.progress}`).join('；');
     const rS=Object.entries(rs).map(([s,c])=>`${REJECTION_STAGES[s]||s}:${c}`).join('；');
     const active=ap.filter(a=>!['OFFER','REJECTED','WITHDRAWN'].includes(a.status)).sort((a,b)=>(getWait(b)||0)-(getWait(a)||0)).slice(0,3).map(a=>`${a.company_name}-${a.position_title}-${getWait(a)||0}天`).join('；');
-    const prompt=`你是一个专业的求职分析顾问。请根据用户当前投递数据，只输出 3 个小节。每个小节标题单独一行，然后换行写内容。不要使用星号、项目符号、序号、Markdown、表格。不要写空话，不要泛泛鼓励，也不要给出“催进度”“跟进 HR”这类运营动作。重点是分析，不是提醒。每个小节必须有明确结论、数据依据和可执行的优化方向。表达要正式、克制、具体，避免口语化表达。必须直接引用当前数据里的数字、类别或公司名。每个小节写 2 到 3 句，句子短，但判断要准确。小节标题固定为：整体概况、方向表现、优化建议。\n\n数据摘要：\n总投递 ${ap.length} 条。\n类别表现：${cS||'暂无'}。\n失败归因：${rS||'暂无'}。\n等待较久岗位：${active||'暂无'}。`;
+    const prompt=`你是一个专业的求职分析顾问。请根据用户当前投递数据，只输出 2 个小节。每个小节标题单独一行，然后换行写内容。不要使用星号、项目符号、序号、Markdown、表格。不要写空话，不要泛泛鼓励，也不要给出“催进度”“跟进 HR”这类执行提醒。重点是分析，不是提醒。表达要正式、克制、具体，避免口语化表达。必须直接引用当前数据里的数字、类别、渠道或公司名。每个小节写 2 到 3 句，句子短，但判断要准确。第一节必须把整体盘面、主要推进岗位、紧跟其后的主要推进渠道、主要失分点写在一起。第二节只写更专业的策略建议。小节标题固定为：整体概况、优化建议。\n\n数据摘要：\n总投递 ${ap.length} 条。\n类别表现：${cS||'暂无'}。\n渠道表现：${sS||'暂无'}。\n失败归因：${rS||'暂无'}。\n等待较久岗位：${active||'暂无'}。`;
     const result=await callAI(prompt,buildAnalyticsFallback(ap,cs,rs));
     renderAIBlocks(el,result.text,'insight',result);
 }
@@ -1253,6 +1318,7 @@ window.rtShouldSeedStarterData=function(data){
 function init(){
     initFilters();
     renderTableControlOptions();
+    syncKanbanSortDirection();
     syncQuickEditPanel();
     updIntl();
     switchView('pipeline');

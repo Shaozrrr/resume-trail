@@ -1,6 +1,67 @@
-// 认证 - 登录直接进，注册需邮箱验证码（云端优先）
+// 认证 - 统一邮箱密码登录/注册
 var rtSession=sb.getSession();
-var pendingEmail='',pendingPwd='';
+var profileAvatarDraft='';
+var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
+
+function getDefaultNicknameFromEmail(email){
+    return email&&email.indexOf('@')>0?email.split('@')[0]:'';
+}
+
+function getAvatarCropStageSize(){
+    var stage=document.getElementById('avatar-crop-stage');
+    return stage&&stage.clientWidth?stage.clientWidth:280;
+}
+
+function clampAvatarCrop(){
+    var stageSize=getAvatarCropStageSize();
+    var scaledW=avatarCropState.naturalWidth*avatarCropState.scale;
+    var scaledH=avatarCropState.naturalHeight*avatarCropState.scale;
+    avatarCropState.x=Math.min(0,Math.max(stageSize-scaledW,avatarCropState.x));
+    avatarCropState.y=Math.min(0,Math.max(stageSize-scaledH,avatarCropState.y));
+}
+
+function renderAvatarCrop(){
+    var img=document.getElementById('avatar-crop-image');
+    if(!img||!avatarCropState.src)return;
+    var scaledW=avatarCropState.naturalWidth*avatarCropState.scale;
+    var scaledH=avatarCropState.naturalHeight*avatarCropState.scale;
+    img.src=avatarCropState.src;
+    img.style.width=scaledW+'px';
+    img.style.height=scaledH+'px';
+    img.style.transform=`translate(${avatarCropState.x}px, ${avatarCropState.y}px)`;
+}
+
+function openAvatarCropper(dataUrl,width,height){
+    document.getElementById('avatar-crop-overlay').classList.add('active');
+    var stageSize=getAvatarCropStageSize();
+    avatarCropState.src=dataUrl;
+    avatarCropState.naturalWidth=width;
+    avatarCropState.naturalHeight=height;
+    avatarCropState.minScale=Math.max(stageSize/width,stageSize/height);
+    avatarCropState.scale=avatarCropState.minScale;
+    avatarCropState.x=(stageSize-width*avatarCropState.scale)/2;
+    avatarCropState.y=(stageSize-height*avatarCropState.scale)/2;
+    clampAvatarCrop();
+    var zoom=document.getElementById('avatar-crop-zoom');
+    if(zoom)zoom.value='100';
+    renderAvatarCrop();
+}
+
+function closeAvatarCropper(){
+    document.getElementById('avatar-crop-overlay').classList.remove('active');
+    var stage=document.getElementById('avatar-crop-stage');
+    if(stage)stage.classList.remove('dragging');
+    avatarCropState.dragging=false;
+}
+
+function applyAvatarContent(el,avatarValue,fallbackText){
+    if(!el)return;
+    if(avatarValue){
+        el.innerHTML=`<img src="${avatarValue}" alt="avatar" class="avatar-image">`;
+        return;
+    }
+    el.textContent=fallbackText||'👤';
+}
 
 function syncSession(session){
     rtSession=session||null;
@@ -42,6 +103,10 @@ async function checkAuth(){
             if(localNick&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
                 await store.setSetting('profileNickname',localNick);
             }
+            var emailDefaultNick=getDefaultNicknameFromEmail(session.user&&session.user.email||'');
+            if(emailDefaultNick&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
+                await store.setSetting('profileNickname',emailDefaultNick);
+            }
             if(typeof syncIntlToggles==='function')syncIntlToggles();
             if(typeof initFilters==='function')initFilters();
             if(typeof updIntl==='function')updIntl();
@@ -64,7 +129,8 @@ function updateAvatar(){
     if(av){
         var nick=(typeof getProfileNickname==='function'&&getProfileNickname())||'';
         var email=rtSession.user&&rtSession.user.email||'';
-        av.textContent=nick?nick[0].toUpperCase():(email?email[0].toUpperCase():'👤');
+        var avatar=(typeof getProfileAvatar==='function'&&getProfileAvatar())||'';
+        applyAvatarContent(av,avatar,nick?nick[0].toUpperCase():(email?email[0].toUpperCase():'👤'));
     }
 }
 
@@ -89,6 +155,9 @@ function clearLocalBusinessData(){
 
 function onSuccess(result){
     clearLocalBusinessData();
+    if(result&&result.user&&result.user.email&&!localStorage.getItem('rt_nickname')){
+        localStorage.setItem('rt_nickname',getDefaultNicknameFromEmail(result.user.email));
+    }
     sb.setSession(result,'auth.onSuccess');
     syncSession(result);
     showMsg('欢迎！正在进入...',false);
@@ -112,55 +181,54 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     }
 
     var errMsg=loginRes.error_description||loginRes.msg||loginRes.error||'';
-    if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0){
-        pendingEmail=email;
-        pendingPwd=pwd;
-        var otpRes=await sb.signInOTP(email);
-        if(otpRes.error){
-            showMsg('发送验证码失败：'+(otpRes.error.message||otpRes.error||''),true);
+    if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0||errMsg.indexOf('Email not confirmed')>=0){
+        var signUpRes=await sb.signUp(email,pwd);
+        if(signUpRes.access_token){
+            onSuccess(signUpRes);
+            return;
+        }
+        if(signUpRes.user&&!signUpRes.error){
+            var retryLogin=await sb.signIn(email,pwd);
+            if(retryLogin.access_token){
+                onSuccess(retryLogin);
+                return;
+            }
+            showMsg('账号已创建，请重新点击开始使用登录',false);
             submitBtn.textContent='开始使用';
             submitBtn.disabled=false;
             return;
         }
-        document.getElementById('login-step1').style.display='none';
-        document.getElementById('login-step2').style.display='';
-        document.getElementById('login-hint').style.display='none';
-        document.getElementById('verify-email-display').textContent=email;
-        showMsg('验证码已发送到你的邮箱',false);
-        submitBtn.textContent='开始使用';
-        submitBtn.disabled=false;
-        document.getElementById('verify-code').focus();
-        return;
+        if(signUpRes.error){
+            var signUpErr=signUpRes.error_description||signUpRes.msg||signUpRes.error||'';
+            if(signUpErr.indexOf('Error sending confirmation email')>=0){
+                showMsg('Supabase 当前开启了邮箱确认，但项目没有可用的发信通道。请到后台的 Authentication > Providers > Email，部分版本会显示在 Authentication > Settings，关闭 Confirm email，或先配置自定义 SMTP。',true);
+                submitBtn.textContent='开始使用';
+                submitBtn.disabled=false;
+                return;
+            }
+            if(signUpErr.indexOf('already')>=0||signUpErr.indexOf('exists')>=0){
+                showMsg('邮箱号或密码错误，请重试',true);
+            }else{
+                showMsg(signUpErr||'注册失败',true);
+            }
+            submitBtn.textContent='开始使用';
+            submitBtn.disabled=false;
+            return;
+        }
     }
 
-    showMsg(errMsg||'登录失败',true);
+    if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0){
+        showMsg('邮箱号或密码错误，请重试',true);
+    }else{
+        showMsg(errMsg||'登录失败',true);
+    }
     submitBtn.textContent='开始使用';
     submitBtn.disabled=false;
 });
 
 var verifyBtn=document.getElementById('verify-submit');
 if(verifyBtn)verifyBtn.addEventListener('click',async function(){
-    var code=document.getElementById('verify-code').value.trim();
-    if(!code||code.length<4){showMsg('请输入验证码',true);return;}
-    hideMsg();
-    verifyBtn.textContent='验证中...';
-    verifyBtn.disabled=true;
-
-    var verifyRes=await sb.verifyOTP(pendingEmail,code);
-    if(verifyRes.access_token){
-        var token=verifyRes.access_token;
-        await fetch(SUPABASE_URL+'/auth/v1/user',{
-            method:'PUT',
-            headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+token},
-            body:JSON.stringify({password:pendingPwd})
-        });
-        onSuccess(verifyRes);
-        return;
-    }
-
-    showMsg(verifyRes.error_description||verifyRes.msg||verifyRes.error||'验证码错误',true);
-    verifyBtn.textContent='验证并注册';
-    verifyBtn.disabled=false;
+    showMsg('当前版本已切换为邮箱密码注册登录，无需验证码。',false);
 });
 
 var backBtn=document.getElementById('verify-back');
@@ -184,10 +252,11 @@ if(pwdInput)pwdInput.addEventListener('keydown',function(e){
 function openProfileModal(){
     if(!rtSession)return;
     var u=rtSession.user||{};
-    var nick=(store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||u.email&&u.email.split('@')[0]||'';
+    var nick=(store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||getDefaultNicknameFromEmail(u.email)||'';
+    profileAvatarDraft=(store&&store.settings&&store.settings.profileAvatar)||'';
     document.getElementById('profile-nickname').value=nick;
     document.getElementById('profile-nickname-display').textContent=nick||'用户';
-    document.getElementById('profile-avatar-display').textContent=nick?(nick[0].toUpperCase()):(u.email?(u.email[0].toUpperCase()):'👤');
+    applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft,nick?(nick[0].toUpperCase()):(u.email?(u.email[0].toUpperCase()):'👤'));
     document.getElementById('profile-login-method').textContent=u.email||'';
     var emailEl=document.getElementById('profile-email-display');
     if(emailEl)emailEl.textContent=u.email||'—';
@@ -212,13 +281,111 @@ if(profileSave)profileSave.addEventListener('click',async function(){
     if(typeof store!=='undefined'&&typeof store.setSetting==='function'){
         var ok=await store.setSetting('profileNickname',nickname);
         if(ok===false)return;
+        var avatarOk=await store.setSetting('profileAvatar',profileAvatarDraft||'');
+        if(avatarOk===false)return;
     }
     localStorage.setItem('rt_nickname',nickname);
     document.getElementById('profile-nickname-display').textContent=nickname||'用户';
-    document.getElementById('profile-avatar-display').textContent=nickname?(nickname[0].toUpperCase()):((rtSession&&rtSession.user&&rtSession.user.email)?rtSession.user.email[0].toUpperCase():'👤');
+    applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft||'',nickname?(nickname[0].toUpperCase()):((rtSession&&rtSession.user&&rtSession.user.email)?rtSession.user.email[0].toUpperCase():'👤'));
     document.getElementById('profile-modal-overlay').classList.remove('active');
     updateAvatar();
     toast('已保存','success');
+});
+
+var profileAvatarChange=document.getElementById('profile-avatar-change');
+var profileAvatarInput=document.getElementById('profile-avatar-input');
+if(profileAvatarChange&&profileAvatarInput)profileAvatarChange.addEventListener('click',function(){
+    profileAvatarInput.click();
+});
+if(profileAvatarInput)profileAvatarInput.addEventListener('change',function(event){
+    var file=event.target.files&&event.target.files[0];
+    if(!file)return;
+    if(!file.type||file.type.indexOf('image/')!==0){
+        if(typeof toast==='function')toast('请选择图片文件','error');
+        return;
+    }
+    var reader=new FileReader();
+    reader.onload=function(loadEvent){
+        var src=loadEvent.target&&loadEvent.target.result||'';
+        var probe=new Image();
+        probe.onload=function(){
+            openAvatarCropper(src,probe.naturalWidth,probe.naturalHeight);
+        };
+        probe.src=src;
+    };
+    reader.readAsDataURL(file);
+    event.target.value='';
+});
+
+var avatarCropStage=document.getElementById('avatar-crop-stage');
+var avatarCropZoom=document.getElementById('avatar-crop-zoom');
+if(avatarCropZoom)avatarCropZoom.addEventListener('input',function(event){
+    if(!avatarCropState.src)return;
+    var stageSize=getAvatarCropStageSize();
+    var prevScale=avatarCropState.scale;
+    var factor=parseInt(event.target.value,10)/100;
+    avatarCropState.scale=avatarCropState.minScale*factor;
+    var centerX=(stageSize/2-avatarCropState.x)/prevScale;
+    var centerY=(stageSize/2-avatarCropState.y)/prevScale;
+    avatarCropState.x=stageSize/2-centerX*avatarCropState.scale;
+    avatarCropState.y=stageSize/2-centerY*avatarCropState.scale;
+    clampAvatarCrop();
+    renderAvatarCrop();
+});
+
+if(avatarCropStage)avatarCropStage.addEventListener('pointerdown',function(event){
+    if(!avatarCropState.src)return;
+    avatarCropState.dragging=true;
+    avatarCropState.startX=event.clientX;
+    avatarCropState.startY=event.clientY;
+    avatarCropState.originX=avatarCropState.x;
+    avatarCropState.originY=avatarCropState.y;
+    avatarCropStage.classList.add('dragging');
+});
+
+window.addEventListener('pointermove',function(event){
+    if(!avatarCropState.dragging)return;
+    avatarCropState.x=avatarCropState.originX+(event.clientX-avatarCropState.startX);
+    avatarCropState.y=avatarCropState.originY+(event.clientY-avatarCropState.startY);
+    clampAvatarCrop();
+    renderAvatarCrop();
+});
+
+window.addEventListener('pointerup',function(){
+    if(!avatarCropState.dragging)return;
+    avatarCropState.dragging=false;
+    if(avatarCropStage)avatarCropStage.classList.remove('dragging');
+});
+
+var avatarCropCancel=document.getElementById('avatar-crop-cancel');
+var avatarCropClose=document.getElementById('avatar-crop-close');
+if(avatarCropCancel)avatarCropCancel.addEventListener('click',closeAvatarCropper);
+if(avatarCropClose)avatarCropClose.addEventListener('click',closeAvatarCropper);
+
+var avatarCropConfirm=document.getElementById('avatar-crop-confirm');
+if(avatarCropConfirm)avatarCropConfirm.addEventListener('click',function(){
+    if(!avatarCropState.src)return;
+    var stageSize=getAvatarCropStageSize();
+    var canvas=document.createElement('canvas');
+    canvas.width=320;
+    canvas.height=320;
+    var ctx=canvas.getContext('2d');
+    ctx.drawImage(
+        document.getElementById('avatar-crop-image'),
+        (-avatarCropState.x)/avatarCropState.scale,
+        (-avatarCropState.y)/avatarCropState.scale,
+        stageSize/avatarCropState.scale,
+        stageSize/avatarCropState.scale,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+    profileAvatarDraft=canvas.toDataURL('image/png');
+    var nick=document.getElementById('profile-nickname').value.trim();
+    var email=rtSession&&rtSession.user&&rtSession.user.email||'';
+    applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft,nick?(nick[0].toUpperCase()):(email?email[0].toUpperCase():'👤'));
+    closeAvatarCropper();
 });
 
 var profileLogout=document.getElementById('profile-logout');

@@ -28,7 +28,7 @@
                     <button class="btn-ghost" style="width:100%;justify-content:center;padding:8px;font-size:12px;margin-top:6px" id="verify-back">← 返回</button>
                 </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
-                <p id="login-hint" style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:12px;line-height:1.5">首次使用需验证邮箱<br>已有账号直接登录</p>
+                <p id="login-hint" style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:12px;line-height:1.5">首次使用自动创建账号<br>之后直接使用邮箱和密码登录</p>
             </div>
         </div>
     </div>
@@ -48,7 +48,7 @@
                 <button class="nav-item" data-view="analytics" title="数据大屏"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><span>数据</span></button>
             </div>
             <div class="sidebar-bottom">
-                <button class="nav-item" id="profile-btn" title="我的"><div id="sidebar-avatar" style="width:24px;height:24px;border-radius:50%;background:var(--bg-tertiary);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted)">👤</div><span>我</span></button>
+                <button class="nav-item" id="profile-btn" title="我的"><div id="sidebar-avatar" style="width:24px;height:24px;border-radius:50%;background:var(--bg-tertiary);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);overflow:hidden">👤</div><span>我</span></button>
                 <button class="nav-item nav-item-hidden" id="settings-btn" title="设置" aria-hidden="true" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span>设置</span></button>
             </div>
         </nav>
@@ -66,7 +66,8 @@
                     <select id="filter-category" class="filter-select"><option value="">全部类别</option></select>
                     <select id="filter-visa" class="filter-select"><option value="">全部工签</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option><option value="UNKNOWN">❓ 未知</option></select>
                     <div style="flex:1"></div>
-                    <select id="kanban-sort" class="filter-select"><option value="">默认排序</option><option value="preference">按偏好度</option><option value="waiting">按等待天数</option><option value="deadline">按DDL紧急</option></select>
+                    <select id="kanban-sort" class="filter-select"><option value="">默认排序</option><option value="preference">按偏好度</option><option value="waiting">按等待天数</option><option value="applied_days">按已投递天数</option></select>
+                    <button class="btn-ghost btn-sm" id="kanban-sort-direction" title="切换排序方向">从大到小</button>
                     <label class="toggle-label"><input type="checkbox" id="toggle-intl-mode"><span class="toggle-slider"></span><span>留学生模式</span></label>
                 </div>
                 <div class="kanban-board" id="kanban-board"></div>
@@ -122,7 +123,7 @@
                     <div class="stat-cards" id="stat-cards"></div>
                     <div class="chart-card" style="padding:14px 18px" id="goal-card"><h3 style="font-size:12px;font-weight:600;color:var(--text-tertiary);margin-bottom:8px">本周投递目标</h3><div id="goal-body"></div></div>
                     <div class="chart-row"><div class="chart-card"><h3>全链路漏斗</h3><div class="chart-body" id="funnel-chart"></div></div><div class="chart-card"><h3>岗位类别转化率</h3><div class="chart-body" id="category-chart"></div></div></div>
-                    <div class="chart-row"><div class="chart-card"><h3>归因图谱</h3><div class="chart-body" id="attribution-chart"></div></div><div class="chart-card"><h3>AI 洞察</h3><div class="chart-body" id="insight-content"></div></div></div>
+                    <div class="chart-row chart-row-insight"><div class="chart-card chart-card-stack"><h3>归因图谱</h3><div class="chart-body" id="attribution-chart"></div><div class="analytics-mini-grid"><section class="mini-chart-card"><h4>Base 地分布</h4><div id="base-chart"></div></section><section class="mini-chart-card"><h4>渠道表现</h4><div id="source-chart"></div></section></div></div><div class="chart-card chart-card-insight"><h3>AI 洞察</h3><div class="chart-body" id="insight-content"></div></div></div>
                 </div>
             </div>
         </main>
@@ -222,7 +223,11 @@
             <div class="modal-header account-modal-header"><div><h2>我的资料</h2><p>邮箱登录 · 设置即时同步到云端</p></div><button class="modal-close" id="profile-modal-close">&times;</button></div>
             <div class="modal-body account-modal-body">
                 <section class="account-hero">
-                    <div id="profile-avatar-display" class="account-avatar" title="当前账号头像占位">👤</div>
+                    <div class="account-avatar-wrap">
+                        <div id="profile-avatar-display" class="account-avatar" title="当前账号头像占位">👤</div>
+                        <button class="account-avatar-btn" id="profile-avatar-change" type="button">更换头像</button>
+                        <input type="file" id="profile-avatar-input" accept="image/*" style="display:none">
+                    </div>
                     <div class="account-hero-meta">
                         <div id="profile-nickname-display" class="account-hero-name">用户</div>
                         <div id="profile-login-method" class="account-hero-email"></div>
@@ -315,6 +320,23 @@
                     <button class="profile-save-btn" id="profile-save">保存资料</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="avatar-crop-overlay">
+        <div class="modal modal-sm">
+            <div class="modal-header"><h2>裁切头像</h2><button class="modal-close" id="avatar-crop-close">&times;</button></div>
+            <div class="modal-body">
+                <div class="avatar-crop-stage" id="avatar-crop-stage">
+                    <img id="avatar-crop-image" class="avatar-crop-image" alt="avatar crop preview">
+                    <div class="avatar-crop-mask"></div>
+                </div>
+                <div class="avatar-crop-slider-row">
+                    <span>缩放</span>
+                    <input type="range" id="avatar-crop-zoom" min="100" max="220" value="100">
+                </div>
+            </div>
+            <div class="modal-footer"><button class="btn-secondary" id="avatar-crop-cancel">取消</button><button class="btn-primary" id="avatar-crop-confirm">使用这张头像</button></div>
         </div>
     </div>
 
