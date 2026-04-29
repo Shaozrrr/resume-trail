@@ -35,22 +35,60 @@ const COLORS=['#60a5fa','#a78bfa','#4ade80','#fb923c','#f87171','#fbbf24','#34d3
 const DEFAULT_COLS=[{id:'company_name',label:'公司',show:true,system:true},{id:'position_title',label:'岗位',show:true,system:true},{id:'position_category',label:'类别',show:true,system:true},{id:'status',label:'状态',show:true,system:true},{id:'applied_date',label:'投递日期',show:true,system:true},{id:'waiting',label:'等待',show:true,system:true},{id:'preference_level',label:'偏好',show:true,system:true},{id:'source_channel',label:'渠道',show:true,system:true},{id:'jd',label:'JD',show:true,system:true},{id:'actions',label:'操作',show:true,system:true}];
 const AI_CFG={gemini:{url:'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',key:'AIzaSyDsUzOWf2a8bm6glCA1kxDTkVYWQXh_nqM'},or:{url:'https://openrouter.ai/api/v1/chat/completions',key:'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',model:'openrouter/auto'}};
 
+function cloneData(value){
+    if(typeof structuredClone==='function')return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
+function getDefaultSettings(){
+    var legacy=10;
+    try{
+        var oldSettings=JSON.parse(localStorage.getItem('rt_set')||'{}');
+        if(oldSettings&&oldSettings.weeklyGoal)legacy=parseInt(oldSettings.weeklyGoal)||10;
+    }catch(err){}
+    return {intlMode:false,weeklyGoal:legacy};
+}
+
 class Store{
     constructor(){
-        // 云端唯一真源：本地只保留运行时内存，不再从 localStorage 读取业务数据
+        this.resetState();
+    }
+    resetState(){
         this.apps=[];
         this.resumes=[];
         this.refs=[];
         this.logs=[];
-        this.settings={intlMode:false};
+        this.settings=getDefaultSettings();
         this.categories=[];
         this.painPoints=[...DEFAULT_PP];
-        this.tableCols=[...DEFAULT_COLS];
+        this.tableCols=cloneData(DEFAULT_COLS);
     }
-    async save(){
+    snapshot(){
+        return {
+            apps:cloneData(this.apps),
+            resumes:cloneData(this.resumes),
+            refs:cloneData(this.refs),
+            logs:cloneData(this.logs),
+            settings:cloneData(this.settings),
+            categories:cloneData(this.categories),
+            painPoints:cloneData(this.painPoints),
+            tableCols:cloneData(this.tableCols)
+        };
+    }
+    restore(snapshot){
+        this.apps=snapshot.apps;
+        this.resumes=snapshot.resumes;
+        this.refs=snapshot.refs;
+        this.logs=snapshot.logs;
+        this.settings=Object.assign(getDefaultSettings(),snapshot.settings||{});
+        this.categories=snapshot.categories;
+        this.painPoints=snapshot.painPoints;
+        this.tableCols=snapshot.tableCols;
+    }
+    async save(reason){
         if(typeof cloudStore!=='undefined'){
             try{
-                await cloudStore.saveFrom(this);
+                await cloudStore.saveFrom(this,reason||'store.save');
                 return true;
             }catch(e){
                 console.error(e);
@@ -60,24 +98,220 @@ class Store{
         }
         return true;
     }
-    async addApp(a){a.id=crypto.randomUUID();a.created_at=new Date().toISOString();a.updated_at=a.created_at;if(!a.timeline)a.timeline=[];this.apps.push(a);this.addLog(a.id,null,a.status);await this.save();return a;}
-    async updateApp(id,u){const i=this.apps.findIndex(a=>a.id===id);if(i<0)return null;const o=this.apps[i];if(u.status&&u.status!==o.status)this.addLog(id,o.status,u.status,u._rej);delete u._rej;Object.assign(this.apps[i],u,{updated_at:new Date().toISOString()});await this.save();return this.apps[i];}
-    async delApp(id){this.apps=this.apps.filter(a=>a.id!==id);this.refs=this.refs.filter(r=>r.app_id!==id);this.logs=this.logs.filter(l=>l.app_id!==id);await this.save();}
-    addLog(aid,from,to,rej){this.logs.push({id:crypto.randomUUID(),app_id:aid,from:from,to:to,rej:rej||null,at:new Date().toISOString()});}
-    async addResume(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.resumes.push(r);await this.save();return r;}
-    async delResume(id){this.resumes=this.resumes.filter(r=>r.id!==id);await this.save();}
-    async addRef(r){r.id=crypto.randomUUID();r.at=new Date().toISOString();this.refs.push(r);await this.save();return r;}
-    async updateRef(id,u){const i=this.refs.findIndex(r=>r.id===id);if(i<0)return;Object.assign(this.refs[i],u);await this.save();}
+    async commit(reason,mutator){
+        const prev=this.snapshot();
+        try{
+            const result=await mutator(this);
+            const ok=await this.save(reason);
+            if(!ok){
+                this.restore(prev);
+                return false;
+            }
+            return typeof result==='undefined'?true:result;
+        }catch(err){
+            this.restore(prev);
+            console.error('[RT store] commit failed',reason,err);
+            if(typeof toast==='function')toast('保存失败，请重试','error');
+            return false;
+        }
+    }
+    addLog(aid,from,to,rej){
+        const log={id:crypto.randomUUID(),app_id:aid,from:from,to:to,rej:rej||null,at:new Date().toISOString()};
+        this.logs.push(log);
+        return log;
+    }
+    async addApp(a){
+        return this.commit('app.add',draft=>{
+            const app=Object.assign({},cloneData(a),{
+                id:crypto.randomUUID(),
+                created_at:new Date().toISOString()
+            });
+            app.updated_at=app.created_at;
+            if(!app.timeline)app.timeline=[];
+            draft.apps.push(app);
+            draft.addLog(app.id,null,app.status);
+            return app;
+        });
+    }
+    async updateApp(id,u){
+        return this.commit('app.update',draft=>{
+            const idx=draft.apps.findIndex(a=>a.id===id);
+            if(idx<0)return null;
+            const old=draft.apps[idx];
+            const updates=cloneData(u||{});
+            if(updates.status&&updates.status!==old.status)draft.addLog(id,old.status,updates.status,updates._rej);
+            delete updates._rej;
+            Object.assign(draft.apps[idx],updates,{updated_at:new Date().toISOString()});
+            return draft.apps[idx];
+        });
+    }
+    async delApp(id){
+        return this.commit('app.delete',draft=>{
+            draft.apps=draft.apps.filter(a=>a.id!==id);
+            draft.refs=draft.refs.filter(r=>r.app_id!==id);
+            draft.logs=draft.logs.filter(l=>l.app_id!==id);
+            return true;
+        });
+    }
+    async deleteApps(ids){
+        return this.commit('app.bulkDelete',draft=>{
+            const idSet=new Set(ids);
+            draft.apps=draft.apps.filter(a=>!idSet.has(a.id));
+            draft.refs=draft.refs.filter(r=>!idSet.has(r.app_id));
+            draft.logs=draft.logs.filter(l=>!idSet.has(l.app_id));
+            return true;
+        });
+    }
+    async addResume(r){
+        return this.commit('resume.add',draft=>{
+            const resume=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:new Date().toISOString()});
+            draft.resumes.push(resume);
+            return resume;
+        });
+    }
+    async delResume(id){
+        return this.commit('resume.delete',draft=>{
+            draft.resumes=draft.resumes.filter(r=>r.id!==id);
+            draft.apps=draft.apps.map(app=>app.resume_id===id?Object.assign({},app,{resume_id:null,updated_at:new Date().toISOString()}):app);
+            return true;
+        });
+    }
+    async linkResumeToApps(resumeId,appIds){
+        return this.commit('resume.linkApps',draft=>{
+            const selected=new Set(appIds);
+            draft.apps.forEach(app=>{
+                if(selected.has(app.id)&&app.resume_id!==resumeId){
+                    app.resume_id=resumeId;
+                    app.updated_at=new Date().toISOString();
+                }else if(!selected.has(app.id)&&app.resume_id===resumeId){
+                    app.resume_id=null;
+                    app.updated_at=new Date().toISOString();
+                }
+            });
+            return true;
+        });
+    }
+    async addRef(r){
+        return this.commit('reflection.add',draft=>{
+            const ref=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:new Date().toISOString()});
+            draft.refs.push(ref);
+            return ref;
+        });
+    }
+    async updateRef(id,u){
+        return this.commit('reflection.update',draft=>{
+            const idx=draft.refs.findIndex(r=>r.id===id);
+            if(idx<0)return null;
+            Object.assign(draft.refs[idx],cloneData(u||{}));
+            return draft.refs[idx];
+        });
+    }
     getApp(id){return this.apps.find(a=>a.id===id);}
     getResume(id){return this.resumes.find(r=>r.id===id);}
     getAppRefs(aid){return this.refs.filter(r=>r.app_id===aid);}
     getAppLogs(aid){return this.logs.filter(l=>l.app_id===aid).sort((a,b)=>new Date(b.at)-new Date(a.at));}
-    async addCat(c){c=c.trim();if(c&&!this.categories.includes(c)){this.categories.push(c);await this.save();}return c;}
-    async rmCat(c){this.categories=this.categories.filter(x=>x!==c);await this.save();}
-    async addPP(p){p=p.trim();if(p&&!this.painPoints.includes(p)){this.painPoints.push(p);await this.save();}return p;}
-    async rmPP(p){this.painPoints=this.painPoints.filter(x=>x!==p);await this.save();}
-    async addCol(name){const id='custom_'+Date.now();const actIdx=this.tableCols.findIndex(c=>c.id==='actions');if(actIdx>=0)this.tableCols.splice(actIdx,0,{id,label:name,show:true,system:false,custom:true});else this.tableCols.push({id,label:name,show:true,system:false,custom:true});await this.save();return id;}
-    async rmCol(id){this.tableCols=this.tableCols.filter(c=>c.id!==id);this.apps.forEach(a=>{if(a.customFields)delete a.customFields[id];});await this.save();}
+    async addCat(c){
+        c=(c||'').trim();
+        if(!c)return'';
+        const exists=this.categories.includes(c);
+        if(exists)return c;
+        const ok=await this.commit('category.add',draft=>{
+            draft.categories.push(c);
+            return c;
+        });
+        return ok===false?'':c;
+    }
+    async rmCat(c){
+        return this.commit('category.remove',draft=>{
+            draft.categories=draft.categories.filter(x=>x!==c);
+            return true;
+        });
+    }
+    async addPP(p){
+        p=(p||'').trim();
+        if(!p)return'';
+        const exists=this.painPoints.includes(p);
+        if(exists)return p;
+        const ok=await this.commit('painPoint.add',draft=>{
+            draft.painPoints.push(p);
+            return p;
+        });
+        return ok===false?'':p;
+    }
+    async rmPP(p){
+        return this.commit('painPoint.remove',draft=>{
+            draft.painPoints=draft.painPoints.filter(x=>x!==p);
+            return true;
+        });
+    }
+    async addCol(name){
+        name=(name||'').trim();
+        if(!name)return'';
+        return this.commit('tableCol.add',draft=>{
+            const id='custom_'+Date.now();
+            const actIdx=draft.tableCols.findIndex(c=>c.id==='actions');
+            const newCol={id:id,label:name,show:true,system:false,custom:true};
+            if(actIdx>=0)draft.tableCols.splice(actIdx,0,newCol);
+            else draft.tableCols.push(newCol);
+            return id;
+        });
+    }
+    async rmCol(id){
+        return this.commit('tableCol.remove',draft=>{
+            draft.tableCols=draft.tableCols.filter(c=>c.id!==id);
+            draft.apps.forEach(a=>{if(a.customFields)delete a.customFields[id];});
+            return true;
+        });
+    }
+    async setColumnVisibility(visibleMap){
+        return this.commit('tableCol.visibility',draft=>{
+            draft.tableCols=draft.tableCols.map(col=>Object.prototype.hasOwnProperty.call(visibleMap,col.id)?Object.assign({},col,{show:!!visibleMap[col.id]}):col);
+            return true;
+        });
+    }
+    async setSetting(key,value){
+        return this.commit('settings.update',draft=>{
+            draft.settings=Object.assign({},draft.settings,{[key]:value});
+            return draft.settings;
+        });
+    }
+    async clearAllData(){
+        if(typeof cloudStore!=='undefined'&&typeof cloudStore.clearAllData==='function'){
+            try{
+                await cloudStore.clearAllData(this);
+                return true;
+            }catch(err){
+                console.error('[RT store] clearAllData failed',err);
+                if(typeof toast==='function')toast('清空失败，请稍后重试','error');
+                return false;
+            }
+        }
+        this.resetState();
+        return true;
+    }
+    async importApps(rows){
+        return this.commit('app.import',draft=>{
+            rows.forEach(function(d){
+                if(d.category&&!draft.categories.includes(d.category))draft.categories.push(d.category);
+                const app={
+                    company_name:d.company,
+                    position_title:d.position,
+                    position_category:d.category,
+                    status:'APPLIED',
+                    applied_date:d.date,
+                    preference_level:'3',
+                    visa_requirement:'UNKNOWN',
+                    timeline:[{name:'已投递',date:d.date}],
+                    id:crypto.randomUUID(),
+                    created_at:new Date().toISOString()
+                };
+                app.updated_at=app.created_at;
+                draft.apps.push(app);
+                draft.addLog(app.id,null,app.status);
+            });
+            return rows.length;
+        });
+    }
 }
 const store=new Store();
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
@@ -89,6 +323,31 @@ const getWait=a=>['OFFER','REJECTED','WITHDRAWN'].includes(a.status)||!a.applied
 const stars=n=>'⭐'.repeat(parseInt(n)||1);
 const ini=n=>(n||'?')[0].toUpperCase();
 function toast(m,t='info'){const c=$('#toast-container'),e=document.createElement('div');e.className=`toast ${t}`;e.textContent=m;c.appendChild(e);setTimeout(()=>{e.style.opacity='0';e.style.transform='translateX(120%)';e.style.transition='all .3s var(--ease)';setTimeout(()=>e.remove(),300);},3000);}
+const DEV_DEBUG=location.protocol==='file:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'||location.search.indexOf('debug=1')>=0;
+window.rtDebug={
+    enabled:DEV_DEBUG,
+    state:{email:'-',userId:'-',sessionExists:'no',lastLoadAt:'-',lastSaveAt:'-',saveResult:'-'},
+    panel:null,
+    render(){
+        if(!this.enabled)return;
+        if(!this.panel){
+            this.panel=document.createElement('div');
+            this.panel.id='rt-debug-panel';
+            this.panel.style.cssText='position:fixed;right:16px;bottom:16px;z-index:9999;width:220px;padding:10px 12px;border-radius:8px;background:rgba(15,23,42,.94);color:#e2e8f0;font-size:11px;line-height:1.5;border:1px solid rgba(148,163,184,.28);box-shadow:0 12px 30px rgba(15,23,42,.28);backdrop-filter:blur(8px)';
+            document.body.appendChild(this.panel);
+        }
+        this.panel.innerHTML=`<div style="font-weight:600;margin-bottom:6px;color:#f8fafc">RT Debug</div><div>邮箱: ${this.state.email||'-'}</div><div>user id: ${this.state.userId||'-'}</div><div>session: ${this.state.sessionExists}</div><div>上次加载: ${this.state.lastLoadAt||'-'}</div><div>上次保存: ${this.state.lastSaveAt||'-'}</div><div>保存结果: ${this.state.saveResult||'-'}</div>`;
+    },
+    update(patch){
+        this.state=Object.assign({},this.state,patch||{});
+        this.render();
+    }
+};
+window.rtDebug.render();
+function syncIntlToggles(){
+    if(document.getElementById('toggle-intl-mode'))document.getElementById('toggle-intl-mode').checked=!!store.settings.intlMode;
+    if(document.getElementById('profile-toggle-intl-mode'))document.getElementById('profile-toggle-intl-mode').checked=!!store.settings.intlMode;
+}
 async function callAI(p){
     try{const r=await fetch(`${AI_CFG.gemini.url}?key=${AI_CFG.gemini.key}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:p}]}]})});if(r.ok){const d=await r.json();return d.candidates?.[0]?.content?.parts?.[0]?.text||'完成。';}}catch(e){}
     try{const r=await fetch(AI_CFG.or.url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${AI_CFG.or.key}`,'HTTP-Referer':location.href},body:JSON.stringify({model:AI_CFG.or.model,messages:[{role:'user',content:p}]})});if(r.ok){const d=await r.json();return d.choices?.[0]?.message?.content||'完成。';}}catch(e){}
@@ -105,8 +364,27 @@ function switchView(v){
 }
 $$('.nav-item[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 $('#global-search').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);});
-$('#toggle-intl-mode').checked=store.settings.intlMode;
-$('#toggle-intl-mode').addEventListener('change',e=>{store.settings.intlMode=e.target.checked;store.save();updIntl();if(curView==='pipeline')renderKanban();});
+syncIntlToggles();
+$('#toggle-intl-mode').addEventListener('change',async e=>{
+    const ok=await store.setSetting('intlMode',e.target.checked);
+    if(ok===false){
+        e.target.checked=!e.target.checked;
+        return;
+    }
+    syncIntlToggles();
+    updIntl();
+    refresh();
+});
+document.getElementById('profile-toggle-intl-mode')?.addEventListener('change',async e=>{
+    const ok=await store.setSetting('intlMode',e.target.checked);
+    if(ok===false){
+        e.target.checked=!e.target.checked;
+        return;
+    }
+    syncIntlToggles();
+    updIntl();
+    refresh();
+});
 function updIntl(){const s=store.settings.intlMode;$$('.intl-field').forEach(el=>el.style.display=s?'':'none');$('#filter-visa').style.display=s?'':'none';}
 updIntl();
 // 类别下拉填充
@@ -114,9 +392,14 @@ function fillCatSelect(selEl,val){
     selEl.innerHTML='<option value="">选择类别</option>';
     store.categories.forEach(c=>{selEl.innerHTML+=`<option value="${c}" ${val===c?'selected':''}>${c}</option>`;});
 }
-$('#add-category-inline').addEventListener('click',()=>{
+$('#add-category-inline').addEventListener('click',async ()=>{
     const name=prompt('输入新类别名称：');
-    if(name&&name.trim()){store.addCat(name.trim());fillCatSelect($('#form-category'),name.trim());initFilters();}
+    if(name&&name.trim()){
+        const added=await store.addCat(name.trim());
+        if(!added)return;
+        fillCatSelect($('#form-category'),name.trim());
+        initFilters();
+    }
 });// ---- 看板 ----
 function renderKanban(q=''){
     const b=$('#kanban-board'),fc=$('#filter-category').value,fv=$('#filter-visa').value;
@@ -148,10 +431,10 @@ function mkCard(a){
     c.addEventListener('click',()=>openDrawer(a.id));
     return c;
 }
-function chgStatus(id,ns){const a=store.getApp(id);if(!a||a.status===ns)return;if(ns==='REJECTED'){openRejModal(id);return;}store.updateApp(id,{status:ns});if(ns==='OFFER')toast('🎉 Offer！','success');renderKanban($('#global-search').value.toLowerCase().trim());}
+async function chgStatus(id,ns){const a=store.getApp(id);if(!a||a.status===ns)return;if(ns==='REJECTED'){openRejModal(id);return;}const ok=await store.updateApp(id,{status:ns});if(ok===false)return;if(ns==='OFFER')toast('🎉 Offer！','success');renderKanban($('#global-search').value.toLowerCase().trim());}
 let pendRej=null;
 function openRejModal(id){pendRej=id;$$('#rejection-options input').forEach(i=>i.checked=false);$('#rejection-modal-overlay').classList.add('active');}
-$('#rejection-confirm').addEventListener('click',()=>{if(!pendRej)return;const s=$('#rejection-options input:checked');if(!s){toast('请选择','error');return;}store.updateApp(pendRej,{status:'REJECTED',_rej:s.value});$('#rejection-modal-overlay').classList.remove('active');pendRej=null;renderKanban($('#global-search').value.toLowerCase().trim());});
+$('#rejection-confirm').addEventListener('click',async ()=>{if(!pendRej)return;const s=$('#rejection-options input:checked');if(!s){toast('请选择','error');return;}const ok=await store.updateApp(pendRej,{status:'REJECTED',_rej:s.value});if(ok===false)return;$('#rejection-modal-overlay').classList.remove('active');pendRej=null;renderKanban($('#global-search').value.toLowerCase().trim());});
 $('#rejection-modal-close').addEventListener('click',()=>{$('#rejection-modal-overlay').classList.remove('active');pendRej=null;});
 
 // ---- 表格 ----
@@ -185,11 +468,11 @@ function mkRow(a,cols){
     });
     return tr;
 }
-function inlineEdit(td,a,f,custom=false){const old=custom?(a.customFields?.[f]||''):(a[f]||'');const inp=document.createElement('input');inp.type='text';inp.className='inline-edit';inp.value=old;td.textContent='';td.appendChild(inp);inp.focus();inp.select();const sv=()=>{const v=inp.value.trim();if(custom){if(!a.customFields)a.customFields={};a.customFields[f]=v;store.updateApp(a.id,{customFields:a.customFields});}else if(v!==old){store.updateApp(a.id,{[f]:v});if(f==='position_category'&&v)store.addCat(v);}renderTable($('#global-search').value.toLowerCase().trim());};inp.addEventListener('blur',sv);inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sv();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
-function inlineCatSel(td,a){const sel=document.createElement('select');sel.className='inline-select';sel.innerHTML='<option value="">选择</option>';store.categories.forEach(c=>{sel.innerHTML+=`<option value="${c}" ${a.position_category===c?'selected':''}>${c}</option>`;});sel.innerHTML+='<option value="__NEW__">+ 新增类别...</option>';td.textContent='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{if(sel.value==='__NEW__'){const name=prompt('输入新类别名称：');if(name&&name.trim()){store.addCat(name.trim());store.updateApp(a.id,{position_category:name.trim()});initFilters();}renderTable($('#global-search').value.toLowerCase().trim());}else if(sel.value){store.updateApp(a.id,{position_category:sel.value});renderTable($('#global-search').value.toLowerCase().trim());}});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',async ()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const ae=a.timeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=a.timeline;}await store.updateApp(a.id,updates);renderTable($('#global-search').value.toLowerCase().trim());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
-function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{chgStatus(a.id,sel.value);renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',()=>{store.updateApp(a.id,{preference_level:sel.value});renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
+function inlineEdit(td,a,f,custom=false){const old=custom?(a.customFields?.[f]||''):(a[f]||'');const inp=document.createElement('input');inp.type='text';inp.className='inline-edit';inp.value=old;td.textContent='';td.appendChild(inp);inp.focus();inp.select();const sv=async ()=>{const v=inp.value.trim();if(custom){const nextFields=Object.assign({},a.customFields||{}, {[f]:v});const ok=await store.updateApp(a.id,{customFields:nextFields});if(ok===false)return renderTable($('#global-search').value.toLowerCase().trim());}else if(v!==old){if(f==='position_category'&&v){const added=await store.addCat(v);if(!added)return renderTable($('#global-search').value.toLowerCase().trim());}const ok=await store.updateApp(a.id,{[f]:v});if(ok===false)return renderTable($('#global-search').value.toLowerCase().trim());}renderTable($('#global-search').value.toLowerCase().trim());};inp.addEventListener('blur',sv);inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sv();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
+function inlineCatSel(td,a){const sel=document.createElement('select');sel.className='inline-select';sel.innerHTML='<option value="">选择</option>';store.categories.forEach(c=>{sel.innerHTML+=`<option value="${c}" ${a.position_category===c?'selected':''}>${c}</option>`;});sel.innerHTML+='<option value="__NEW__">+ 新增类别...</option>';td.textContent='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{if(sel.value==='__NEW__'){const name=prompt('输入新类别名称：');if(name&&name.trim()){const added=await store.addCat(name.trim());if(!added)return renderTable($('#global-search').value.toLowerCase().trim());const ok=await store.updateApp(a.id,{position_category:name.trim()});if(ok!==false)initFilters();}renderTable($('#global-search').value.toLowerCase().trim());}else if(sel.value){const ok=await store.updateApp(a.id,{position_category:sel.value});if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());}});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
+function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',async ()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const nextTimeline=cloneData(a.timeline);const ae=nextTimeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=nextTimeline;}const ok=await store.updateApp(a.id,updates);if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
+function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{await chgStatus(a.id,sel.value);renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
+function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{const ok=await store.updateApp(a.id,{preference_level:sel.value});if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
 $('#table-group-by').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
 $('#table-filter-status').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
 $('#filter-category').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
@@ -197,7 +480,7 @@ $('#filter-visa').addEventListener('change',()=>renderKanban($('#global-search')
 $('#table-add-row').addEventListener('click',()=>openAppModal());
 $('#table-edit-mode-btn').addEventListener('click',()=>{
     // 列管理
-    const list=$('#columns-list');list.innerHTML='';store.tableCols.forEach((c,i)=>{const lb=document.createElement('label');lb.innerHTML=`<input type="checkbox" ${c.show?'checked':''} data-idx="${i}"><span>${c.label}</span>${!c.system?`<span class="remove-tag" style="margin-left:auto;cursor:pointer;color:var(--text-muted)">🗑</span>`:''}`;lb.querySelector('.remove-tag')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();store.rmCol(c.id);$('#table-edit-mode-btn').click();});list.appendChild(lb);});
+    const list=$('#columns-list');list.innerHTML='';store.tableCols.forEach((c,i)=>{const lb=document.createElement('label');lb.innerHTML=`<input type="checkbox" ${c.show?'checked':''} data-idx="${i}"><span>${c.label}</span>${!c.system?`<span class="remove-tag" style="margin-left:auto;cursor:pointer;color:var(--text-muted)">🗑</span>`:''}`;lb.querySelector('.remove-tag')?.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const ok=await store.rmCol(c.id);if(ok!==false)$('#table-edit-mode-btn').click();});list.appendChild(lb);});
     // 行管理
     const rl=$('#rows-batch-list');rl.innerHTML='';
     store.apps.forEach(a=>{const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border-light);font-size:12px;cursor:pointer';row.innerHTML=`<input type="checkbox" class="row-check" data-id="${a.id}"><span style="font-weight:500;color:var(--text-primary)">${a.company_name}</span><span style="color:var(--text-secondary)">${a.position_title}</span><span class="status-pill ${getSI(a.status).cls}" style="margin-left:auto;font-size:10px">${getSI(a.status).label}</span>`;rl.appendChild(row);});
@@ -206,9 +489,9 @@ $('#table-edit-mode-btn').addEventListener('click',()=>{
     $('#columns-modal-overlay').classList.add('active');
 });
 $('#rows-add-btn')?.addEventListener('click',()=>{$('#columns-modal-overlay').classList.remove('active');openAppModal();});
-$('#rows-batch-del-btn')?.addEventListener('click',()=>{const ids=[];$$('.row-check:checked').forEach(c=>ids.push(c.dataset.id));if(!ids.length){toast('请先勾选要删除的行','error');return;}if(!confirm(`确定删除 ${ids.length} 条投递？`))return;ids.forEach(id=>store.delApp(id));toast(`已删除 ${ids.length} 条`,'success');$('#table-edit-mode-btn').click();refresh();});
-$('#add-col-btn').addEventListener('click',async ()=>{const n=$('#new-col-name').value.trim();if(!n)return;await store.addCol(n);$('#new-col-name').value='';$('#table-edit-mode-btn').click();});
-$('#columns-done').addEventListener('click',async ()=>{$$('#columns-list input[type="checkbox"]').forEach(inp=>{const i=parseInt(inp.dataset.idx);if(!isNaN(i))store.tableCols[i].show=inp.checked;});await store.save();$('#columns-modal-overlay').classList.remove('active');renderTable($('#global-search').value.toLowerCase().trim());});
+$('#rows-batch-del-btn')?.addEventListener('click',async ()=>{const ids=[];$$('.row-check:checked').forEach(c=>ids.push(c.dataset.id));if(!ids.length){toast('请先勾选要删除的行','error');return;}if(!confirm(`确定删除 ${ids.length} 条投递？`))return;const ok=await store.deleteApps(ids);if(ok===false)return;toast(`已删除 ${ids.length} 条`,'success');$('#table-edit-mode-btn').click();refresh();});
+$('#add-col-btn').addEventListener('click',async ()=>{const n=$('#new-col-name').value.trim();if(!n)return;const ok=await store.addCol(n);if(ok===false)return;$('#new-col-name').value='';$('#table-edit-mode-btn').click();});
+$('#columns-done').addEventListener('click',async ()=>{const visibleMap={};$$('#columns-list input[type="checkbox"]').forEach(inp=>{const i=parseInt(inp.dataset.idx);if(!isNaN(i)&&store.tableCols[i])visibleMap[store.tableCols[i].id]=inp.checked;});const ok=await store.setColumnVisibility(visibleMap);if(ok===false)return;$('#columns-modal-overlay').classList.remove('active');renderTable($('#global-search').value.toLowerCase().trim());});
 $('#columns-modal-close').addEventListener('click',()=>$('#columns-modal-overlay').classList.remove('active'));
 $('#jd-preview-close').addEventListener('click',()=>$('#jd-preview-overlay').classList.remove('active'));
 $('#jd-preview-overlay').addEventListener('click',e=>{if(e.target===$('#jd-preview-overlay'))$('#jd-preview-overlay').classList.remove('active');});
@@ -229,7 +512,7 @@ async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$
 const cf={};$$('.custom-field-input').forEach(inp=>{cf[inp.dataset.colId]=inp.value.trim();});if(Object.keys(cf).length)d.customFields=cf;
 if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.customFields||{},cf);
 // 同步投递日期到时间线
-if(old.timeline&&old.timeline.length){const ae=old.timeline.find(t=>t.name==='已投递');if(ae)ae.date=appliedDate;d.timeline=old.timeline;}
+if(old.timeline&&old.timeline.length){const nextTimeline=cloneData(old.timeline);const ae=nextTimeline.find(t=>t.name==='已投递');if(ae)ae.date=appliedDate;d.timeline=nextTimeline;}
 const ok=await store.updateApp(editId,d);if(!ok){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{d.timeline=[{name:'已投递',date:appliedDate}];d.status='APPLIED';d.customFields=cf;const ok=await store.addApp(d);if(!ok){toast('保存失败，请重试','error');return;}toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
 $('#add-application-btn').addEventListener('click',()=>openAppModal());
 $('#modal-save').addEventListener('click',()=>saveApp(false));
@@ -254,23 +537,27 @@ function renderDTL(a,edit=false){
             const dateInp=document.createElement('input');dateInp.type='date';dateInp.className='inline-edit';dateInp.style.width='130px';dateInp.value=item.date||'';dateInp.dataset.i=String(i);dateInp.dataset.f='date';
             const isFirst=i===0&&item.name==='已投递';
             const delBtn=document.createElement('button');delBtn.className='td-action-btn';delBtn.textContent='×';delBtn.style.visibility=isFirst?'hidden':'visible';
-            delBtn.addEventListener('click',()=>{timeline.splice(i,1);store.updateApp(a.id,{timeline});renderDTL(a,true);});
+            delBtn.addEventListener('click',async ()=>{const nextTimeline=cloneData(timeline);nextTimeline.splice(i,1);const ok=await store.updateApp(a.id,{timeline:nextTimeline});if(ok!==false){a.timeline=nextTimeline;renderDTL(a,true);}});
             row.appendChild(sel);row.appendChild(dateInp);row.appendChild(delBtn);list.appendChild(row);
         });
         tl.appendChild(list);
         const btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px;margin-top:8px';
         btns.innerHTML=`<button class="btn-ghost btn-sm" id="tl-add">+ 添加轮次</button><button class="btn-primary btn-sm" id="tl-save">保存</button>`;
         tl.appendChild(btns);
-        $('#tl-add').addEventListener('click',()=>{timeline.push({name:'一面',date:''});store.updateApp(a.id,{timeline});renderDTL(a,true);});
+        $('#tl-add').addEventListener('click',async ()=>{const nextTimeline=cloneData(timeline);nextTimeline.push({name:'一面',date:''});const ok=await store.updateApp(a.id,{timeline:nextTimeline});if(ok!==false){a.timeline=nextTimeline;renderDTL(a,true);}});
         $('#tl-save').addEventListener('click',async ()=>{
-            $$('#tl-edit select, #tl-edit input').forEach(el=>{const i=parseInt(el.dataset.i),f=el.dataset.f;if(!isNaN(i)&&timeline[i])timeline[i][f]=el.value;});
+            const nextTimeline=cloneData(timeline);
+            $$('#tl-edit select, #tl-edit input').forEach(el=>{const i=parseInt(el.dataset.i),f=el.dataset.f;if(!isNaN(i)&&nextTimeline[i])nextTimeline[i][f]=el.value;});
             // 从时间线推导状态
-            const newStatus=deriveStatus(timeline);
+            const newStatus=deriveStatus(nextTimeline);
             // 同步"已投递"日期到 applied_date
-            const appliedEntry=timeline.find(t=>t.name==='已投递');
-            const updates={timeline,status:newStatus};
+            const appliedEntry=nextTimeline.find(t=>t.name==='已投递');
+            const updates={timeline:nextTimeline,status:newStatus};
             if(appliedEntry&&appliedEntry.date)updates.applied_date=appliedEntry.date;
-            await store.updateApp(a.id,updates);
+            const ok=await store.updateApp(a.id,updates);
+            if(ok===false)return;
+            a.timeline=nextTimeline;
+            a.status=newStatus;
             tlEditing=false;
             // 刷新侧边栏头部状态
             const si=getSI(newStatus);$('#drawer-status').className=`status-badge ${si.cls}`;$('#drawer-status').textContent=si.label;
@@ -298,7 +585,7 @@ function updDActions(){
         else if(curTab==='timeline'){tlEditing=!tlEditing;const a=store.getApp(curDId);renderDTL(a,tlEditing);updDActions();}
     });
     $('#d-newref')?.addEventListener('click',()=>openRefModal(null,curDId));
-    $('#d-del')?.addEventListener('click',()=>{if(confirm('确定删除？')){store.delApp(curDId);$('#drawer-overlay').classList.remove('active');refresh();toast('已删除','info');}});
+    $('#d-del')?.addEventListener('click',async ()=>{if(confirm('确定删除？')){const ok=await store.delApp(curDId);if(ok===false)return;$('#drawer-overlay').classList.remove('active');refresh();toast('已删除','info');}});
 }
 $$('.drawer-tab').forEach(t=>{t.addEventListener('click',()=>{$$('.drawer-tab').forEach(x=>x.classList.remove('active'));$$('.drawer-tab-content').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(`#tab-${t.dataset.tab}`).classList.add('active');curTab=t.dataset.tab;updDActions();});});
 $('#drawer-close').addEventListener('click',()=>$('#drawer-overlay').classList.remove('active'));
@@ -317,7 +604,7 @@ function renderResumes(){
         c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-name">${r.file_name}</div><div class="resume-card-meta">${fmtDT(r.at)} · ${r.file_type||'PDF'}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div>${linked.length?`<div class="resume-card-linked">关联 <span>${linked.length}</span> 条投递：${linked.slice(0,3).map(a=>a.company_name+' '+a.position_title).join('、')}${linked.length>3?'...':''}</div>`:`<div class="resume-card-linked" style="color:var(--text-muted)">未关联投递</div>`}${r.tags?.length?`<div class="resume-card-tags">${r.tags.map(t=>`<span class="resume-tag">${t}</span>`).join('')}</div>`:''}<div class="resume-card-actions">${r.data_url?`<button class="resume-action-btn preview-btn">👁 预览</button>`:''}<button class="resume-action-btn link-btn">🔗 关联岗位</button><button class="resume-action-btn del-btn" style="flex:0;padding:7px 12px;color:var(--red)">🗑</button></div></div>`;
         c.querySelector('.preview-btn')?.addEventListener('click',e=>{e.stopPropagation();if(r.data_url)window.open(r.data_url,'_blank');else toast('无预览数据，请重新上传','error');});
         c.querySelector('.link-btn').addEventListener('click',e=>{e.stopPropagation();openResumeLinkModal(r.id);});
-        c.querySelector('.del-btn').addEventListener('click',e=>{e.stopPropagation();if(confirm('删除简历「'+r.file_name+'」？')){store.delResume(r.id);renderResumes();toast('已删除','info');}});
+        c.querySelector('.del-btn').addEventListener('click',async e=>{e.stopPropagation();if(confirm('删除简历「'+r.file_name+'」？')){const ok=await store.delResume(r.id);if(ok===false)return;renderResumes();toast('已删除','info');}});
         g.appendChild(c);
     });
 }
@@ -374,7 +661,7 @@ function openRefModal(refId=null,preAppId=null){
     $('#voice-recorder').style.display='none';$('#reflection-content').style.display='';$$('.mode-btn').forEach(b=>b.classList.remove('active'));$('.mode-btn[data-mode="text"]').classList.add('active');
     $('#reflection-modal-overlay').classList.add('active');
 }
-$('#add-pain-point-btn').addEventListener('click',()=>{const inp=$('#new-pain-point-input'),v=inp.value.trim();if(!v)return;store.addPP(v);inp.value='';const cur=[];$$('#pain-points-selector input:checked').forEach(i=>cur.push(i.value));cur.push(v);renderPPTags(cur);});
+$('#add-pain-point-btn').addEventListener('click',async ()=>{const inp=$('#new-pain-point-input'),v=inp.value.trim();if(!v)return;const added=await store.addPP(v);if(!added)return;inp.value='';const cur=[];$$('#pain-points-selector input:checked').forEach(i=>cur.push(i.value));cur.push(v);renderPPTags(cur);});
 $('#new-pain-point-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#add-pain-point-btn').click();}});
 $$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#reflection-content').style.display=b.dataset.mode==='text'?'':'none';$('#voice-recorder').style.display=b.dataset.mode==='voice'?'':'none';});});
 let mediaRec=null,audioChunks=[],recTimer=null,recSec=0;
@@ -404,12 +691,12 @@ function renderAnalytics(){
 async function doInsight(ap,cs,rs){const el=$('#insight-content');if(ap.length<3){el.innerHTML='<div class="empty-state"><p>投递3条以上解锁</p></div>';return;}el.innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';const cS=Object.entries(cs).map(([c,v])=>`${c}:投${v.t}回${v.r}`).join(';'),rS=Object.entries(rs).map(([s,c])=>`${REJECTION_STAGES[s]||s}:${c}`).join(';');el.textContent=await callAI(`求职顾问。总投${ap.length}，类别:${cS||'无'}，归因:${rS||'无'}。3-5条简洁中文建议。`);}
 
 // ---- 设置 ----
-$('#settings-btn').addEventListener('click',()=>{renderSetCats();renderSetPPs();$('#clear-confirm-area').style.display='none';$('#clear-confirm-input').value='';$('#settings-modal-overlay').classList.add('active');});
-function renderSetCats(){const el=$('#settings-categories');el.innerHTML='';store.categories.forEach(c=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${c} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',()=>{store.rmCat(c);renderSetCats();initFilters();});el.appendChild(t);});}
-function renderSetPPs(){const el=$('#settings-painpoints');el.innerHTML='';store.painPoints.forEach(p=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${p} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',()=>{store.rmPP(p);renderSetPPs();});el.appendChild(t);});}
-$('#settings-add-cat').addEventListener('click',async ()=>{const v=$('#settings-new-cat').value.trim();if(v){await store.addCat(v);$('#settings-new-cat').value='';renderSetCats();initFilters();}});
+document.getElementById('settings-btn')?.addEventListener('click',()=>{document.getElementById('profile-btn')?.click();});
+function renderSetCats(){const el=$('#settings-categories');el.innerHTML='';store.categories.forEach(c=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${c} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',async ()=>{const ok=await store.rmCat(c);if(ok!==false){renderSetCats();initFilters();}});el.appendChild(t);});}
+function renderSetPPs(){const el=$('#settings-painpoints');el.innerHTML='';store.painPoints.forEach(p=>{const t=document.createElement('span');t.className='settings-tag';t.innerHTML=`${p} <span class="remove-tag">×</span>`;t.querySelector('.remove-tag').addEventListener('click',async ()=>{const ok=await store.rmPP(p);if(ok!==false)renderSetPPs();});el.appendChild(t);});}
+$('#settings-add-cat').addEventListener('click',async ()=>{const v=$('#settings-new-cat').value.trim();if(v){const added=await store.addCat(v);if(!added)return;$('#settings-new-cat').value='';renderSetCats();initFilters();}});
 $('#settings-new-cat').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#settings-add-cat').click();}});
-$('#settings-add-pp').addEventListener('click',async ()=>{const v=$('#settings-new-pp').value.trim();if(v){await store.addPP(v);$('#settings-new-pp').value='';renderSetPPs();}});
+$('#settings-add-pp').addEventListener('click',async ()=>{const v=$('#settings-new-pp').value.trim();if(v){const added=await store.addPP(v);if(!added)return;$('#settings-new-pp').value='';renderSetPPs();}});
 $('#settings-new-pp').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#settings-add-pp').click();}});
 $('#settings-export').addEventListener('click',()=>{
     // 导出为 CSV (Excel 兼容)
@@ -436,9 +723,7 @@ $('#settings-export').addEventListener('click',()=>{
     const b=new Blob([csv],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(b);const el=document.createElement('a');el.href=u;el.download='履迹-投递记录.csv';el.click();URL.revokeObjectURL(u);toast('已导出 Excel','success');
 });
 $('#settings-clear').addEventListener('click',()=>{$('#clear-confirm-area').style.display='';$('#clear-confirm-input').value='';$('#clear-confirm-input').focus();});
-$('#clear-confirm-btn').addEventListener('click',()=>{if($('#clear-confirm-input').value.trim()==='确定清除数据'){localStorage.clear();location.reload();}else{toast('请输入正确的确认文字','error');}});
-$('#settings-done').addEventListener('click',()=>$('#settings-modal-overlay').classList.remove('active'));
-$('#settings-modal-close').addEventListener('click',()=>$('#settings-modal-overlay').classList.remove('active'));
+$('#clear-confirm-btn').addEventListener('click',async ()=>{if($('#clear-confirm-input').value.trim()==='确定清除数据'){const ok=await store.clearAllData();if(ok===false)return;localStorage.removeItem('rt_set');store.settings=getDefaultSettings();Object.keys(localStorage).forEach(function(key){if(key.indexOf('n_')===0)localStorage.removeItem(key);});$('#clear-confirm-area').style.display='none';$('#clear-confirm-input').value='';if(document.getElementById('settings-weekly-goal'))document.getElementById('settings-weekly-goal').value=getDefaultSettings().weeklyGoal;syncIntlToggles();renderSetCats();renderSetPPs();refresh();initFilters();updIntl();toast('云端数据已清空','success');}else{toast('请输入正确的确认文字','error');}});
 
 // ---- 初始化 ----
 // 简历批量关联
@@ -451,9 +736,10 @@ function openResumeLinkModal(resumeId){
     document.body.insertAdjacentHTML('beforeend',html);
     $('#resume-link-close').addEventListener('click',()=>$('#resume-link-overlay').remove());
     $('#resume-link-overlay').addEventListener('click',e=>{if(e.target===$('#resume-link-overlay'))$('#resume-link-overlay').remove();});
-    $('#resume-link-save').addEventListener('click',()=>{
-        const selected=new Set();$$('.rl-check:checked').forEach(c=>selected.add(c.dataset.id));
-        store.apps.forEach(a=>{if(selected.has(a.id)){if(a.resume_id!==resumeId)store.updateApp(a.id,{resume_id:resumeId});}else{if(a.resume_id===resumeId)store.updateApp(a.id,{resume_id:null});}});
+    $('#resume-link-save').addEventListener('click',async ()=>{
+        const selected=[];$$('.rl-check:checked').forEach(c=>selected.push(c.dataset.id));
+        const ok=await store.linkResumeToApps(resumeId,selected);
+        if(ok===false)return;
         $('#resume-link-overlay').remove();renderResumes();toast('关联已更新','success');
     });
 }

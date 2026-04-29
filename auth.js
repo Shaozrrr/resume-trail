@@ -1,61 +1,95 @@
 // 认证 - 登录直接进，注册需邮箱验证码（云端优先）
-var rtSession=JSON.parse(localStorage.getItem('rt_session')||'null');
+var rtSession=sb.getSession();
 var pendingEmail='',pendingPwd='';
 
-function checkAuth(){
-    if(rtSession&&rtSession.access_token){
-        document.getElementById('login-page').style.display='none';
-        document.getElementById('app').style.display='flex';
+function syncSession(session){
+    rtSession=session||null;
+    if(window.rtDebug)window.rtDebug.update({
+        email:rtSession&&rtSession.user&&rtSession.user.email||'-',
+        userId:rtSession&&rtSession.user&&rtSession.user.id||'-',
+        sessionExists:rtSession&&rtSession.access_token?'yes':'no'
+    });
+}
+
+window.addEventListener('rt:session',function(event){
+    syncSession(event.detail&&event.detail.session||null);
+    updateAvatar();
+});
+
+function updateAppShell(isLoggedIn){
+    document.getElementById('login-page').style.display=isLoggedIn?'none':'flex';
+    document.getElementById('app').style.display=isLoggedIn?'flex':'none';
+}
+
+async function checkAuth(){
+    var sessionSnapshot=sb.getSession();
+    console.log('[RT auth] checkAuth start',{
+        rtSessionExists:!!localStorage.getItem('rt_session'),
+        hasAccessToken:!!(sessionSnapshot&&sessionSnapshot.access_token),
+        hasRefreshToken:!!(sessionSnapshot&&sessionSnapshot.refresh_token),
+        userId:sessionSnapshot&&sessionSnapshot.user&&sessionSnapshot.user.id||null
+    });
+    const session=await sb.ensureSession();
+    syncSession(session);
+    if(session&&session.access_token){
+        updateAppShell(true);
         updateAvatar();
-        // 强制从云端加载当前账号数据
-        cloudStore.loadInto(store).then(function(){
+        console.log('[RT auth] active user',{userId:session.user&&session.user.id||null,email:session.user&&session.user.email||null});
+        try{
+            const loadResult=await cloudStore.loadInto(store);
+            console.log('[RT auth] cloudStore.loadInto(store) returned',loadResult);
+            if(typeof syncIntlToggles==='function')syncIntlToggles();
             if(typeof initFilters==='function')initFilters();
+            if(typeof updIntl==='function')updIntl();
+            if(typeof refresh==='function')refresh();
             if(typeof switchView==='function')switchView('pipeline');
-        }).catch(function(err){
-            console.error(err);
+            return true;
+        }catch(err){
+            console.error('[RT auth] cloud load failed',err);
             toast('云端数据加载失败，请刷新重试','error');
-        });
-        return true;
+            return false;
+        }
     }
-    document.getElementById('login-page').style.display='flex';
-    document.getElementById('app').style.display='none';
+    updateAppShell(false);
     return false;
 }
 
 function updateAvatar(){
     if(!rtSession)return;
     var av=document.getElementById('sidebar-avatar');
-    if(av){var e=rtSession.user&&rtSession.user.email||'';av.textContent=e?e[0].toUpperCase():'👤';}
+    if(av){
+        var email=rtSession.user&&rtSession.user.email||'';
+        av.textContent=email?email[0].toUpperCase():'👤';
+    }
 }
 
 function showMsg(text,isErr){
     var el=document.getElementById('login-msg');
-    if(el){el.style.display='block';el.style.color=isErr?'var(--red)':'var(--green)';el.textContent=text;}
+    if(el){
+        el.style.display='block';
+        el.style.color=isErr?'var(--red)':'var(--green)';
+        el.textContent=text;
+    }
 }
-function hideMsg(){var el=document.getElementById('login-msg');if(el)el.style.display='none';}
+
+function hideMsg(){
+    var el=document.getElementById('login-msg');
+    if(el)el.style.display='none';
+}
 
 function clearLocalBusinessData(){
     if(typeof store==='undefined')return;
-    store.apps=[];
-    store.resumes=[];
-    store.refs=[];
-    store.logs=[];
-    store.categories=[];
-    store.painPoints=(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]);
-    store.settings={intlMode:false};
-    store.tableCols=(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[]);
+    store.resetState();
 }
 
-// 登录成功：清空旧数据，保存 session，刷新后拉云端
 function onSuccess(result){
     clearLocalBusinessData();
-    localStorage.setItem('rt_session',JSON.stringify(result));
-    rtSession=result;
+    sb.setSession(result,'auth.onSuccess');
+    syncSession(result);
     showMsg('欢迎！正在进入...',false);
     setTimeout(function(){location.reload();},600);
 }
 
-// 步骤1：输入邮箱密码
 var submitBtn=document.getElementById('login-submit');
 if(submitBtn)submitBtn.addEventListener('click',async function(){
     var email=document.getElementById('login-email').value.trim();
@@ -63,23 +97,24 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     if(!email||!email.includes('@')){showMsg('请输入有效邮箱',true);return;}
     if(!pwd||pwd.length<6){showMsg('密码至少6位',true);return;}
     hideMsg();
-    submitBtn.textContent='请稍候...';submitBtn.disabled=true;
+    submitBtn.textContent='请稍候...';
+    submitBtn.disabled=true;
 
-    // 先尝试登录（老用户）
     var loginRes=await sb.signIn(email,pwd);
     if(loginRes.access_token){
         onSuccess(loginRes);
         return;
     }
 
-    var errMsg=loginRes.error_description||loginRes.msg||'';
+    var errMsg=loginRes.error_description||loginRes.msg||loginRes.error||'';
     if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0){
-        // 尝试走注册验证码流程
-        pendingEmail=email;pendingPwd=pwd;
+        pendingEmail=email;
+        pendingPwd=pwd;
         var otpRes=await sb.signInOTP(email);
         if(otpRes.error){
-            showMsg('发送验证码失败：'+(otpRes.error.message||''),true);
-            submitBtn.textContent='开始使用';submitBtn.disabled=false;
+            showMsg('发送验证码失败：'+(otpRes.error.message||otpRes.error||''),true);
+            submitBtn.textContent='开始使用';
+            submitBtn.disabled=false;
             return;
         }
         document.getElementById('login-step1').style.display='none';
@@ -87,26 +122,27 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         document.getElementById('login-hint').style.display='none';
         document.getElementById('verify-email-display').textContent=email;
         showMsg('验证码已发送到你的邮箱',false);
-        submitBtn.textContent='开始使用';submitBtn.disabled=false;
+        submitBtn.textContent='开始使用';
+        submitBtn.disabled=false;
         document.getElementById('verify-code').focus();
         return;
     }
 
     showMsg(errMsg||'登录失败',true);
-    submitBtn.textContent='开始使用';submitBtn.disabled=false;
+    submitBtn.textContent='开始使用';
+    submitBtn.disabled=false;
 });
 
-// 步骤2：验证码确认
 var verifyBtn=document.getElementById('verify-submit');
 if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     var code=document.getElementById('verify-code').value.trim();
     if(!code||code.length<4){showMsg('请输入验证码',true);return;}
     hideMsg();
-    verifyBtn.textContent='验证中...';verifyBtn.disabled=true;
+    verifyBtn.textContent='验证中...';
+    verifyBtn.disabled=true;
 
     var verifyRes=await sb.verifyOTP(pendingEmail,code);
     if(verifyRes.access_token){
-        // 设置密码
         var token=verifyRes.access_token;
         await fetch(SUPABASE_URL+'/auth/v1/user',{
             method:'PUT',
@@ -117,11 +153,11 @@ if(verifyBtn)verifyBtn.addEventListener('click',async function(){
         return;
     }
 
-    showMsg(verifyRes.error_description||verifyRes.msg||'验证码错误',true);
-    verifyBtn.textContent='验证并注册';verifyBtn.disabled=false;
+    showMsg(verifyRes.error_description||verifyRes.msg||verifyRes.error||'验证码错误',true);
+    verifyBtn.textContent='验证并注册';
+    verifyBtn.disabled=false;
 });
 
-// 返回
 var backBtn=document.getElementById('verify-back');
 if(backBtn)backBtn.addEventListener('click',function(){
     document.getElementById('login-step1').style.display='';
@@ -131,37 +167,55 @@ if(backBtn)backBtn.addEventListener('click',function(){
 });
 
 var codeInput=document.getElementById('verify-code');
-if(codeInput)codeInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&verifyBtn)verifyBtn.click();});
-var pwdInput=document.getElementById('login-password');
-if(pwdInput)pwdInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&submitBtn)submitBtn.click();});
+if(codeInput)codeInput.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&verifyBtn)verifyBtn.click();
+});
 
-// 用户资料
-var profileBtn=document.getElementById('profile-btn');
-if(profileBtn)profileBtn.addEventListener('click',function(){
+var pwdInput=document.getElementById('login-password');
+if(pwdInput)pwdInput.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&submitBtn)submitBtn.click();
+});
+
+function openProfileModal(){
     if(!rtSession)return;
     var u=rtSession.user||{};
     var nick=localStorage.getItem('rt_nickname')||u.email&&u.email.split('@')[0]||'';
     document.getElementById('profile-nickname').value=nick;
-    document.getElementById('profile-email').value=u.email||'';
-    document.getElementById('profile-phone').value='';
     document.getElementById('profile-nickname-display').textContent=nick||'用户';
     document.getElementById('profile-avatar-display').textContent=u.email?(u.email[0].toUpperCase()):'👤';
     document.getElementById('profile-login-method').textContent=u.email||'';
+    var emailEl=document.getElementById('profile-email-display');
+    if(emailEl)emailEl.textContent=u.email||'—';
+    var weeklyGoalEl=document.getElementById('settings-weekly-goal');
+    if(weeklyGoalEl&&typeof getWeeklyGoal==='function')weeklyGoalEl.value=getWeeklyGoal();
+    if(typeof syncIntlToggles==='function')syncIntlToggles();
+    if(typeof renderSetCats==='function')renderSetCats();
+    if(typeof renderSetPPs==='function')renderSetPPs();
+    var clearArea=document.getElementById('clear-confirm-area');
+    if(clearArea)clearArea.style.display='none';
+    var clearInput=document.getElementById('clear-confirm-input');
+    if(clearInput)clearInput.value='';
     document.getElementById('profile-modal-overlay').classList.add('active');
-});
+}
+
+var profileBtn=document.getElementById('profile-btn');
+if(profileBtn)profileBtn.addEventListener('click',openProfileModal);
 
 var profileSave=document.getElementById('profile-save');
 if(profileSave)profileSave.addEventListener('click',async function(){
-    localStorage.setItem('rt_nickname',document.getElementById('profile-nickname').value.trim());
+    var nickname=document.getElementById('profile-nickname').value.trim();
+    localStorage.setItem('rt_nickname',nickname);
+    document.getElementById('profile-nickname-display').textContent=nickname||'用户';
     document.getElementById('profile-modal-overlay').classList.remove('active');
-    updateAvatar();toast('已保存','success');
+    updateAvatar();
+    toast('已保存','success');
 });
 
 var profileLogout=document.getElementById('profile-logout');
 if(profileLogout)profileLogout.addEventListener('click',async function(){
     if(!confirm('确定退出登录？'))return;
-    if(rtSession)await sb.signOut(rtSession.access_token);
-    localStorage.removeItem('rt_session');
+    if(rtSession&&rtSession.access_token)await sb.signOut(rtSession.access_token);
+    sb.clearSession('auth.logout');
     clearLocalBusinessData();
     location.reload();
 });

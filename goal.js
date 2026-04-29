@@ -1,8 +1,9 @@
 // 周目标进度
 function getWeeklyGoal(){
-    var s=JSON.parse(localStorage.getItem('rt_set')||'{}');
-    return parseInt(s.weeklyGoal)||10;
+    if(typeof store==='undefined')return 10;
+    return parseInt(store.settings&&store.settings.weeklyGoal)||10;
 }
+
 function renderGoal(){
     var el=document.querySelector('#goal-body');
     if(!el||typeof store==='undefined')return;
@@ -21,27 +22,28 @@ function renderGoal(){
     var barColor=pct>=100?'var(--green)':'var(--blue)';
     el.innerHTML='<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:6px"><span>本周 '+tw+'/'+goal+'</span><span>vs上周'+lw+' '+diffText+'</span></div><div style="height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:4px;transition:width .6s"></div></div>';
 }
-// 扩展 renderAnalytics
+
 var _origRA=typeof renderAnalytics==='function'?renderAnalytics:null;
 if(_origRA){
     window.renderAnalytics=function(){_origRA();renderGoal();};
 }
-// 设置中的周目标
+
 var swg=document.querySelector('#settings-weekly-goal');
 if(swg){
     swg.value=getWeeklyGoal();
-    swg.addEventListener('change',function(){
-        var s=JSON.parse(localStorage.getItem('rt_set')||'{}');
-        s.weeklyGoal=parseInt(swg.value)||10;
-        localStorage.setItem('rt_set',JSON.stringify(s));
+    swg.addEventListener('change',async function(){
+        var ok=await store.setSetting('weeklyGoal',parseInt(swg.value)||10);
+        if(ok===false){
+            swg.value=getWeeklyGoal();
+            return;
+        }
         if(typeof renderAnalytics==='function')renderAnalytics();
     });
 }
-// 设置打开时同步值
-var origSettingsClick=document.querySelector('#settings-btn');
-if(origSettingsClick){
-    var origHandler=origSettingsClick.onclick;
-    origSettingsClick.addEventListener('click',function(){
+
+var profileOpenBtn=document.querySelector('#profile-btn');
+if(profileOpenBtn){
+    profileOpenBtn.addEventListener('click',function(){
         var swg2=document.querySelector('#settings-weekly-goal');
         if(swg2)swg2.value=getWeeklyGoal();
     });

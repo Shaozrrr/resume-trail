@@ -93,9 +93,10 @@ function parseImport(){
     importData=[];text.split('\n').filter(l=>l.trim()).forEach(line=>{const p=line.split(/[,\t|;]/).map(s=>s.trim()).filter(Boolean);if(p.length>=2)importData.push({company:p[0],position:p[1],category:p[2]||'',date:p[3]||new Date().toISOString().split('T')[0]});});
     if(importData.length){$('#import-preview').style.display='';$('#import-count').textContent=importData.length;$('#import-preview-list').innerHTML=importData.slice(0,10).map(d=>'<div style="padding:3px 0;border-bottom:1px solid var(--border-light)">'+d.company+' · '+d.position+'</div>').join('');}
 }
-$('#import-confirm')?.addEventListener('click',function(){
+$('#import-confirm')?.addEventListener('click',async function(){
     if(!importData.length){toast('没有数据','error');return;}
-    importData.forEach(function(d){if(d.category)store.addCat(d.category);store.addApp({company_name:d.company,position_title:d.position,position_category:d.category,status:'APPLIED',applied_date:d.date,preference_level:'3',visa_requirement:'UNKNOWN',timeline:[{name:'已投递',date:d.date}]});});
+    const ok=await store.importApps(importData);
+    if(ok===false)return;
     if(typeof initFilters==='function')initFilters();if(typeof refresh==='function')refresh();
     toast('已导入 '+importData.length+' 条','success');$('#import-modal-overlay').classList.remove('active');importData=[];
 });
