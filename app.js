@@ -33,7 +33,7 @@ const PREF_OPTIONS=[{v:'1',l:'⭐ 保底'},{v:'2',l:'⭐⭐ 一般'},{v:'3',l:'�
 const DEFAULT_PP=['表达不清','知识盲区','紧张','准备不足','Case分析薄弱','行为面试不佳','技术题不熟练'];
 const COLORS=['#60a5fa','#a78bfa','#4ade80','#fb923c','#f87171','#fbbf24','#34d399','#f472b6','#818cf8','#a3e635'];
 const DEFAULT_COLS=[{id:'company_name',label:'公司',show:true,system:true},{id:'position_title',label:'岗位',show:true,system:true},{id:'position_category',label:'类别',show:true,system:true},{id:'base_location',label:'Base地',show:true,system:true},{id:'status',label:'状态',show:true,system:true},{id:'applied_date',label:'投递日期',show:true,system:true},{id:'waiting',label:'等待',show:true,system:true},{id:'preference_level',label:'偏好',show:true,system:true},{id:'source_channel',label:'渠道',show:true,system:true},{id:'jd',label:'JD',show:true,system:true},{id:'actions',label:'操作',show:true,system:true}];
-const AI_CFG={gemini:{url:'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',key:'AIzaSyDsUzOWf2a8bm6glCA1kxDTkVYWQXh_nqM'},or:{url:'https://openrouter.ai/api/v1/chat/completions',key:'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',model:'openrouter/auto'}};
+const AI_CFG={openrouter:{url:'https://openrouter.ai/api/v1/chat/completions',key:'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',models:[{id:'qwen/qwen3-next-80b-a3b-instruct:free',label:'Qwen3 Next 免费版'},{id:'qwen/qwen3-coder:free',label:'Qwen3 Coder 免费版'}]}};
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -383,10 +383,185 @@ function syncIntlToggles(){
     if(document.getElementById('toggle-intl-mode'))document.getElementById('toggle-intl-mode').checked=!!store.settings.intlMode;
     if(document.getElementById('profile-toggle-intl-mode'))document.getElementById('profile-toggle-intl-mode').checked=!!store.settings.intlMode;
 }
-async function callAI(p){
-    try{const r=await fetch(`${AI_CFG.gemini.url}?key=${AI_CFG.gemini.key}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:p}]}]})});if(r.ok){const d=await r.json();return d.candidates?.[0]?.content?.parts?.[0]?.text||'完成。';}}catch(e){}
-    try{const r=await fetch(AI_CFG.or.url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${AI_CFG.or.key}`,'HTTP-Referer':location.href},body:JSON.stringify({model:AI_CFG.or.model,messages:[{role:'user',content:p}]})});if(r.ok){const d=await r.json();return d.choices?.[0]?.message?.content||'完成。';}}catch(e){}
-    return'⚠️ AI 暂不可用';
+function sanitizeAIText(text){
+    return String(text||'')
+        .replace(/\*/g,'')
+        .replace(/\r/g,'')
+        .replace(/\n{3,}/g,'\n\n')
+        .trim();
+}
+
+function getAILocationHint(status,data){
+    const message=String((data&&data.error&&data.error.message)||'').toLowerCase();
+    if(status===401)return'OpenRouter Key 校验失败，已切换为本地策略洞察。';
+    if(status===402)return'当前免费额度不可用，已切换为本地策略洞察。';
+    if(status===404&&message.includes('no endpoints found'))return'当前免费模型暂时没有可用节点，已切换为本地策略洞察。';
+    if(status===429&&message.includes('rate-limited'))return'免费通道当前限流，已切换为本地策略洞察。';
+    if(status===429)return'云端分析请求过多，已切换为本地策略洞察。';
+    return'云端分析暂时不可用，已切换为本地策略洞察。';
+}
+
+function buildAnalyticsFallback(ap,cs,rs){
+    const active=ap.filter(a=>!['OFFER','REJECTED','WITHDRAWN'].includes(a.status));
+    const topCategory=Object.entries(cs).sort((a,b)=>{
+        const ar=a[1].t?a[1].r/a[1].t:0;
+        const br=b[1].t?b[1].r/b[1].t:0;
+        return br-ar||b[1].t-a[1].t;
+    })[0];
+    const weakestCategory=Object.entries(cs).filter(([,v])=>v.t>=2).sort((a,b)=>{
+        const ar=a[1].t?a[1].r/a[1].t:0;
+        const br=b[1].t?b[1].r/b[1].t:0;
+        return ar-br||b[1].t-a[1].t;
+    })[0];
+    const rejectTop=Object.entries(rs).sort((a,b)=>b[1]-a[1])[0];
+    const responseCount=ap.filter(a=>['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length;
+    const responseRate=ap.length?Math.round(responseCount/ap.length*100):0;
+    const offerCount=ap.filter(a=>a.status==='OFFER').length;
+    const topCategoryRate=topCategory&&topCategory[1].t?Math.round(topCategory[1].r/topCategory[1].t*100):0;
+    const weakestCategoryRate=weakestCategory&&weakestCategory[1].t?Math.round(weakestCategory[1].r/weakestCategory[1].t*100):0;
+    const rejectLabel=rejectTop?(REJECTION_STAGES[rejectTop[0]]||rejectTop[0]):'暂无稳定失分样本';
+    const categoryGap=topCategory&&weakestCategory?Math.max(topCategoryRate-weakestCategoryRate,0):0;
+    const interviewCount=ap.filter(a=>['ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length;
+    const interviewRate=ap.length?Math.round(interviewCount/ap.length*100):0;
+    const rejectionShare=rejectTop&&Object.keys(rs).length?Math.round(rejectTop[1]/Math.max(Object.values(rs).reduce((sum,val)=>sum+val,0),1)*100):0;
+    return [
+        '整体概况',
+        `当前共跟踪 ${ap.length} 条投递，收到推进 ${responseCount} 条，整体回复率约 ${responseRate}%，进入面试阶段的占比约 ${interviewRate}%，已获得 ${offerCount} 条 Offer。现阶段需要重点关注的不是投递规模，而是投递到推进之间的转化效率。`,
+        topCategory?`${topCategory[0]} 当前推进率约 ${topCategoryRate}%，已经构成现阶段最有价值的主方向；如果资源继续平均分配到所有岗位，整体效率会被明显稀释。`:'样本量仍偏少，建议继续积累 1 到 2 轮完整投递数据后再做判断。',
+        '',
+        '方向表现',
+        topCategory&&weakestCategory
+            ?`${topCategory[0]} 与 ${weakestCategory[0]} 的推进率差距约为 ${categoryGap} 个点，说明不同方向之间已经出现可辨识的表现分层。高推进方向通常意味着经历匹配、简历呈现和面试表达至少有两项是对齐的；低推进方向则提示其中至少一项仍需要调整。`
+            :active.length
+                ?`当前尚未形成非常清晰的方向分层，但活跃岗位与推进岗位的占比已经可以作为第一层参考。后续分析应重点观察哪些方向能够稳定进入笔试、面试及后续轮次。`
+                :'当前样本仍不足，建议先完整记录投递、推进与拒绝节点，再做更稳健的比较。',
+        `最近的主要失分点集中在 ${rejectLabel}${rejectTop?`，约占已记录失分的 ${rejectionShare}%`:''}。这说明当前需要优先处理的是高频失分环节，而不是笼统提升所谓“整体状态”。`,
+        '',
+        '优化建议',
+        rejectTop
+            ?`后续应继续提高 ${topCategory?topCategory[0]:'高匹配方向'} 的投递占比，同时针对 ${REJECTION_STAGES[rejectTop[0]]||rejectTop[0]} 做专项复盘，将问题定义、案例展开、结果表达和收束逻辑整理成稳定模板。这样做的目的不是增加动作数量，而是提升单次投递与单次面试的产出效率。`
+            :'建议继续积累更完整的推进与失分样本，再对比不同方向的推进表现。分析目标不在于填满表格，而在于识别哪一种岗位叙事更容易形成稳定转化。',
+        '更有效的做法，是将有限资源持续配置到回报更高的方向。'
+    ].join('\n');
+}
+
+function buildReflectionFallback(content){
+    const text=String(content||'').trim();
+    const sentenceCount=text.split(/[。！？!?]/).filter(Boolean).length;
+    const hasMetric=/数据|指标|转化|增长|SQL|A\/B|实验/i.test(text);
+    const hasStructure=/用户|场景|拆解|优先级|方案|复盘/i.test(text);
+    return [
+        '整体判断',
+        sentenceCount>=3?'这段复盘信息量已经足够，适合沉淀成可复用答案。':'信息还偏少，建议把问题、回答、追问、反思补完整。',
+        '',
+        '亮点',
+        hasStructure?'你已经有结构化表达意识，这会直接提升复盘质量。':'你已经记录了关键过程，后续只要再补充结构就会更有价值。',
+        '',
+        '短板',
+        hasMetric?'可以继续补充结果导向和业务判断，让回答更像真实工作方案。':'这段内容里缺少量化指标或结果判断，下一次尽量补上数字和取舍理由。',
+        '',
+        '下一次怎么答',
+        '先用一句话定义问题，再拆目标、方案、权衡，最后补结果和复盘动作。'
+    ].join('\n');
+}
+
+function parseAISections(text){
+    return sanitizeAIText(text).split(/\n\s*\n/).map(function(block){
+        const lines=block.split('\n').map(function(line){return line.trim();}).filter(Boolean);
+        if(!lines.length)return null;
+        return {title:lines[0],body:lines.slice(1)};
+    }).filter(Boolean);
+}
+
+function renderAIBlocks(el,text,variant,meta){
+    if(!el)return;
+    const sections=parseAISections(text);
+    if(!sections.length){
+        el.textContent=sanitizeAIText(text);
+        return;
+    }
+    el.innerHTML='';
+    const wrap=document.createElement('div');
+    wrap.className=`ai-rich-block ai-rich-${variant||'insight'}`;
+    if(meta&&meta.badge){
+        const metaRow=document.createElement('div');
+        metaRow.className='ai-rich-meta';
+        if(meta.mode){
+            const badge=document.createElement('span');
+            badge.className=`ai-rich-badge ${meta.mode==='fallback'?'fallback':'online'}`;
+            badge.textContent=meta.label||(meta.mode==='fallback'?'本地策略洞察':'实时分析');
+            metaRow.appendChild(badge);
+        }
+        const note=document.createElement('span');
+        note.className='ai-rich-note';
+        note.textContent=meta.badge;
+        metaRow.appendChild(note);
+        wrap.appendChild(metaRow);
+    }
+    sections.forEach(function(section,index){
+        const card=document.createElement('section');
+        card.className='ai-rich-section';
+        card.style.transitionDelay=`${index*90}ms`;
+        const title=document.createElement('div');
+        title.className='ai-rich-title';
+        title.textContent=section.title;
+        const body=document.createElement('div');
+        body.className='ai-rich-body';
+        section.body.forEach(function(line,lineIndex){
+            const p=document.createElement('p');
+            p.textContent=line;
+            p.style.transitionDelay=`${index*90+lineIndex*60+80}ms`;
+            body.appendChild(p);
+        });
+        card.appendChild(title);
+        card.appendChild(body);
+        wrap.appendChild(card);
+    });
+    el.appendChild(wrap);
+    requestAnimationFrame(function(){
+        wrap.querySelectorAll('.ai-rich-section,.ai-rich-body p').forEach(function(node){
+            node.classList.add('visible');
+        });
+    });
+}
+
+async function callAI(prompt,fallbackText){
+    let lastFailure=null;
+    for(const model of AI_CFG.openrouter.models){
+        try{
+            const r=await fetch(AI_CFG.openrouter.url,{
+                method:'POST',
+                headers:{
+                    'Content-Type':'application/json',
+                    'Authorization':`Bearer ${AI_CFG.openrouter.key}`,
+                    'HTTP-Referer':location.href,
+                    'X-Title':'Resume Trail'
+                },
+                body:JSON.stringify({
+                    model:model.id,
+                    messages:[{role:'user',content:prompt}],
+                    temperature:0.65,
+                    top_p:0.9,
+                    max_tokens:700
+                })
+            });
+            const d=await r.json().catch(function(){return null;});
+            if(r.ok){
+                const text=d&&d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content;
+                if(text)return{text:sanitizeAIText(text),mode:'online',label:model.label,badge:`基于 ${model.label} 生成`};
+            }else{
+                lastFailure={status:r.status,data:d,model:model};
+                console.warn('[RT AI] OpenRouter request failed',{model:model.id,status:r.status,data:d});
+                if(r.status!==429)break;
+            }
+        }catch(e){
+            lastFailure={error:e,model:model};
+            console.warn('[RT AI] OpenRouter fetch error',{model:model.id,error:e});
+        }
+    }
+    if(lastFailure&&lastFailure.error)return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:'网络请求失败，已切换为本地策略洞察。'};
+    if(lastFailure)return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:getAILocationHint(lastFailure.status,lastFailure.data)};
+    return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:'云端分析暂时不可用，已切换为本地策略洞察。'};
 }
 let curView='pipeline',curTab='info';
 let tableQuickEdit=false;
@@ -528,19 +703,29 @@ $('#add-category-inline').addEventListener('click',async ()=>{
     }
 });// ---- 看板 ----
 function renderKanban(q=''){
-    const b=$('#kanban-board'),fc=$('#filter-category').value,fv=$('#filter-visa').value;
+    const b=$('#kanban-board'),fc=$('#filter-category').value,fv=$('#filter-visa').value,ks=$('#kanban-sort').value;
     let apps=store.apps.filter(a=>{if(q&&!a.company_name.toLowerCase().includes(q)&&!a.position_title.toLowerCase().includes(q))return false;if(fc&&a.position_category!==fc)return false;if(fv&&a.visa_requirement!==fv)return false;return true;});
+    apps=apps.slice().sort(function(a,b){
+        if(ks==='preference')return(parseInt(b.preference_level)||0)-(parseInt(a.preference_level)||0);
+        if(ks==='waiting')return(getWait(b)||-1)-(getWait(a)||-1);
+        if(ks==='deadline'){
+            const ad=a.next_deadline?new Date(a.next_deadline).getTime():Number.MAX_SAFE_INTEGER;
+            const bd=b.next_deadline?new Date(b.next_deadline).getTime():Number.MAX_SAFE_INTEGER;
+            return ad-bd;
+        }
+        return(new Date(b.created_at||0).getTime())-(new Date(a.created_at||0).getTime());
+    });
     b.innerHTML='';
     getKanbanStatuses().forEach(st=>{
-        const col=document.createElement('div');col.className='kanban-column';
+        const col=document.createElement('section');col.className='kanban-lane';
         const cards=apps.filter(a=>a.status===st.key);
-        col.innerHTML=`<div class="column-header"><span class="column-title">${st.label}</span><span class="column-count">${cards.length}</span></div><div class="column-cards" data-status="${st.key}"></div><button class="column-add">+ 新建</button>`;
-        const cc=col.querySelector('.column-cards');
+        col.innerHTML=`<div class="lane-header"><div class="lane-header-top"><span class="lane-title">${st.label}</span><span class="lane-count">${cards.length}</span></div><div class="lane-subtitle">${cards.length?`当前阶段共 ${cards.length} 条记录`:'当前阶段暂无记录'}</div></div><div class="lane-body"><div class="lane-track" data-status="${st.key}"></div><button class="lane-add" type="button">+ 在 ${st.label} 新建</button></div>`;
+        const cc=col.querySelector('.lane-track');
         cards.forEach(a=>cc.appendChild(mkCard(a)));
         cc.addEventListener('dragover',e=>{e.preventDefault();col.classList.add('drag-over');});
         cc.addEventListener('dragleave',()=>col.classList.remove('drag-over'));
         cc.addEventListener('drop',e=>{e.preventDefault();col.classList.remove('drag-over');chgStatus(e.dataTransfer.getData('text/plain'),st.key);});
-        col.querySelector('.column-add').addEventListener('click',()=>openAppModal(null,st.key));
+        col.querySelector('.lane-add').addEventListener('click',()=>openAppModal(null,st.key));
         b.appendChild(col);
     });
     $('#view-subtitle').textContent=`${store.apps.length} 条投递`;
@@ -549,9 +734,14 @@ function mkCard(a){
     const c=document.createElement('div');c.className='kanban-card';c.draggable=true;
     const w=getWait(a),wc=w>30?'danger':w>14?'warn':'',r=a.resume_id?store.getResume(a.resume_id):null;
     const sv=store.settings.intlMode&&a.visa_requirement&&a.visa_requirement!=='UNKNOWN',vi=VISA_MAP[a.visa_requirement]||{};
-    let ddl='';if(a.next_deadline){const dl=daysBtw(new Date().toISOString().split('T')[0],a.next_deadline.split('T')[0]);ddl=`<div class="card-ddl ${dl<=3?'urgent':''}">⏰ ${fmtD(a.next_deadline)} ${a.next_action||''}</div>`;}
+    let ddl='';if(a.next_deadline){const dl=daysBtw(new Date().toISOString().split('T')[0],a.next_deadline.split('T')[0]);ddl=`<div class="card-ddl ${dl<=3?'urgent':''}"><span>DDL</span><strong>${fmtD(a.next_deadline)}</strong>${a.next_action?`<em>${a.next_action}</em>`:''}</div>`;}
     const dateStr=a.applied_date?fmtD(a.applied_date):'';
-    c.innerHTML=`<div class="card-top"><div class="card-logo">${ini(a.company_name)}</div><div class="card-info"><div class="card-company">${a.company_name}</div><div class="card-position">${a.position_title}</div></div></div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span style="opacity:.5">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}${sv?`<span class="card-visa ${vi.cls}">${vi.label}</span>`:''}</div>${r?`<div class="card-resume">📎 ${r.file_name}</div>`:''}${ddl}`;
+    const chips=[
+        a.position_category?`<span class="card-chip">${a.position_category}</span>`:'',
+        a.base_location?`<span class="card-chip subtle">${a.base_location}</span>`:'',
+        a.source_channel?`<span class="card-chip subtle">${a.source_channel}</span>`:''
+    ].filter(Boolean).join('');
+    c.innerHTML=`<div class="card-top"><div class="card-logo">${ini(a.company_name)}</div><div class="card-info"><div class="card-company">${a.company_name}</div><div class="card-position">${a.position_title}</div></div><div class="card-chevron">›</div></div><div class="card-chips">${chips}</div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span class="card-date">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}${sv?`<span class="card-visa ${vi.cls}">${vi.label}</span>`:''}</div>${r?`<div class="card-resume">已关联简历 · ${r.file_name}</div>`:''}${ddl}`;
     c.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',a.id);c.classList.add('dragging');});
     c.addEventListener('dragend',()=>c.classList.remove('dragging'));
     c.addEventListener('click',()=>openDrawer(a.id));
@@ -706,6 +896,7 @@ $('#table-sort-column').addEventListener('change',e=>{tableSortColumn=e.target.v
 $('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable($('#global-search').value.toLowerCase().trim());});
 $('#filter-category').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#filter-visa').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
+$('#kanban-sort').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#table-add-row').addEventListener('click',()=>openAppModal());
 $('#table-edit-mode-btn').addEventListener('click',()=>{
     tableQuickEdit=!tableQuickEdit;
@@ -903,7 +1094,7 @@ function openRefModal(refId=null,preAppId=null){
     $('#reflection-round').value=ref?.interview_round||'ROUND_1';$('#reflection-content').value=ref?.raw_content||'';
     renderPPTags(ref?.pain_points||[]);
     $$('.star-rating .star').forEach(s=>s.classList.toggle('active',parseInt(s.dataset.val)<=(ref?.self_rating||0)));
-    $('#ai-analysis-section').style.display=ref?.ai_extracted?'':'none';if(ref?.ai_extracted)$('#ai-analysis-content').textContent=ref.ai_extracted;
+    $('#ai-analysis-section').style.display=ref?.ai_extracted?'':'none';if(ref?.ai_extracted)renderAIBlocks($('#ai-analysis-content'),ref.ai_extracted,'reflection');
     $('#voice-recorder').style.display='none';$('#reflection-content').style.display='';$$('.mode-btn').forEach(b=>b.classList.remove('active'));$('.mode-btn[data-mode="text"]').classList.add('active');
     $('#reflection-modal-overlay').classList.add('active');
 }
@@ -913,7 +1104,15 @@ $$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forE
 let mediaRec=null,audioChunks=[],recTimer=null,recSec=0;
 $('#record-btn').addEventListener('click',async()=>{const btn=$('#record-btn');if(mediaRec?.state==='recording'){mediaRec.stop();btn.classList.remove('recording');$('#record-label').textContent='处理中...';clearInterval(recTimer);return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});mediaRec=new MediaRecorder(stream);audioChunks=[];recSec=0;mediaRec.ondataavailable=e=>audioChunks.push(e.data);mediaRec.onstop=()=>{stream.getTracks().forEach(t=>t.stop());$('#voice-result').style.display='';$('#voice-result').textContent='录音完成';$('#reflection-content').value='（录音完成，请编辑）';$('#reflection-content').style.display='';$('#record-label').textContent='重新录音';};mediaRec.start();btn.classList.add('recording');$('#record-label').textContent='录音中...';recTimer=setInterval(()=>{recSec++;$('#record-timer').textContent=`${String(Math.floor(recSec/60)).padStart(2,'0')}:${String(recSec%60).padStart(2,'0')}`;},1000);}catch(e){toast('无法访问麦克风','error');}});
 $$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
-$('#reflection-ai-btn').addEventListener('click',async()=>{const c=$('#reflection-content').value.trim();if(!c||c.length<10){toast('请先输入内容','error');return;}$('#ai-analysis-section').style.display='';$('#ai-analysis-content').innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';$('#ai-analysis-content').textContent=await callAI(`求职面试教练。分析：1.考点 2.回答 3.改进\n\n${c}\n\n简洁中文。`);});
+$('#reflection-ai-btn').addEventListener('click',async()=>{
+    const c=$('#reflection-content').value.trim();
+    if(!c||c.length<10){toast('请先输入内容','error');return;}
+    $('#ai-analysis-section').style.display='';
+    $('#ai-analysis-content').innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';
+    const prompt=`你是求职面试教练。请基于下面这段复盘，输出 4 个小节，每个小节标题单独一行，然后换行写内容。不要使用星号、序号、Markdown、表格。每段最多两行，语言简洁但有参考价值。小节标题固定为：整体判断、亮点、短板、下一次怎么答。\n\n复盘内容：\n${c}`;
+    const result=await callAI(prompt,buildReflectionFallback(c));
+    renderAIBlocks($('#ai-analysis-content'),result.text,'reflection',result);
+});
 $('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const aiC=$('#ai-analysis-content').textContent,aiOk=aiC&&!aiC.includes('分析中');const d={app_id:aid,interview_round:round,input_type:'TEXT',raw_content:content,cleaned_content:content,ai_extracted:aiOk?aiC:null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
 $('#reflection-cancel').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 $('#reflection-modal-close').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
@@ -934,7 +1133,20 @@ function renderAnalytics(){
     $('#attribution-chart').innerHTML=re.length?re.map(([s,c])=>`<div class="attribution-item"><span class="attribution-label">${REJECTION_STAGES[s]||s}</span><div class="attribution-bar-wrap"><div class="attribution-bar" style="width:${Math.max(Math.round(c/mr*100),8)}%"></div></div><span class="attribution-count">${c}</span></div>`).join(''):'<div class="empty-state"><p>暂无归因</p></div>';
     doInsight(ap,cs,rs);
 }
-async function doInsight(ap,cs,rs){const el=$('#insight-content');if(ap.length<3){el.innerHTML='<div class="empty-state"><p>投递3条以上解锁</p></div>';return;}el.innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';const cS=Object.entries(cs).map(([c,v])=>`${c}:投${v.t}回${v.r}`).join(';'),rS=Object.entries(rs).map(([s,c])=>`${REJECTION_STAGES[s]||s}:${c}`).join(';');el.textContent=await callAI(`求职顾问。总投${ap.length}，类别:${cS||'无'}，归因:${rS||'无'}。3-5条简洁中文建议。`);}
+async function doInsight(ap,cs,rs){
+    const el=$('#insight-content');
+    if(ap.length<3){
+        el.innerHTML='<div class="empty-state"><p>投递3条以上解锁</p></div>';
+        return;
+    }
+    el.innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';
+    const cS=Object.entries(cs).map(([c,v])=>`${c}:投递${v.t}，推进${v.r}`).join('；');
+    const rS=Object.entries(rs).map(([s,c])=>`${REJECTION_STAGES[s]||s}:${c}`).join('；');
+    const active=ap.filter(a=>!['OFFER','REJECTED','WITHDRAWN'].includes(a.status)).sort((a,b)=>(getWait(b)||0)-(getWait(a)||0)).slice(0,3).map(a=>`${a.company_name}-${a.position_title}-${getWait(a)||0}天`).join('；');
+    const prompt=`你是一个专业的求职分析顾问。请根据用户当前投递数据，只输出 3 个小节。每个小节标题单独一行，然后换行写内容。不要使用星号、项目符号、序号、Markdown、表格。不要写空话，不要泛泛鼓励，也不要给出“催进度”“跟进 HR”这类运营动作。重点是分析，不是提醒。每个小节必须有明确结论、数据依据和可执行的优化方向。表达要正式、克制、具体，避免口语化表达。必须直接引用当前数据里的数字、类别或公司名。每个小节写 2 到 3 句，句子短，但判断要准确。小节标题固定为：整体概况、方向表现、优化建议。\n\n数据摘要：\n总投递 ${ap.length} 条。\n类别表现：${cS||'暂无'}。\n失败归因：${rS||'暂无'}。\n等待较久岗位：${active||'暂无'}。`;
+    const result=await callAI(prompt,buildAnalyticsFallback(ap,cs,rs));
+    renderAIBlocks(el,result.text,'insight',result);
+}
 
 // ---- 设置 ----
 document.getElementById('settings-btn')?.addEventListener('click',()=>{document.getElementById('profile-btn')?.click();});
