@@ -38,6 +38,10 @@ async function checkAuth(){
         try{
             const loadResult=await cloudStore.loadInto(store);
             console.log('[RT auth] cloudStore.loadInto(store) returned',loadResult);
+            var localNick=localStorage.getItem('rt_nickname')||'';
+            if(localNick&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
+                await store.setSetting('profileNickname',localNick);
+            }
             if(typeof syncIntlToggles==='function')syncIntlToggles();
             if(typeof initFilters==='function')initFilters();
             if(typeof updIntl==='function')updIntl();
@@ -58,8 +62,9 @@ function updateAvatar(){
     if(!rtSession)return;
     var av=document.getElementById('sidebar-avatar');
     if(av){
+        var nick=(typeof getProfileNickname==='function'&&getProfileNickname())||'';
         var email=rtSession.user&&rtSession.user.email||'';
-        av.textContent=email?email[0].toUpperCase():'👤';
+        av.textContent=nick?nick[0].toUpperCase():(email?email[0].toUpperCase():'👤');
     }
 }
 
@@ -179,10 +184,10 @@ if(pwdInput)pwdInput.addEventListener('keydown',function(e){
 function openProfileModal(){
     if(!rtSession)return;
     var u=rtSession.user||{};
-    var nick=localStorage.getItem('rt_nickname')||u.email&&u.email.split('@')[0]||'';
+    var nick=(store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||u.email&&u.email.split('@')[0]||'';
     document.getElementById('profile-nickname').value=nick;
     document.getElementById('profile-nickname-display').textContent=nick||'用户';
-    document.getElementById('profile-avatar-display').textContent=u.email?(u.email[0].toUpperCase()):'👤';
+    document.getElementById('profile-avatar-display').textContent=nick?(nick[0].toUpperCase()):(u.email?(u.email[0].toUpperCase()):'👤');
     document.getElementById('profile-login-method').textContent=u.email||'';
     var emailEl=document.getElementById('profile-email-display');
     if(emailEl)emailEl.textContent=u.email||'—';
@@ -204,8 +209,13 @@ if(profileBtn)profileBtn.addEventListener('click',openProfileModal);
 var profileSave=document.getElementById('profile-save');
 if(profileSave)profileSave.addEventListener('click',async function(){
     var nickname=document.getElementById('profile-nickname').value.trim();
+    if(typeof store!=='undefined'&&typeof store.setSetting==='function'){
+        var ok=await store.setSetting('profileNickname',nickname);
+        if(ok===false)return;
+    }
     localStorage.setItem('rt_nickname',nickname);
     document.getElementById('profile-nickname-display').textContent=nickname||'用户';
+    document.getElementById('profile-avatar-display').textContent=nickname?(nickname[0].toUpperCase()):((rtSession&&rtSession.user&&rtSession.user.email)?rtSession.user.email[0].toUpperCase():'👤');
     document.getElementById('profile-modal-overlay').classList.remove('active');
     updateAvatar();
     toast('已保存','success');

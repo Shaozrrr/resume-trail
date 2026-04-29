@@ -21,9 +21,27 @@ function rtDefaultUserData(){
     logs:[],
     categories:[],
     pain_points:(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]),
-    settings:{intlMode:false,weeklyGoal:10},
+    settings:{intlMode:false,weeklyGoal:10,profileNickname:''},
     table_cols:(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[])
   };
+}
+
+function rtStarterUserData(preservedSettings){
+  if(typeof window.rtCreateStarterData==='function'){
+    const starter=window.rtCreateStarterData(preservedSettings||{});
+    if(starter&&starter.settings){
+      starter.settings=Object.assign({},rtDefaultUserData().settings,starter.settings);
+    }
+    return starter;
+  }
+  const fallback=rtDefaultUserData();
+  fallback.settings=Object.assign({},fallback.settings,preservedSettings||{});
+  return fallback;
+}
+
+function rtNeedsStarterSeed(data){
+  if(typeof window.rtShouldSeedStarterData==='function')return !!window.rtShouldSeedStarterData(data);
+  return !data||(!data.apps?.length&&!data.categories?.length&&!data.refs?.length&&!data.logs?.length);
 }
 
 function rtFieldFallback(field){
@@ -381,14 +399,16 @@ const cloudStore={
   loaded:false,
 
   applyDataToStore(store,data){
-    store.apps=data.apps;
+    store.apps=Array.isArray(data.apps)?data.apps.map(function(app){
+      return typeof normalizeAppRecord==='function'?normalizeAppRecord(app):app;
+    }):[];
     store.resumes=data.resumes;
     store.refs=data.refs;
     store.logs=data.logs;
     store.categories=data.categories;
     store.painPoints=data.pain_points;
-    store.settings=Object.assign({intlMode:false,weeklyGoal:10},data.settings||{});
-    store.tableCols=data.table_cols;
+    store.settings=Object.assign({intlMode:false,weeklyGoal:10,profileNickname:''},data.settings||{});
+    store.tableCols=typeof normalizeTableColumns==='function'?normalizeTableColumns(data.table_cols):data.table_cols;
   },
 
   buildPayloadFromStore(store){
@@ -433,7 +453,14 @@ const cloudStore={
       }
 
       this.rowId=row&&row.id||null;
-      const decoded=sb.decodeUserDataRow(row);
+      let decoded=sb.decodeUserDataRow(row);
+      if(rtNeedsStarterSeed(decoded)){
+        const seededPayload=rtStarterUserData(decoded&&decoded.settings?{profileNickname:decoded.settings.profileNickname||''}:{});
+        const seededResult=await sb.persistUserData(this.rowId,seededPayload);
+        if(!seededResult.ok)throw new Error(seededResult.error||'初始化演示数据失败');
+        this.rowId=seededResult.data&&seededResult.data.id||this.rowId;
+        decoded=sb.decodeUserDataRow(seededResult.data);
+      }
       this.applyDataToStore(store,decoded);
       this.loaded=true;
       resultPayload={
@@ -497,32 +524,27 @@ const cloudStore={
     const uid=sb.getUserId();
     if(!uid)throw new Error('未登录，无法清空云端数据');
     console.log('[RT cloud] clearAllData start',{userId:uid,rowId:this.rowId});
+    const starter=rtStarterUserData(store&&store.settings?{profileNickname:store.settings.profileNickname||''}:{});
     const deleted=await sb.deleteUserDataRowsByUserId(uid);
     console.log('[RT cloud] clearAllData delete response',deleted);
-    if(!deleted.ok){
-      const defaults=rtDefaultUserData();
-      const payload={
-        apps:defaults.apps,
-        resumes:defaults.resumes,
-        refs:defaults.refs,
-        logs:defaults.logs,
-        categories:defaults.categories,
-        pain_points:defaults.pain_points,
-        settings:defaults.settings,
-        table_cols:defaults.table_cols
-      };
+    let finalRowResult=null;
+    if(deleted.ok){
+      finalRowResult=await sb.persistUserData(null,starter);
+      console.log('[RT cloud] clearAllData recreate response',finalRowResult);
+      if(!finalRowResult.ok)throw new Error(finalRowResult.error||'重建演示数据失败');
+    }else{
       const ensuredId=await this.ensureRow(store);
-      const resetResult=await sb.persistUserData(ensuredId,payload);
-      console.log('[RT cloud] clearAllData reset response',resetResult);
-      if(!resetResult.ok)throw new Error(resetResult.error||'清空云端数据失败');
+      finalRowResult=await sb.persistUserData(ensuredId,starter);
+      console.log('[RT cloud] clearAllData reset response',finalRowResult);
+      if(!finalRowResult.ok)throw new Error(finalRowResult.error||'清空云端数据失败');
     }
-    store.resetState();
-    this.rowId=null;
-    this.loaded=false;
+    this.rowId=finalRowResult.data&&finalRowResult.data.id||null;
+    this.applyDataToStore(store,starter);
+    this.loaded=true;
     if(window.rtDebug)window.rtDebug.update({
       lastSaveAt:new Date().toLocaleTimeString('zh-CN',{hour12:false}),
       saveResult:'success',
-      lastLoadAt:'-'
+      lastLoadAt:new Date().toLocaleTimeString('zh-CN',{hour12:false})
     });
     return true;
   }

@@ -75,8 +75,23 @@
                 <div class="table-toolbar">
                     <select id="table-group-by" class="filter-select"><option value="">不分组</option><option value="position_category">按类别</option><option value="status">按状态</option><option value="source_channel">按渠道</option></select>
                     <select id="table-filter-status" class="filter-select"><option value="">全部状态</option></select>
+                    <select id="table-filter-column" class="filter-select"><option value="">筛选列</option></select>
+                    <input type="text" id="table-filter-value" class="table-filter-input" placeholder="输入筛选值">
+                    <select id="table-sort-column" class="filter-select"><option value="">排序列</option></select>
+                    <button class="btn-ghost btn-sm" id="table-sort-direction" title="切换排序方向">↓</button>
                     <div style="flex:1"></div>
-                    <button class="btn-ghost btn-sm" id="table-edit-mode-btn">⚙ 编辑行列</button>
+                    <button class="btn-ghost btn-sm" id="table-edit-mode-btn">快捷编辑</button>
+                </div>
+                <div id="table-quick-edit-panel" class="table-quick-edit-panel">
+                    <div class="table-quick-edit-actions">
+                        <button class="btn-secondary btn-sm" id="table-quick-add-row">+ 新增一行</button>
+                        <div class="table-quick-add-col">
+                            <input type="text" id="table-quick-col-name" placeholder="新列名称">
+                            <button class="btn-secondary btn-sm" id="table-quick-add-col-btn">+ 新增列</button>
+                        </div>
+                        <button class="btn-danger btn-sm" id="table-quick-del-rows">删除选中行</button>
+                    </div>
+                    <div class="table-quick-edit-hint">开启后可直接点击单元格修改内容，自定义列支持在表头一键删除。</div>
                 </div>
                 <div class="table-container"><table id="applications-table"><thead><tr id="table-header"></tr></thead><tbody id="table-body"></tbody></table><div id="table-add-row" style="padding:8px 0;text-align:center;border-top:1px dashed var(--border);margin-top:4px;cursor:pointer;color:var(--text-muted);font-size:12px;transition:all .2s;border-radius:0 0 8px 8px" onmouseover="this.style.color='var(--text-secondary)';this.style.background='var(--accent-dim)'" onmouseout="this.style.color='var(--text-muted)';this.style.background='transparent'">+ 新增一行</div></div>
             </div>
@@ -121,11 +136,13 @@
                 <div class="form-group"><label>公司名称 <span class="required">*</span></label><input type="text" id="form-company" placeholder="输入公司名称..." autocomplete="off"><div class="autocomplete-list" id="company-autocomplete"></div></div>
                 <div class="form-row"><div class="form-group"><label>岗位名称 <span class="required">*</span></label><input type="text" id="form-position" placeholder="如：产品经理"></div><div class="form-group"><label>岗位类别 <span class="required">*</span></label><select id="form-category"><option value="">选择类别</option></select><div style="margin-top:4px"><button class="btn-ghost btn-sm" id="add-category-inline" type="button">+ 新类别</button></div></div></div>
                 <div class="form-row"><div class="form-group"><label>当前状态</label><select id="form-status"><option value="WATCHING">观望中</option><option value="APPLIED" selected>已投递</option><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="OFFER">Offer</option></select></div><div class="form-group"><label>投递日期</label><input type="date" id="form-date"></div></div>
-                <div class="form-row"><div class="form-group"><label>绑定简历</label><select id="form-resume"><option value="">不绑定</option></select></div><div class="form-group"><label>偏好度</label><select id="form-preference"><option value="1">⭐ 保底</option><option value="2">⭐⭐ 一般</option><option value="3" selected>⭐⭐⭐ 心仪</option><option value="4">⭐⭐⭐⭐ 梦想</option></select></div></div>
-                <div class="form-group intl-field" style="display:none"><label>工签要求</label><select id="form-visa"><option value="UNKNOWN">❓ 未知</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option></select></div>
-                <div class="form-row"><div class="form-group"><label>投递渠道</label><select id="form-channel"><option value="">未选择</option><option value="官网">官网</option><option value="Boss直聘">Boss直聘</option><option value="内推">内推</option><option value="猎头">猎头</option><option value="LinkedIn">LinkedIn</option><option value="牛客">牛客</option><option value="其他">其他</option></select></div><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div></div>
+                <div class="form-row"><div class="form-group"><label>Base 地</label><input type="text" id="form-base" placeholder="如：上海 / London"></div><div class="form-group"><label>绑定简历</label><select id="form-resume"><option value="">不绑定</option></select></div></div>
+                <div class="form-row"><div class="form-group"><label>偏好度</label><select id="form-preference"><option value="1">⭐ 保底</option><option value="2">⭐⭐ 一般</option><option value="3" selected>⭐⭐⭐ 心仪</option><option value="4">⭐⭐⭐⭐ 梦想</option></select></div><div class="form-group intl-field" style="display:none"><label>工签要求</label><select id="form-visa"><option value="UNKNOWN">❓ 未知</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option></select></div></div>
+                <div class="form-row"><div class="form-group"><label>投递渠道</label><input type="text" id="form-channel" list="channel-options" placeholder="如：官网"></div><div class="form-group"><label>渠道链接</label><input type="url" id="form-channel-link" placeholder="https://..."></div></div>
+                <datalist id="channel-options"><option value="官网"></option><option value="Boss直聘"></option><option value="内推"></option><option value="猎头"></option><option value="LinkedIn"></option><option value="牛客"></option><option value="其他"></option></datalist>
+                <div class="form-row"><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
                 <div class="form-group"><label>下一步行动</label><input type="text" id="form-next-action" placeholder="如：准备行为面试题"></div>
-                <div class="form-row"><div class="form-group"><label>下一步 DDL</label><input type="datetime-local" id="form-deadline"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
+                <div class="form-group"><label>下一步 DDL</label><input type="datetime-local" id="form-deadline"></div>
                 <div class="form-group"><label>JD 截图 <span style="font-weight:normal;color:var(--text-muted)">Ctrl+V 粘贴</span></label><div class="jd-paste-zone" id="jd-paste-zone" tabindex="0"><span class="jd-paste-hint" id="jd-paste-hint">点击后粘贴截图或拖拽图片</span></div></div>
                 <div class="form-group"><label>备注</label><textarea id="form-notes" rows="3" placeholder="其他备注..."></textarea></div>
                 <div id="custom-fields-area"></div>
@@ -216,11 +233,11 @@
                 <section class="account-section">
                     <div class="account-section-head">
                         <div class="account-section-title">账户资料</div>
-                        <div class="account-section-desc">昵称保存在当前设备，其余配置实时同步。</div>
+                        <div class="account-section-desc">昵称、偏好和标签都会跟随账号一起同步。</div>
                     </div>
                     <div class="account-grid">
-                        <div class="form-group account-field">
-                            <label>昵称</label>
+                        <div class="account-input-card account-field">
+                            <span class="account-input-label">昵称</span>
                             <input type="text" id="profile-nickname" placeholder="设置昵称">
                         </div>
                         <div class="account-readonly-field">
