@@ -151,7 +151,7 @@ radial-gradient(circle at bottom left,rgba(96,165,250,.08),transparent 34%)}
 .resumes-kicker{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--text-tertiary)}
 .resumes-subtitle{margin-top:6px;font-size:13px;color:var(--text-secondary);line-height:1.65;max-width:620px}
 .resumes-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.resumes-toolbar-left{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.resumes-toolbar-left{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;flex:0 0 auto}
 .resumes-stats{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .resume-stat-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.035);border:1px solid var(--border-light);font-size:12px;color:var(--text-secondary)}
 .resume-stat-pill strong{font-size:13px;color:var(--text-primary);font-weight:600}
@@ -580,6 +580,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
   .base-donut{width:104px;height:104px;flex-basis:104px}
   .modal.modal-profile{width:min(96vw,680px)}
   .resumes-header-main,.resumes-toolbar,.resumes-toolbar-left{flex-direction:column;align-items:stretch}
+  .resumes-toolbar-left{flex-wrap:wrap}
   .resumes-search{min-width:0}
   .resumes-grid{grid-auto-columns:min(calc(100vw - 36px),340px);padding:16px 18px 28px}
   .resume-card{width:min(calc(100vw - 36px),340px)}
