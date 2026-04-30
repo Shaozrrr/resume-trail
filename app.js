@@ -40,6 +40,12 @@ function cloneData(value){
     return JSON.parse(JSON.stringify(value));
 }
 
+function escapeHTML(value){
+    return String(value??'').replace(/[&<>"']/g,function(char){
+        return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]);
+    });
+}
+
 function normalizeTableColumns(cols){
     const source=Array.isArray(cols)?cloneData(cols):[];
     const systemMap=new Map();
@@ -198,15 +204,40 @@ class Store{
     }
     async addResume(r){
         return this.commit('resume.add',draft=>{
-            const resume=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:new Date().toISOString()});
+            const now=new Date().toISOString();
+            const maxOrder=draft.resumes.reduce(function(max,resume){
+                return Math.max(max,Number.isFinite(resume.sort_order)?resume.sort_order:-1);
+            },-1);
+            const resume=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:now,updated_at:now,sort_order:maxOrder+1});
             draft.resumes.push(resume);
             return resume;
+        });
+    }
+    async updateResume(id,patch){
+        return this.commit('resume.update',draft=>{
+            const idx=draft.resumes.findIndex(r=>r.id===id);
+            if(idx<0)return null;
+            draft.resumes[idx]=Object.assign({},draft.resumes[idx],cloneData(patch||{}),{updated_at:new Date().toISOString()});
+            return draft.resumes[idx];
         });
     }
     async delResume(id){
         return this.commit('resume.delete',draft=>{
             draft.resumes=draft.resumes.filter(r=>r.id!==id);
             draft.apps=draft.apps.map(app=>app.resume_id===id?Object.assign({},app,{resume_id:null,updated_at:new Date().toISOString()}):app);
+            return true;
+        });
+    }
+    async reorderResumes(ids){
+        return this.commit('resume.reorder',draft=>{
+            const orderMap=new Map(ids.map(function(id,index){return[id,index];}));
+            draft.resumes=draft.resumes.slice().sort(function(a,b){
+                const ai=orderMap.has(a.id)?orderMap.get(a.id):Number.MAX_SAFE_INTEGER;
+                const bi=orderMap.has(b.id)?orderMap.get(b.id):Number.MAX_SAFE_INTEGER;
+                return ai-bi;
+            }).map(function(resume,index){
+                return Object.assign({},resume,{sort_order:index});
+            });
             return true;
         });
     }
@@ -1079,33 +1110,504 @@ $('#drawer-close').addEventListener('click',()=>$('#drawer-overlay').classList.r
 $('#drawer-overlay').addEventListener('click',e=>{if(e.target===$('#drawer-overlay'))$('#drawer-overlay').classList.remove('active');});
 function refresh(){const q=$('#global-search').value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);else if(curView==='resumes')renderResumes();else if(curView==='reflections')renderRefs();else if(curView==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(curView==='analytics')renderAnalytics();}
 // ---- 简历 ----
+function renderResumeStats(){
+    const statsEl=$('#resumes-stats');
+    if(!statsEl)return;
+    const total=store.resumes.length;
+    statsEl.innerHTML=total?`<span class="resume-stat-pill"><strong>${total}</strong> 份简历</span>`:'';
+}
+
+const resumeRailState={dragging:false,startX:0,startScrollLeft:0,moved:false,justDragged:false};
+const resumeReorderState={active:false,draggingId:null,card:null,placeholder:null,grid:null,ghost:null,startX:0,startY:0,lastClientX:0,lastClientY:0,pointerOffsetX:0,pointerOffsetY:0,targetGhostX:0,targetGhostY:0,currentGhostX:0,currentGhostY:0,lastSwapTrackX:0,lastSwapAt:0,lastSwapDirection:0,swapStreak:0,ghostFrame:0,moved:false,autoScrollFrame:0,justReorderedUntil:0};
+
+function getOrderedResumes(){
+    return [...store.resumes].sort(function(a,b){
+        const aOrder=Number.isFinite(a.sort_order)?a.sort_order:store.resumes.indexOf(a);
+        const bOrder=Number.isFinite(b.sort_order)?b.sort_order:store.resumes.indexOf(b);
+        if(aOrder!==bOrder)return aOrder-bOrder;
+        return new Date(a.at||0)-new Date(b.at||0);
+    });
+}
+
+function clearResumeDropMarkers(){
+    $$('.resume-card, .resume-drop-slot').forEach(function(card){
+        card.classList.remove('drop-before','drop-after','is-placeholder');
+    });
+}
+
+function stopResumeGhostAnimation(){
+    if(!resumeReorderState.ghostFrame)return;
+    cancelAnimationFrame(resumeReorderState.ghostFrame);
+    resumeReorderState.ghostFrame=0;
+}
+
+function stopResumeAutoScroll(){
+    if(!resumeReorderState.autoScrollFrame)return;
+    cancelAnimationFrame(resumeReorderState.autoScrollFrame);
+    resumeReorderState.autoScrollFrame=0;
+}
+
+function tickResumeAutoScroll(){
+    const grid=resumeReorderState.grid||$('#resumes-grid');
+    if(!grid||!resumeReorderState.active){
+        stopResumeAutoScroll();
+        return;
+    }
+    const rect=grid.getBoundingClientRect();
+    const edge=104;
+    let delta=0;
+    if(resumeReorderState.lastClientX<rect.left+edge){
+        const ratio=(rect.left+edge-resumeReorderState.lastClientX)/edge;
+        delta=-(8+Math.round(Math.min(1,ratio)*12));
+    }else if(resumeReorderState.lastClientX>rect.right-edge){
+        const ratio=(resumeReorderState.lastClientX-(rect.right-edge))/edge;
+        delta=8+Math.round(Math.min(1,ratio)*12);
+    }
+    if(delta!==0){
+        grid.scrollLeft+=delta;
+        placeResumeCardByPointer(resumeReorderState.lastClientX);
+    }
+    resumeReorderState.autoScrollFrame=requestAnimationFrame(tickResumeAutoScroll);
+}
+
+function ensureResumeAutoScroll(){
+    if(resumeReorderState.autoScrollFrame)return;
+    resumeReorderState.autoScrollFrame=requestAnimationFrame(tickResumeAutoScroll);
+}
+
+function updateResumeDropMarkers(){
+    clearResumeDropMarkers();
+    const placeholder=resumeReorderState.placeholder;
+    if(!placeholder)return;
+    placeholder.classList.add('is-placeholder');
+    if(placeholder.previousElementSibling)placeholder.previousElementSibling.classList.add('drop-after');
+    else if(placeholder.nextElementSibling)placeholder.nextElementSibling.classList.add('drop-before');
+}
+
+function positionResumeGhost(){
+    const ghost=resumeReorderState.ghost;
+    if(!ghost)return;
+    const targetX=resumeReorderState.targetGhostX;
+    const targetY=resumeReorderState.targetGhostY;
+    const nextX=resumeReorderState.currentGhostX+(targetX-resumeReorderState.currentGhostX)*0.17;
+    const nextY=resumeReorderState.currentGhostY+(targetY-resumeReorderState.currentGhostY)*0.17;
+    resumeReorderState.currentGhostX=nextX;
+    resumeReorderState.currentGhostY=nextY;
+    const vx=targetX-nextX;
+    const tilt=Math.max(-1.4,Math.min(1.4,vx*.02));
+    ghost.style.transform=`translate3d(${nextX}px,${nextY}px,0) scale(1.016) rotate(${tilt}deg)`;
+    if(Math.abs(targetX-nextX)>0.4||Math.abs(targetY-nextY)>0.4){
+        resumeReorderState.ghostFrame=requestAnimationFrame(positionResumeGhost);
+    }else{
+        resumeReorderState.currentGhostX=targetX;
+        resumeReorderState.currentGhostY=targetY;
+        ghost.style.transform=`translate3d(${targetX}px,${targetY}px,0) scale(1.016) rotate(0deg)`;
+        resumeReorderState.ghostFrame=0;
+    }
+}
+
+function setResumeGhostTarget(clientX,clientY){
+    resumeReorderState.targetGhostX=clientX-resumeReorderState.pointerOffsetX;
+    resumeReorderState.targetGhostY=clientY-resumeReorderState.pointerOffsetY;
+    if(!resumeReorderState.ghostFrame)resumeReorderState.ghostFrame=requestAnimationFrame(positionResumeGhost);
+}
+
+function animateResumeRailReflow(grid,mutate){
+    const cards=[...grid.querySelectorAll('.resume-card')];
+    const firstRects=new Map(cards.map(function(card){return[card.dataset.resumeId,card.getBoundingClientRect()];}));
+    mutate();
+    const nextCards=[...grid.querySelectorAll('.resume-card')];
+    nextCards.forEach(function(card){
+        const first=firstRects.get(card.dataset.resumeId);
+        if(!first)return;
+        const last=card.getBoundingClientRect();
+        const dx=first.left-last.left;
+        const dy=first.top-last.top;
+        if(Math.abs(dx)<1&&Math.abs(dy)<1)return;
+        card.style.transition='none';
+        card.style.transform=`translate3d(${dx}px,${dy}px,0)`;
+        card.getBoundingClientRect();
+        requestAnimationFrame(function(){
+            card.style.transition='transform 420ms cubic-bezier(.18,.88,.24,1)';
+            card.style.transform='';
+            const cleanup=function(){
+                card.style.transition='';
+                card.removeEventListener('transitionend',cleanup);
+            };
+            card.addEventListener('transitionend',cleanup);
+        });
+    });
+}
+
+function placeResumeCardByPointer(clientX){
+    const grid=resumeReorderState.grid;
+    const placeholder=resumeReorderState.placeholder;
+    if(!grid||!placeholder)return;
+    const placeholderRect=placeholder.getBoundingClientRect();
+    const ghostLeft=clientX-resumeReorderState.pointerOffsetX;
+    const ghostCenter=ghostLeft+placeholderRect.width/2;
+    const pointerTrackX=clientX+grid.scrollLeft;
+    const now=Date.now();
+    const swapCooldown=now-resumeReorderState.lastSwapAt;
+    const swapTravel=pointerTrackX-resumeReorderState.lastSwapTrackX;
+    const direction=swapTravel===0?0:(swapTravel>0?1:-1);
+    const continuingSameDirection=direction!==0&&direction===resumeReorderState.lastSwapDirection;
+    const streak=continuingSameDirection?resumeReorderState.swapStreak:0;
+    const previous=placeholder.previousElementSibling;
+    const next=placeholder.nextElementSibling;
+    if(previous){
+        const prevRect=previous.getBoundingClientRect();
+        const prevThreshold=prevRect.left+prevRect.width*(0.44-(Math.min(streak,3)*0.03));
+        const minSwapTravel=34+(continuingSameDirection?streak*22:0);
+        if(ghostCenter<prevThreshold&&swapTravel<-minSwapTravel&&swapCooldown>(continuingSameDirection?105:72)){
+            animateResumeRailReflow(grid,function(){
+                grid.insertBefore(placeholder,previous);
+                updateResumeDropMarkers();
+            });
+            resumeReorderState.lastSwapTrackX=pointerTrackX;
+            resumeReorderState.lastSwapAt=now;
+            resumeReorderState.lastSwapDirection=-1;
+            resumeReorderState.swapStreak=continuingSameDirection?streak+1:1;
+            return;
+        }
+    }
+    if(next){
+        const nextRect=next.getBoundingClientRect();
+        const nextThreshold=nextRect.left+nextRect.width*(0.485+(Math.min(streak,3)*0.08));
+        const minSwapTravel=8+(continuingSameDirection?streak*42:0);
+        if(ghostCenter>nextThreshold&&swapTravel>minSwapTravel&&swapCooldown>(continuingSameDirection?142:38)){
+            animateResumeRailReflow(grid,function(){
+                grid.insertBefore(placeholder,next.nextElementSibling);
+                updateResumeDropMarkers();
+            });
+            resumeReorderState.lastSwapTrackX=pointerTrackX;
+            resumeReorderState.lastSwapAt=now;
+            resumeReorderState.lastSwapDirection=1;
+            resumeReorderState.swapStreak=continuingSameDirection?streak+1:1;
+            return;
+        }
+    }
+    if(direction!==resumeReorderState.lastSwapDirection&&Math.abs(swapTravel)>14){
+        resumeReorderState.swapStreak=0;
+    }
+    updateResumeDropMarkers();
+}
+
+function beginResumeReorder(card,id,e){
+    const grid=$('#resumes-grid');
+    if(!grid||resumeReorderState.active)return;
+    const rect=card.getBoundingClientRect();
+    const ghost=card.cloneNode(true);
+    const placeholder=document.createElement('div');
+    ghost.classList.add('resume-drag-ghost');
+    ghost.style.width=`${rect.width}px`;
+    ghost.style.height=`${rect.height}px`;
+    placeholder.className='resume-card resume-drop-slot';
+    placeholder.dataset.resumeId=id;
+    placeholder.style.width=`${rect.width}px`;
+    placeholder.style.height=`${rect.height}px`;
+    placeholder.setAttribute('aria-hidden','true');
+    card.replaceWith(placeholder);
+    document.body.appendChild(ghost);
+    resumeRailState.dragging=false;
+    grid.classList.remove('is-dragging');
+    resumeReorderState.active=true;
+    resumeReorderState.draggingId=id;
+    resumeReorderState.card=card;
+    resumeReorderState.placeholder=placeholder;
+    resumeReorderState.grid=grid;
+    resumeReorderState.ghost=ghost;
+    resumeReorderState.startX=e.clientX;
+    resumeReorderState.startY=e.clientY;
+    resumeReorderState.lastClientX=e.clientX;
+    resumeReorderState.lastClientY=e.clientY;
+    resumeReorderState.pointerOffsetX=e.clientX-rect.left;
+    resumeReorderState.pointerOffsetY=e.clientY-rect.top;
+    resumeReorderState.targetGhostX=rect.left;
+    resumeReorderState.targetGhostY=rect.top;
+    resumeReorderState.currentGhostX=rect.left;
+    resumeReorderState.currentGhostY=rect.top;
+    resumeReorderState.lastSwapTrackX=e.clientX+grid.scrollLeft;
+    resumeReorderState.lastSwapAt=Date.now();
+    resumeReorderState.lastSwapDirection=0;
+    resumeReorderState.swapStreak=0;
+    resumeReorderState.moved=false;
+    grid.classList.add('is-reordering');
+    document.body.style.userSelect='none';
+    ghost.style.transform=`translate3d(${rect.left}px,${rect.top}px,0) scale(1.016) rotate(0deg)`;
+    setResumeGhostTarget(e.clientX,e.clientY);
+    updateResumeDropMarkers();
+    ensureResumeAutoScroll();
+    document.addEventListener('pointermove',onResumeReorderMove);
+    document.addEventListener('pointerup',onResumeReorderEnd);
+    document.addEventListener('pointercancel',onResumeReorderEnd);
+}
+
+function onResumeReorderMove(e){
+    if(!resumeReorderState.active)return;
+    e.preventDefault();
+    resumeReorderState.lastClientX=e.clientX;
+    resumeReorderState.lastClientY=e.clientY;
+    if(Math.abs(e.clientX-resumeReorderState.startX)>1)resumeReorderState.moved=true;
+    setResumeGhostTarget(e.clientX,e.clientY);
+    placeResumeCardByPointer(e.clientX);
+}
+
+async function onResumeReorderEnd(){
+    if(!resumeReorderState.active)return;
+    document.removeEventListener('pointermove',onResumeReorderMove);
+    document.removeEventListener('pointerup',onResumeReorderEnd);
+    document.removeEventListener('pointercancel',onResumeReorderEnd);
+    stopResumeAutoScroll();
+    stopResumeGhostAnimation();
+    const grid=resumeReorderState.grid;
+    const card=resumeReorderState.card;
+    const placeholder=resumeReorderState.placeholder;
+    const ghost=resumeReorderState.ghost;
+    const moved=resumeReorderState.moved;
+    const ids=grid?[...grid.children].map(function(cardEl){return cardEl.dataset.resumeId;}):[];
+    const targetRect=placeholder?placeholder.getBoundingClientRect():null;
+    clearResumeDropMarkers();
+    grid?.classList.remove('is-reordering');
+    document.body.style.userSelect='';
+    if(ghost&&targetRect){
+        ghost.style.transition='transform 320ms cubic-bezier(.16,1,.3,1),opacity 280ms ease,filter 280ms ease';
+        ghost.style.transform=`translate3d(${targetRect.left}px,${targetRect.top}px,0) scale(.995) rotate(0deg)`;
+        ghost.style.opacity='0';
+        ghost.style.filter='saturate(1.02) blur(.2px)';
+    }
+    if(placeholder&&card)placeholder.replaceWith(card);
+    resumeReorderState.active=false;
+    resumeReorderState.draggingId=null;
+    resumeReorderState.card=null;
+    resumeReorderState.placeholder=null;
+    resumeReorderState.grid=null;
+    resumeReorderState.ghost=null;
+    resumeReorderState.targetGhostX=0;
+    resumeReorderState.targetGhostY=0;
+    resumeReorderState.currentGhostX=0;
+    resumeReorderState.currentGhostY=0;
+    resumeReorderState.lastSwapTrackX=0;
+    resumeReorderState.lastSwapAt=0;
+    resumeReorderState.lastSwapDirection=0;
+    resumeReorderState.swapStreak=0;
+    resumeReorderState.justReorderedUntil=Date.now()+180;
+    setTimeout(function(){ghost?.remove();},320);
+    if(moved&&ids.length){
+        const ok=await store.reorderResumes(ids);
+        if(ok!==false){
+            toast('顺序已更新','success');
+            return;
+        }
+    }
+    renderResumes();
+}
+
+function bindResumeRailDrag(){
+    const grid=$('#resumes-grid');
+    if(!grid||grid.dataset.dragBound==='1')return;
+    grid.dataset.dragBound='1';
+    grid.addEventListener('pointerdown',function(e){
+        if(e.pointerType==='mouse'&&e.button!==0)return;
+        if(!store.resumes.length)return;
+        if(resumeReorderState.active)return;
+        if(e.target.closest('.resume-drag-handle, .resume-action-btn, .resume-inline-edit, button, input, textarea, select, a'))return;
+        resumeRailState.dragging=true;
+        resumeRailState.moved=false;
+        resumeRailState.startX=e.clientX;
+        resumeRailState.startScrollLeft=grid.scrollLeft;
+        grid.classList.add('is-dragging');
+        grid.setPointerCapture?.(e.pointerId);
+    });
+    grid.addEventListener('pointermove',function(e){
+        if(!resumeRailState.dragging)return;
+        const dx=e.clientX-resumeRailState.startX;
+        if(Math.abs(dx)>6)resumeRailState.moved=true;
+        grid.scrollLeft=resumeRailState.startScrollLeft-dx;
+    });
+    function stopDrag(e){
+        if(!resumeRailState.dragging)return;
+        resumeRailState.dragging=false;
+        grid.classList.remove('is-dragging');
+        grid.releasePointerCapture?.(e.pointerId);
+        if(resumeRailState.moved){
+            resumeRailState.justDragged=true;
+            setTimeout(function(){resumeRailState.justDragged=false;},80);
+        }
+    }
+    grid.addEventListener('pointerup',stopDrag);
+    grid.addEventListener('pointercancel',stopDrag);
+    grid.addEventListener('pointerleave',function(e){
+        if(e.pointerType==='mouse')stopDrag(e);
+    });
+    grid.addEventListener('click',function(e){
+        if(!resumeRailState.justDragged)return;
+        e.preventDefault();
+        e.stopPropagation();
+    },true);
+}
+
+function parseResumeTags(value){
+    return String(value||'').split(/[，,]/).map(function(tag){return tag.trim();}).filter(Boolean);
+}
+
+async function withButtonBusy(button,task,busyText){
+    if(!button)return await task();
+    if(button.dataset.busy==='1')return false;
+    const originalText=button.textContent;
+    button.dataset.busy='1';
+    button.disabled=true;
+    button.classList.add('is-busy');
+    if(busyText)button.textContent=busyText;
+    try{
+        return await task();
+    }finally{
+        button.dataset.busy='0';
+        button.disabled=false;
+        button.classList.remove('is-busy');
+        button.textContent=originalText;
+    }
+}
+
+function resetResumeUploadZone(){
+    const zone=$('#upload-zone');
+    zone.dataset.mode='create';
+    zone.querySelector('p').textContent='拖拽或点击选择';
+    zone.querySelector('.upload-hint').textContent='PDF/DOCX ≤ 10MB';
+}
+
+function resetResumeModal(){
+    $('#resume-modal-title').textContent='上传简历';
+    $('#resume-save').textContent='保存简历';
+    $('#resume-name').value='';
+    $('#resume-tags').value='';
+    $('#resume-notes').value='';
+    $('#resume-file-input').value='';
+    selFile=null;
+    editingResumeId=null;
+    resetResumeUploadZone();
+}
+
+function openResumeCreateModal(){
+    resetResumeModal();
+    $('#resume-modal-overlay').classList.add('active');
+}
+
+function openResumeEditModal(id){
+    const resume=store.getResume(id);
+    if(!resume)return;
+    resetResumeModal();
+    editingResumeId=id;
+    $('#resume-modal-title').textContent='编辑简历资料';
+    $('#resume-save').textContent='更新资料';
+    $('#resume-name').value=resume.file_name||'';
+    $('#resume-tags').value=(resume.tags||[]).join(', ');
+    $('#resume-notes').value=resume.notes||'';
+    const zone=$('#upload-zone');
+    zone.dataset.mode='edit';
+    zone.querySelector('p').textContent=resume.orig?`当前文件：${resume.orig}`:'可选：补充文件';
+    zone.querySelector('.upload-hint').textContent='可重新上传以替换原文件，标签和备注可直接修改';
+    $('#resume-modal-overlay').classList.add('active');
+}
+
 function renderResumes(){
     const g=$('#resumes-grid');
+    bindResumeRailDrag();
+    renderResumeStats();
+    const query=($('#resume-search')?.value||'').toLowerCase().trim();
     if(!store.resumes.length){g.innerHTML='<div class="empty-state"><p>还没有简历</p><span>上传第一份简历吧</span></div>';return;}
+    const resumes=getOrderedResumes().filter(function(r){
+        if(!query)return true;
+        const haystack=[r.file_name,r.orig,r.notes,(r.tags||[]).join(' ')].join(' ').toLowerCase();
+        return haystack.includes(query);
+    });
+    if(!resumes.length){g.innerHTML='<div class="empty-state"><p>没有匹配结果</p><span>试试换个关键词，或者补充更清晰的标签和备注</span></div>';return;}
     g.innerHTML='';
-    store.resumes.forEach(r=>{
+    resumes.forEach(r=>{
         const linked=store.apps.filter(a=>a.resume_id===r.id);
         const c=document.createElement('div');c.className='resume-card';
         const gradients=['linear-gradient(135deg,rgba(96,165,250,.15),rgba(167,139,250,.1))','linear-gradient(135deg,rgba(74,222,128,.12),rgba(96,165,250,.1))','linear-gradient(135deg,rgba(251,146,60,.12),rgba(248,113,113,.08))','linear-gradient(135deg,rgba(167,139,250,.15),rgba(244,114,182,.1))'];
         const gi=store.resumes.indexOf(r)%gradients.length;
-        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-name">${r.file_name}</div><div class="resume-card-meta">${fmtDT(r.at)} · ${r.file_type||'PDF'}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div>${linked.length?`<div class="resume-card-linked">关联 <span>${linked.length}</span> 条投递：${linked.slice(0,3).map(a=>a.company_name+' '+a.position_title).join('、')}${linked.length>3?'...':''}</div>`:`<div class="resume-card-linked" style="color:var(--text-muted)">未关联投递</div>`}${r.tags?.length?`<div class="resume-card-tags">${r.tags.map(t=>`<span class="resume-tag">${t}</span>`).join('')}</div>`:''}<div class="resume-card-actions">${r.data_url?`<button class="resume-action-btn preview-btn">👁 预览</button>`:''}<button class="resume-action-btn link-btn">🔗 关联岗位</button><button class="resume-action-btn del-btn" style="flex:0;padding:7px 12px;color:var(--red)">🗑</button></div></div>`;
-        c.querySelector('.preview-btn')?.addEventListener('click',e=>{e.stopPropagation();if(r.data_url)window.open(r.data_url,'_blank');else toast('无预览数据，请重新上传','error');});
-        c.querySelector('.link-btn').addEventListener('click',e=>{e.stopPropagation();openResumeLinkModal(r.id);});
-        c.querySelector('.del-btn').addEventListener('click',async e=>{e.stopPropagation();if(confirm('删除简历「'+r.file_name+'」？')){const ok=await store.delResume(r.id);if(ok===false)return;renderResumes();toast('已删除','info');}});
+        const tagHTML=(r.tags||[]).length?`<div class="resume-card-tags">${r.tags.map(t=>`<span class="resume-tag">${escapeHTML(t)}</span>`).join('')}</div>`:'';
+        const noteHTML=(r.notes||'').trim()?`<div class="resume-card-note">${escapeHTML(r.notes)}</div>`:'<div class="resume-card-note is-empty">还没有备注，适合补充岗位方向、版本重点和使用建议。</div>';
+        const linkedText=linked.length?`${linked.length} 条已关联`:'未关联投递';
+        const linkedList=linked.length?`<div class="resume-linked-scroller">${linked.map(function(a){
+            return `<div class="resume-linked-item"><div class="resume-linked-company">${escapeHTML(a.company_name)}</div><div class="resume-linked-role">${escapeHTML(a.position_title)}</div></div>`;
+        }).join('')}</div>`:'<div class="resume-linked-empty">建议补上适用岗位，后面回看会轻松很多。</div>';
+        c.dataset.resumeId=r.id;
+        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-card-banner-top"><span class="resume-file-chip">${escapeHTML(r.file_type||'文件')}</span><span class="resume-linked-chip">${linkedText}</span></div><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-head"><div><div class="resume-card-name">${escapeHTML(r.file_name)}</div><div class="resume-card-meta">${fmtDT(r.updated_at||r.at)}${r.updated_at&&r.updated_at!==r.at?' 更新':''}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div></div><div class="resume-card-controls"><button class="resume-drag-handle" type="button" title="拖动排序"><span>⋮⋮</span><em>拖动排序</em></button><button class="resume-inline-edit" type="button">编辑资料</button></div></div>${tagHTML}${noteHTML}<div class="resume-card-linked"><div class="resume-linked-head"><span>适用记录</span>${linked.length?`<em>横向滑动查看全部</em>`:''}</div>${linkedList}</div><div class="resume-card-actions">${r.data_url?`<button class="resume-action-btn preview-btn">预览</button>`:''}<button class="resume-action-btn link-btn">关联岗位</button><button class="resume-action-btn edit-btn">修改标签备注</button><button class="resume-action-btn del-btn resume-action-danger">删除</button></div></div>`;
+        c.addEventListener('click',()=>{if(Date.now()<resumeReorderState.justReorderedUntil)return;openResumeEditModal(r.id);});
+        c.querySelector('.resume-drag-handle').addEventListener('pointerdown',function(e){
+            e.preventDefault();
+            e.stopPropagation();
+            beginResumeReorder(c,r.id,e);
+        });
+        c.querySelector('.preview-btn')?.addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>{if(r.data_url)window.open(r.data_url,'_blank');else toast('无预览数据，请重新上传','error');});});
+        c.querySelector('.link-btn').addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>openResumeLinkModal(r.id));});
+        c.querySelector('.resume-inline-edit').addEventListener('click',e=>{e.stopPropagation();openResumeEditModal(r.id);});
+        c.querySelector('.edit-btn').addEventListener('click',e=>{e.stopPropagation();openResumeEditModal(r.id);});
+        c.querySelector('.del-btn').addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>{if(confirm('删除简历「'+r.file_name+'」？')){const ok=await store.delResume(r.id);if(ok===false)return;renderResumes();toast('已删除','info');}},'删除中...');});
         g.appendChild(c);
     });
 }
-$('#upload-resume-btn').addEventListener('click',()=>{$('#resume-name').value='';$('#resume-tags').value='';$('#resume-file-input').value='';$('#resume-modal-overlay').classList.add('active');});
+$('#upload-resume-btn').addEventListener('click',openResumeCreateModal);
+$('#resume-search')?.addEventListener('input',renderResumes);
 $('#upload-zone').addEventListener('click',()=>$('#resume-file-input').click());
 $('#upload-zone').addEventListener('dragover',e=>{e.preventDefault();e.currentTarget.classList.add('dragover');});
 $('#upload-zone').addEventListener('dragleave',e=>e.currentTarget.classList.remove('dragover'));
 $('#upload-zone').addEventListener('drop',e=>{e.preventDefault();e.currentTarget.classList.remove('dragover');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);});
 let selFile=null;
+let editingResumeId=null;
 $('#resume-file-input').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0]);});
-function handleFile(f){if(f.size>10485760){toast('超过10MB','error');return;}if(!f.name.match(/\.(pdf|docx)$/i)){toast('仅PDF/DOCX','error');return;}selFile=f;$('#resume-name').value=f.name.replace(/\.(pdf|docx)$/i,'');$('#upload-zone').querySelector('p').textContent=`已选: ${f.name}`;}
-$('#resume-save').addEventListener('click',async ()=>{const n=$('#resume-name').value.trim();if(!n){toast('请输入名称','error');return;}const tags=$('#resume-tags').value.split(',').map(t=>t.trim()).filter(Boolean);const rd={file_name:n,orig:selFile?.name||n,file_type:selFile?.name?.endsWith('.pdf')?'PDF':'DOCX',size:selFile?.size||0,tags,data_url:null};if(selFile){const reader=new FileReader();reader.onload=async e=>{rd.data_url=e.target.result;const ok=await store.addResume(rd);if(!ok){toast('保存失败，请重试','error');return;}toast('已上传','success');$('#resume-modal-overlay').classList.remove('active');selFile=null;renderResumes();};reader.readAsDataURL(selFile);}else{const ok=await store.addResume(rd);if(!ok){toast('保存失败，请重试','error');return;}toast('已保存','success');$('#resume-modal-overlay').classList.remove('active');renderResumes();}});
-$('#resume-cancel').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');selFile=null;});
-$('#resume-modal-close').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');selFile=null;});
+function handleFile(f){
+    if(f.size>10485760){toast('超过10MB','error');return;}
+    if(!f.name.match(/\.(pdf|docx)$/i)){toast('仅PDF/DOCX','error');return;}
+    selFile=f;
+    if(!editingResumeId||!$('#resume-name').value.trim())$('#resume-name').value=f.name.replace(/\.(pdf|docx)$/i,'');
+    $('#upload-zone').querySelector('p').textContent=`已选: ${f.name}`;
+    $('#upload-zone').querySelector('.upload-hint').textContent=editingResumeId?'松手后会替换原文件，标签和备注会保留':'文件已就绪，可以继续补充标签和备注';
+}
+async function persistResumeDraft(payload){
+    if(editingResumeId){
+        const ok=await store.updateResume(editingResumeId,payload);
+        if(!ok){toast('更新失败，请重试','error');return false;}
+        toast('已更新','success');
+    }else{
+        const ok=await store.addResume(payload);
+        if(!ok){toast('保存失败，请重试','error');return false;}
+        toast(selFile?'已上传':'已保存','success');
+    }
+    $('#resume-modal-overlay').classList.remove('active');
+    resetResumeModal();
+    renderResumes();
+    return true;
+}
+$('#resume-save').addEventListener('click',async e=>{await withButtonBusy(e.currentTarget,async ()=>{
+    const n=$('#resume-name').value.trim();
+    if(!n){toast('请输入名称','error');return;}
+    if(!editingResumeId&&!selFile){toast('请先选择简历文件','error');return;}
+    const tags=parseResumeTags($('#resume-tags').value);
+    const notes=$('#resume-notes').value.trim();
+    const current=editingResumeId?store.getResume(editingResumeId):null;
+    const basePayload={file_name:n,tags,notes};
+    if(selFile){
+        const payload=Object.assign({},basePayload,{orig:selFile.name,file_type:selFile.name.toLowerCase().endsWith('.pdf')?'PDF':'DOCX',size:selFile.size,data_url:null});
+        const reader=new FileReader();
+        reader.onload=async e=>{
+            payload.data_url=e.target.result;
+            await persistResumeDraft(payload);
+        };
+        reader.readAsDataURL(selFile);
+        return;
+    }
+    if(editingResumeId&&current){
+        await persistResumeDraft(basePayload);
+        return;
+    }
+    await persistResumeDraft(Object.assign({},basePayload,{orig:n,file_type:'文件',size:0,data_url:null}));
+},editingResumeId?'更新中...':'保存中...');});
+$('#resume-cancel').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');resetResumeModal();});
+$('#resume-modal-close').addEventListener('click',()=>{$('#resume-modal-overlay').classList.remove('active');resetResumeModal();});
 
 // ---- 复盘 ----
 let editRefId=null;
@@ -1329,12 +1831,12 @@ function openResumeLinkModal(resumeId){
     document.body.insertAdjacentHTML('beforeend',html);
     $('#resume-link-close').addEventListener('click',()=>$('#resume-link-overlay').remove());
     $('#resume-link-overlay').addEventListener('click',e=>{if(e.target===$('#resume-link-overlay'))$('#resume-link-overlay').remove();});
-    $('#resume-link-save').addEventListener('click',async ()=>{
+    $('#resume-link-save').addEventListener('click',async e=>{await withButtonBusy(e.currentTarget,async ()=>{
         const selected=[];$$('.rl-check:checked').forEach(c=>selected.push(c.dataset.id));
         const ok=await store.linkResumeToApps(resumeId,selected);
         if(ok===false)return;
         $('#resume-link-overlay').remove();renderResumes();toast('关联已更新','success');
-    });
+    },'保存中...');});
 }
 function initFilters(){const cs=$('#filter-category');cs.innerHTML='<option value="">全部类别</option>';store.categories.forEach(c=>{cs.innerHTML+=`<option value="${c}">${c}</option>`;});const ss=$('#table-filter-status');const prev=ss.value;ss.innerHTML='<option value="">全部状态</option>';STATUSES.filter(s=>s.key!=='REJECTED').forEach(s=>{ss.innerHTML+=`<option value="${s.key}">${s.label}</option>`;});ss.value=STATUSES.some(s=>s.key===prev&&s.key!=='REJECTED')?prev:'';renderTableControlOptions();}
 function daysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().split('T')[0];}

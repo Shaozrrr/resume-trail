@@ -97,7 +97,22 @@
                 <div class="table-container"><table id="applications-table"><thead><tr id="table-header"></tr></thead><tbody id="table-body"></tbody></table><div id="table-add-row" style="padding:8px 0;text-align:center;border-top:1px dashed var(--border);margin-top:4px;cursor:pointer;color:var(--text-muted);font-size:12px;transition:all .2s;border-radius:0 0 8px 8px" onmouseover="this.style.color='var(--text-secondary)';this.style.background='var(--accent-dim)'" onmouseout="this.style.color='var(--text-muted)';this.style.background='transparent'">+ 新增一行</div></div>
             </div>
             <div id="view-resumes" class="view">
-                <div class="resumes-header"><button id="upload-resume-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>上传简历</button></div>
+                <div class="resumes-header">
+                    <div class="resumes-header-main">
+                        <div class="resumes-lead">
+                            <div class="resumes-kicker">版本管理</div>
+                            <div class="resumes-subtitle">给不同方向的简历补充标签、备注和适用投递，后面回看会轻松很多。</div>
+                        </div>
+                        <button id="upload-resume-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>上传简历</button>
+                    </div>
+                    <div class="resumes-toolbar">
+                        <div class="resumes-stats" id="resumes-stats"></div>
+                        <label class="resumes-search">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                            <input type="search" id="resume-search" placeholder="搜索名称、标签或备注">
+                        </label>
+                    </div>
+                </div>
                 <div class="resumes-grid" id="resumes-grid"></div>
             </div>
             <div id="view-reflections" class="view">
@@ -189,13 +204,14 @@
     <!-- 简历上传弹窗 -->
     <div class="modal-overlay" id="resume-modal-overlay">
         <div class="modal modal-sm">
-            <div class="modal-header"><h2>上传简历</h2><button class="modal-close" id="resume-modal-close">&times;</button></div>
+            <div class="modal-header"><h2 id="resume-modal-title">上传简历</h2><button class="modal-close" id="resume-modal-close">&times;</button></div>
             <div class="modal-body">
                 <div class="upload-zone" id="upload-zone"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg><p>拖拽或点击选择</p><span class="upload-hint">PDF/DOCX ≤ 10MB</span><input type="file" id="resume-file-input" accept=".pdf,.docx" style="display:none"></div>
                 <div class="form-group" style="margin-top:16px"><label>简历名称</label><input type="text" id="resume-name" placeholder="如：产品经理_v2"></div>
                 <div class="form-group"><label>标签</label><input type="text" id="resume-tags" placeholder="逗号分隔，如：中文,产品方向"></div>
+                <div class="form-group"><label>备注</label><textarea id="resume-notes" rows="4" placeholder="这版简历适合哪些岗位、突出哪些经历、投递时要注意什么"></textarea></div>
             </div>
-            <div class="modal-footer"><button class="btn-secondary" id="resume-cancel">取消</button><button class="btn-primary" id="resume-save">保存</button></div>
+            <div class="modal-footer"><button class="btn-secondary" id="resume-cancel">取消</button><button class="btn-primary" id="resume-save">保存简历</button></div>
         </div>
     </div>
 
