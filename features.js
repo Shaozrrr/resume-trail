@@ -15,19 +15,25 @@ window.sortKanbanCards=function(cards){
 
 // ---- 日历视图 ----
 let calDate=new Date(),calView='month';
+function toDateKey(date){
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
 function renderCalendar(){
     const grid=$('#calendar-grid'),title=$('#cal-title');if(!grid||!title)return;
     const y=calDate.getFullYear(),m=calDate.getMonth();
     if(calView==='month'){
         title.textContent=`${y}年${m+1}月`;
-        const first=new Date(y,m,1),last=new Date(y,m+1,0),startDay=first.getDay();
+        const first=new Date(y,m,1),startDay=first.getDay();
+        const monthStart=new Date(y,m,1-startDay);
         let html='<div class="cal-header"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="cal-days">';
-        for(let i=0;i<startDay;i++)html+='<div class="cal-day empty"></div>';
-        for(let d=1;d<=last.getDate();d++){
-            const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const today=new Date().toISOString().split('T')[0]===ds;
+        for(let i=0;i<42;i++){
+            const current=new Date(monthStart);
+            current.setDate(monthStart.getDate()+i);
+            const ds=toDateKey(current);
+            const today=toDateKey(new Date())===ds;
+            const adjacent=current.getMonth()!==m;
             const evts=getEventsForDate(ds);
-            html+=`<div class="cal-day ${today?'today':''}" data-date="${ds}"><span class="cal-day-num">${d}</span>${evts.map(e=>`<div class="cal-event" style="background:${e.color}" title="${e.company} · ${e.position}">${e.company.slice(0,4)} ${e.label}</div>`).join('')}</div>`;
+            html+=`<div class="cal-day ${today?'today':''} ${adjacent?'adjacent':''}" data-date="${ds}"><span class="cal-day-num">${current.getDate()}</span>${evts.map(e=>`<div class="cal-event" style="background:${e.color}" title="${e.company} · ${e.position}">${e.company.slice(0,4)} ${e.label}</div>`).join('')}</div>`;
         }
         html+='</div>';grid.innerHTML=html;
     }else{
@@ -37,8 +43,8 @@ function renderCalendar(){
         const dayN=['日','一','二','三','四','五','六'];
         let html='<div class="cal-week">';
         for(let i=0;i<7;i++){
-            const d=new Date(ws.getTime()+i*864e5),ds=d.toISOString().split('T')[0];
-            const today=new Date().toISOString().split('T')[0]===ds;
+            const d=new Date(ws.getTime()+i*864e5),ds=toDateKey(d);
+            const today=toDateKey(new Date())===ds;
             const evts=getEventsForDate(ds);
             html+=`<div class="cal-week-day ${today?'today':''}"><div class="cal-week-header"><span>${dayN[i]}</span><span class="cal-day-num">${d.getDate()}</span></div>${evts.map(e=>`<div class="cal-event-lg" style="border-left:3px solid ${e.color}"><div style="font-weight:500;font-size:12px">${e.company}</div><div style="font-size:10px;color:var(--text-muted)">${e.position} · ${e.label}</div></div>`).join('')}</div>`;
         }
@@ -57,7 +63,7 @@ function getEventsForDate(ds){
 }
 function renderUpcoming(){
     const list=$('#cal-upcoming-list');if(!list||typeof store==='undefined')return;
-    const today=new Date().toISOString().split('T')[0];const up=[];
+    const today=toDateKey(new Date());const up=[];
     store.apps.forEach(a=>{
         if(a.timeline)a.timeline.forEach(t=>{if(t.date&&t.date>=today&&t.name!=='已投递')up.push({date:t.date,text:`${a.company_name} · ${a.position_title} · ${t.name}`});});
         if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd>=today)up.push({date:dd,text:`${a.company_name} · ${a.next_action||'DDL'}`});}
@@ -75,7 +81,7 @@ function checkNotif(){
     if(!('Notification' in window)||typeof store==='undefined')return;
     if(Notification.permission==='default')Notification.requestPermission();
     if(Notification.permission!=='granted')return;
-    const today=new Date().toISOString().split('T')[0],tmr=new Date(Date.now()+864e5).toISOString().split('T')[0];
+    const today=toDateKey(new Date()),tmr=toDateKey(new Date(Date.now()+864e5));
     store.apps.forEach(a=>{if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd===today||dd===tmr){const k='n_'+a.id+'_'+dd;if(!localStorage.getItem(k)){new Notification('履迹 · 提醒',{body:`${a.company_name} · ${a.next_action||'DDL'}${dd===today?' 今天到期！':' 明天到期！'}`});localStorage.setItem(k,'1');}}}});
 }
 setTimeout(checkNotif,2000);

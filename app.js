@@ -530,7 +530,7 @@ function renderAIBlocks(el,text,variant,meta){
         if(meta.mode){
             const badge=document.createElement('span');
             badge.className=`ai-rich-badge ${meta.mode==='fallback'?'fallback':'online'}`;
-            badge.textContent=meta.label||(meta.mode==='fallback'?'本地策略洞察':'实时分析');
+            badge.textContent=meta.label||(meta.mode==='fallback'?'内置数据分析':'云端分析');
             metaRow.appendChild(badge);
         }
         const note=document.createElement('span');
@@ -600,9 +600,9 @@ async function callAI(prompt,fallbackText){
             console.warn('[RT AI] OpenRouter fetch error',{model:model.id,error:e});
         }
     }
-    if(lastFailure&&lastFailure.error)return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:'网络请求失败，已切换为本地策略洞察。'};
-    if(lastFailure)return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:getAILocationHint(lastFailure.status,lastFailure.data)};
-    return{text:sanitizeAIText(fallbackText||'暂时没有可用的 AI 结果。'),mode:'fallback',label:'本地策略洞察',badge:'云端分析暂时不可用，已切换为本地策略洞察。'};
+    if(lastFailure&&lastFailure.error)return{text:sanitizeAIText(fallbackText||'暂时没有可用的分析结果。'),mode:'fallback',label:'内置数据分析',badge:'网络请求失败，已切换为内置数据分析。'};
+    if(lastFailure)return{text:sanitizeAIText(fallbackText||'暂时没有可用的分析结果。'),mode:'fallback',label:'内置数据分析',badge:getAILocationHint(lastFailure.status,lastFailure.data)};
+    return{text:sanitizeAIText(fallbackText||'暂时没有可用的分析结果。'),mode:'fallback',label:'内置数据分析',badge:'云端分析暂时不可用，已切换为内置数据分析。'};
 }
 let curView='pipeline',curTab='info';
 let tableQuickEdit=false;
@@ -717,25 +717,26 @@ function switchView(v){
 $$('.nav-item[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 $('#global-search').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);});
 syncIntlToggles();
-$('#toggle-intl-mode').addEventListener('change',async e=>{
-    const ok=await store.setSetting('intlMode',e.target.checked);
+async function setIntlMode(enabled){
+    const ok=await store.setSetting('intlMode',!!enabled);
     if(ok===false){
-        e.target.checked=!e.target.checked;
-        return;
+        syncIntlToggles();
+        return false;
     }
     syncIntlToggles();
     updIntl();
     refresh();
+    return true;
+}
+$('#toggle-intl-mode').addEventListener('change',async e=>{
+    const ok=await setIntlMode(e.target.checked);
+    if(ok===false){
+        return;
+    }
 });
 document.getElementById('profile-toggle-intl-mode')?.addEventListener('change',async e=>{
-    const ok=await store.setSetting('intlMode',e.target.checked);
-    if(ok===false){
-        e.target.checked=!e.target.checked;
-        return;
-    }
-    syncIntlToggles();
-    updIntl();
-    refresh();
+    const ok=await setIntlMode(e.target.checked);
+    if(ok===false)return;
 });
 function updIntl(){const s=store.settings.intlMode;$$('.intl-field').forEach(el=>el.style.display=s?'':'none');$('#filter-visa').style.display=s?'':'none';}
 updIntl();
@@ -1134,7 +1135,18 @@ function renderRefs(){
     });
 }
 $('#new-reflection-btn').addEventListener('click',()=>openRefModal(null));
+let currentReflectionMode='text';
 function renderPPTags(sel=[]){const el=$('#pain-points-selector');el.innerHTML='';store.painPoints.forEach(p=>{const lb=document.createElement('label');lb.className='tag-check';lb.innerHTML=`<input type="checkbox" value="${p}" ${sel.includes(p)?'checked':''}><span>${p}</span>`;el.appendChild(lb);});}
+function resetVoiceUI(){
+    const btn=$('#record-btn');
+    if(btn)btn.classList.remove('recording');
+    if($('#record-label'))$('#record-label').textContent='点击开始转写';
+    if($('#record-timer'))$('#record-timer').textContent='00:00';
+    if($('#voice-result')){
+        $('#voice-result').style.display='none';
+        $('#voice-result').textContent='';
+    }
+}
 function openRefModal(refId=null,preAppId=null){
     editRefId=refId;const ref=refId?store.refs.find(r=>r.id===refId):null;
     $('#reflection-modal-title').textContent=ref?'编辑复盘':'新建复盘';
@@ -1143,28 +1155,92 @@ function openRefModal(refId=null,preAppId=null){
     $('#reflection-round').value=ref?.interview_round||'ROUND_1';$('#reflection-content').value=ref?.raw_content||'';
     renderPPTags(ref?.pain_points||[]);
     $$('.star-rating .star').forEach(s=>s.classList.toggle('active',parseInt(s.dataset.val)<=(ref?.self_rating||0)));
-    $('#ai-analysis-section').style.display=ref?.ai_extracted?'':'none';if(ref?.ai_extracted)renderAIBlocks($('#ai-analysis-content'),ref.ai_extracted,'reflection');
+    currentReflectionMode='text';
+    if(voiceRecognition)voiceRecognition.stop();
+    clearInterval(recTimer);recSec=0;voiceTranscriptFinal='';
+    resetVoiceUI();
     $('#voice-recorder').style.display='none';$('#reflection-content').style.display='';$$('.mode-btn').forEach(b=>b.classList.remove('active'));$('.mode-btn[data-mode="text"]').classList.add('active');
     $('#reflection-modal-overlay').classList.add('active');
 }
 $('#add-pain-point-btn').addEventListener('click',async ()=>{const inp=$('#new-pain-point-input'),v=inp.value.trim();if(!v)return;const added=await store.addPP(v);if(!added)return;inp.value='';const cur=[];$$('#pain-points-selector input:checked').forEach(i=>cur.push(i.value));cur.push(v);renderPPTags(cur);});
 $('#new-pain-point-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#add-pain-point-btn').click();}});
-$$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#reflection-content').style.display=b.dataset.mode==='text'?'':'none';$('#voice-recorder').style.display=b.dataset.mode==='voice'?'':'none';});});
-let mediaRec=null,audioChunks=[],recTimer=null,recSec=0;
-$('#record-btn').addEventListener('click',async()=>{const btn=$('#record-btn');if(mediaRec?.state==='recording'){mediaRec.stop();btn.classList.remove('recording');$('#record-label').textContent='处理中...';clearInterval(recTimer);return;}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});mediaRec=new MediaRecorder(stream);audioChunks=[];recSec=0;mediaRec.ondataavailable=e=>audioChunks.push(e.data);mediaRec.onstop=()=>{stream.getTracks().forEach(t=>t.stop());$('#voice-result').style.display='';$('#voice-result').textContent='录音完成';$('#reflection-content').value='（录音完成，请编辑）';$('#reflection-content').style.display='';$('#record-label').textContent='重新录音';};mediaRec.start();btn.classList.add('recording');$('#record-label').textContent='录音中...';recTimer=setInterval(()=>{recSec++;$('#record-timer').textContent=`${String(Math.floor(recSec/60)).padStart(2,'0')}:${String(recSec%60).padStart(2,'0')}`;},1000);}catch(e){toast('无法访问麦克风','error');}});
-$$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
-$('#reflection-ai-btn').addEventListener('click',async()=>{
-    const c=$('#reflection-content').value.trim();
-    if(!c||c.length<10){toast('请先输入内容','error');return;}
-    $('#ai-analysis-section').style.display='';
-    $('#ai-analysis-content').innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';
-    const prompt=`你是求职面试教练。请基于下面这段复盘，输出 4 个小节，每个小节标题单独一行，然后换行写内容。不要使用星号、序号、Markdown、表格。每段最多两行，语言简洁但有参考价值。小节标题固定为：整体判断、亮点、短板、下一次怎么答。\n\n复盘内容：\n${c}`;
-    const result=await callAI(prompt,buildReflectionFallback(c));
-    renderAIBlocks($('#ai-analysis-content'),result.text,'reflection',result);
+$$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentReflectionMode=b.dataset.mode||'text';$('#reflection-content').style.display=currentReflectionMode==='text'?'':'none';$('#voice-recorder').style.display=currentReflectionMode==='voice'?'':'none';if(currentReflectionMode!=='voice'&&voiceRecognition)voiceRecognition.stop();});});
+let recTimer=null,recSec=0,voiceRecognition=null,voiceTranscriptFinal='',voiceRecognitionActive=false;
+const SpeechRecognitionCtor=window.SpeechRecognition||window.webkitSpeechRecognition||null;
+if(SpeechRecognitionCtor){
+    voiceRecognition=new SpeechRecognitionCtor();
+    voiceRecognition.lang='zh-CN';
+    voiceRecognition.continuous=true;
+    voiceRecognition.interimResults=true;
+    voiceRecognition.onresult=function(event){
+        let interim='';
+        for(let i=event.resultIndex;i<event.results.length;i++){
+            const transcript=(event.results[i][0]&&event.results[i][0].transcript)||'';
+            if(event.results[i].isFinal)voiceTranscriptFinal+=transcript;
+            else interim+=transcript;
+        }
+        const combined=(voiceTranscriptFinal+interim).trim();
+        $('#reflection-content').value=combined;
+        $('#voice-result').style.display=combined?'':'none';
+        $('#voice-result').innerHTML=combined?`<div class="voice-result-label">实时转写</div><div>${combined.replace(/\n/g,'<br>')}</div>`:'';
+    };
+    voiceRecognition.onend=function(){
+        voiceRecognitionActive=false;
+        clearInterval(recTimer);
+        recTimer=null;
+        const btn=$('#record-btn');
+        if(btn)btn.classList.remove('recording');
+        $('#record-label').textContent=voiceTranscriptFinal.trim()?'重新转写':'点击开始转写';
+        if($('#voice-result').textContent.trim()){
+            $('#voice-result').style.display='';
+            if(!$('#voice-result').querySelector('.voice-result-label'))$('#voice-result').innerHTML=`<div class="voice-result-label">转写完成</div><div>${($('#reflection-content').value||'').replace(/\n/g,'<br>')}</div>`;
+        }
+    };
+    voiceRecognition.onerror=function(event){
+        voiceRecognitionActive=false;
+        clearInterval(recTimer);
+        recTimer=null;
+        const btn=$('#record-btn');
+        if(btn)btn.classList.remove('recording');
+        $('#record-label').textContent='点击开始转写';
+        if(event&&event.error!=='no-speech')toast('语音转文字暂时不可用，请改用文本输入','error');
+    };
+}
+$('#record-btn').addEventListener('click',async()=>{
+    const btn=$('#record-btn');
+    if(!voiceRecognition){
+        toast('当前浏览器不支持语音转文字，请改用文本输入','error');
+        return;
+    }
+    if(voiceRecognitionActive){
+        $('#record-label').textContent='整理中...';
+        voiceRecognition.stop();
+        return;
+    }
+    try{
+        voiceTranscriptFinal='';
+        $('#reflection-content').value='';
+        $('#voice-result').style.display='none';
+        $('#voice-result').textContent='';
+        recSec=0;
+        $('#record-timer').textContent='00:00';
+        voiceRecognition.start();
+        voiceRecognitionActive=true;
+        btn.classList.add('recording');
+        $('#record-label').textContent='正在转写...';
+        recTimer=setInterval(()=>{recSec++;$('#record-timer').textContent=`${String(Math.floor(recSec/60)).padStart(2,'0')}:${String(recSec%60).padStart(2,'0')}`;},1000);
+    }catch(e){
+        voiceRecognitionActive=false;
+        btn.classList.remove('recording');
+        clearInterval(recTimer);
+        recTimer=null;
+        toast('无法启动语音转文字，请检查麦克风权限','error');
+    }
 });
-$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const aiC=$('#ai-analysis-content').textContent,aiOk=aiC&&!aiC.includes('分析中');const d={app_id:aid,interview_round:round,input_type:'TEXT',raw_content:content,cleaned_content:content,ai_extracted:aiOk?aiC:null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
-$('#reflection-cancel').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
-$('#reflection-modal-close').addEventListener('click',()=>{$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
+$$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
+$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const d={app_id:aid,interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',raw_content:content,cleaned_content:content,ai_extracted:null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
+$('#reflection-cancel').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
+$('#reflection-modal-close').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 
 // ---- 数据大屏 ----
 function renderAnalytics(){
@@ -1202,14 +1278,7 @@ async function doInsight(ap,cs,rs){
         el.innerHTML='<div class="empty-state"><p>投递3条以上解锁</p></div>';
         return;
     }
-    el.innerHTML='<div class="insight-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div><span>分析中...</span></div>';
-    const cS=Object.entries(cs).map(([c,v])=>`${c}:投递${v.t}，推进${v.r}`).join('；');
-    const sourceStats={};ap.forEach(a=>{const c=a.source_channel||'未填写';if(!sourceStats[c])sourceStats[c]={total:0,progress:0};sourceStats[c].total++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))sourceStats[c].progress++;});
-    const sS=Object.entries(sourceStats).map(([c,v])=>`${c}:投递${v.total}，推进${v.progress}`).join('；');
-    const rS=Object.entries(rs).map(([s,c])=>`${REJECTION_STAGES[s]||s}:${c}`).join('；');
-    const active=ap.filter(a=>!['OFFER','REJECTED','WITHDRAWN'].includes(a.status)).sort((a,b)=>(getWait(b)||0)-(getWait(a)||0)).slice(0,3).map(a=>`${a.company_name}-${a.position_title}-${getWait(a)||0}天`).join('；');
-    const prompt=`你是一个专业的求职分析顾问。请根据用户当前投递数据，只输出 2 个小节。每个小节标题单独一行，然后换行写内容。不要使用星号、项目符号、序号、Markdown、表格。不要写空话，不要泛泛鼓励，也不要给出“催进度”“跟进 HR”这类执行提醒。重点是分析，不是提醒。表达要正式、克制、具体，避免口语化表达。必须直接引用当前数据里的数字、类别、渠道或公司名。每个小节写 2 到 3 句，句子短，但判断要准确。第一节必须把整体盘面、主要推进岗位、紧跟其后的主要推进渠道、主要失分点写在一起。第二节只写更专业的策略建议。小节标题固定为：整体概况、优化建议。\n\n数据摘要：\n总投递 ${ap.length} 条。\n类别表现：${cS||'暂无'}。\n渠道表现：${sS||'暂无'}。\n失败归因：${rS||'暂无'}。\n等待较久岗位：${active||'暂无'}。`;
-    const result=await callAI(prompt,buildAnalyticsFallback(ap,cs,rs));
+    const result={text:buildAnalyticsFallback(ap,cs,rs),mode:'fallback',label:'内置数据分析',badge:'基于当前投递、推进、失分和渠道数据自动生成。'};
     renderAIBlocks(el,result.text,'insight',result);
 }
 

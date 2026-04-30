@@ -123,7 +123,7 @@
                     <div class="stat-cards" id="stat-cards"></div>
                     <div class="chart-card" style="padding:14px 18px" id="goal-card"><h3 style="font-size:12px;font-weight:600;color:var(--text-tertiary);margin-bottom:8px">本周投递目标</h3><div id="goal-body"></div></div>
                     <div class="chart-row"><div class="chart-card"><h3>全链路漏斗</h3><div class="chart-body" id="funnel-chart"></div></div><div class="chart-card"><h3>岗位类别转化率</h3><div class="chart-body" id="category-chart"></div></div></div>
-                    <div class="chart-row chart-row-insight"><div class="chart-card chart-card-stack"><h3>归因图谱</h3><div class="chart-body" id="attribution-chart"></div><div class="analytics-mini-grid"><section class="mini-chart-card"><h4>Base 地分布</h4><div id="base-chart"></div></section><section class="mini-chart-card"><h4>渠道表现</h4><div id="source-chart"></div></section></div></div><div class="chart-card chart-card-insight"><h3>AI 洞察</h3><div class="chart-body" id="insight-content"></div></div></div>
+                    <div class="chart-row chart-row-insight"><div class="chart-card chart-card-stack"><h3>归因图谱</h3><div class="chart-body" id="attribution-chart"></div><div class="analytics-mini-grid"><section class="mini-chart-card"><h4>Base 地分布</h4><div id="base-chart"></div></section><section class="mini-chart-card"><h4>渠道表现</h4><div id="source-chart"></div></section></div></div><div class="chart-card chart-card-insight"><h3>数据解读</h3><div class="chart-body" id="insight-content"></div></div></div>
                 </div>
             </div>
         </main>
@@ -178,12 +178,11 @@
             <div class="modal-header"><h2 id="reflection-modal-title">新建复盘</h2><button class="modal-close" id="reflection-modal-close">&times;</button></div>
             <div class="modal-body">
                 <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option></select></div></div>
-                <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始录音</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
+                <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
                 <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
                 <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
-                <div id="ai-analysis-section" style="display:none"><div class="ai-badge">✨ AI 分析</div><div id="ai-analysis-content" class="ai-analysis-content"></div></div>
             </div>
-            <div class="modal-footer"><button class="btn-ghost" id="reflection-ai-btn">✨ AI 分析</button><button class="btn-secondary" id="reflection-cancel">取消</button><button class="btn-primary" id="reflection-save">保存</button></div>
+            <div class="modal-footer"><button class="btn-secondary" id="reflection-cancel">取消</button><button class="btn-primary" id="reflection-save">保存</button></div>
         </div>
     </div>
 
@@ -263,14 +262,14 @@
                             <span class="account-inline-help">用于数据看板的节奏追踪</span>
                             <input type="number" id="settings-weekly-goal" value="10" min="1" max="100">
                         </label>
-                        <label class="account-inline-setting account-inline-toggle">
+                        <div class="account-inline-setting account-inline-toggle">
                             <span class="account-inline-label">留学生模式</span>
                             <span class="account-inline-help">显示工签相关字段与筛选</span>
-                            <span class="account-toggle-wrap">
-                                <input type="checkbox" id="profile-toggle-intl-mode">
+                            <input type="checkbox" id="profile-toggle-intl-mode">
+                            <label class="account-toggle-wrap" for="profile-toggle-intl-mode" aria-label="切换留学生模式">
                                 <span class="toggle-slider"></span>
-                            </span>
-                        </label>
+                            </label>
+                        </div>
                     </div>
                 </section>
 

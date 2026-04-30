@@ -332,6 +332,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .record-btn.recording .record-icon{animation:pulse 1s infinite}
 .record-timer{font-size:22px;font-weight:300;color:var(--text-muted);text-align:center;margin-top:10px;font-variant-numeric:tabular-nums}
 .voice-result{margin-top:10px;padding:10px;background:var(--bg-tertiary);border-radius:var(--radius-sm);font-size:13px;color:var(--text-secondary);line-height:1.6}
+.voice-result-label{font-size:10px;color:var(--text-muted);letter-spacing:.3px;margin-bottom:6px}
 .tag-selector{display:flex;flex-wrap:wrap;gap:5px}
 .tag-check{display:flex;align-items:center;gap:4px;padding:4px 11px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:11px;color:var(--text-secondary);transition:all .2s var(--ease)}
 .tag-check:hover{border-color:var(--text-tertiary)}
@@ -418,9 +419,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .cal-header{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--text-muted);padding-bottom:8px;border-bottom:1px solid var(--border-light)}
 .cal-days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-top:4px}
 .cal-day{min-height:80px;padding:4px 6px;border-radius:6px;transition:background .2s;cursor:default;border:1px solid transparent}
-.cal-day:hover:not(.empty){background:var(--accent-dim)}
+.cal-day:hover{background:var(--accent-dim)}
 .cal-day.today{border-color:var(--text-tertiary);background:var(--accent-dim)}
-.cal-day.empty{opacity:0}
+.cal-day.adjacent{opacity:.48}
+.cal-day.adjacent .cal-day-num{color:var(--text-muted)}
 .cal-day-num{font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:2px}
 .cal-day.today .cal-day-num{color:var(--text-primary);font-weight:700}
 .cal-event{font-size:9px;padding:1px 4px;border-radius:3px;color:#fff;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -472,8 +474,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .account-inline-help{font-size:11px;color:var(--text-muted);line-height:1.5}
 .account-inline-setting input[type="number"]{width:88px;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);font-size:16px;font-weight:600;text-align:center;font-family:var(--font);outline:none;margin-top:auto}
 .account-inline-toggle{justify-content:space-between}
-.account-toggle-wrap{display:flex;align-items:center;gap:8px;margin-top:auto}
-.account-toggle-wrap input{display:none}
+.account-inline-toggle input{display:none}
+.account-toggle-wrap{display:inline-flex;align-items:center;gap:8px;margin-top:auto;cursor:pointer}
+.account-inline-toggle input:checked + .account-toggle-wrap .toggle-slider{background:var(--green)}
+.account-inline-toggle input:checked + .account-toggle-wrap .toggle-slider::after{transform:translateX(14px);background:#fff}
 .account-label-lg{font-size:13px!important;font-weight:500!important;color:var(--text-primary)!important;margin-bottom:8px!important}
 .account-section-danger .account-section-title{color:#f4f4f5}
 .account-data-actions{display:flex;gap:10px;align-items:center}
