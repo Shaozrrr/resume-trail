@@ -1062,19 +1062,26 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     border-radius:14px;
   }
   .resumes-grid{
-    display:flex;
-    flex-direction:column;
-    align-items:stretch;
-    gap:12px;
-    padding:14px 14px calc(24px + env(safe-area-inset-bottom));
-    overflow-x:visible;
+    display:grid;
+    grid-auto-flow:column;
+    grid-auto-columns:min(calc(100vw - 42px),334px);
+    grid-template-rows:1fr;
+    justify-content:start;
+    align-items:start;
+    gap:14px;
+    padding:14px 14px calc(28px + env(safe-area-inset-bottom));
+    overflow-x:auto;
     overflow-y:visible;
-    cursor:default;
-    scroll-snap-type:none;
+    cursor:grab;
+    scroll-snap-type:x mandatory;
+    scroll-padding-inline:14px;
+    min-height:max-content;
+    -webkit-overflow-scrolling:touch;
   }
   .resume-card{
-    width:100%;
-    max-width:none;
+    width:min(calc(100vw - 42px),334px);
+    max-width:min(calc(100vw - 42px),334px);
+    min-height:0;
   }
   .resume-card-banner{
     height:70px;
@@ -1095,32 +1102,37 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     gap:8px;
     flex-wrap:wrap;
   }
+  .resume-drag-handle,
+  .resume-inline-edit{
+    flex:1 1 calc(50% - 4px);
+    justify-content:center;
+    min-width:0;
+  }
   .resume-card-name{
     font-size:16px;
   }
   .resume-card-note{
     min-height:0;
-    -webkit-line-clamp:3;
+    -webkit-line-clamp:2;
   }
   .resume-card-linked{
-    overflow:visible;
+    overflow:hidden;
   }
   .resume-linked-scroller{
-    padding:2px 0 2px;
-    -webkit-mask-image:none;
-    mask-image:none;
+    padding:2px 2px 4px;
   }
   .resume-linked-item{
-    flex:0 0 min(216px,68vw);
+    flex:0 0 min(188px,56vw);
   }
   .resume-card-actions{
     grid-template-columns:repeat(2,minmax(0,1fr));
     gap:8px;
-    margin-top:4px;
+    margin-top:2px;
   }
   .resume-action-btn{
-    min-height:42px;
+    min-height:40px;
     font-size:12px;
+    padding:8px 8px;
   }
   .reflections-header{
     padding:14px;
