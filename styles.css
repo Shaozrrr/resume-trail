@@ -1191,6 +1191,9 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     display:flex;
     flex-direction:column;
   }
+  .chart-row-insight>.chart-card{
+    min-height:0;
+  }
   .chart-row-insight>.chart-card-stack{
     order:1;
   }
@@ -1200,6 +1203,7 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .chart-card{
     padding:14px 13px;
     border-radius:16px;
+    box-shadow:0 14px 26px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.03);
   }
   .chart-card h3{
     font-size:13px;
@@ -1207,14 +1211,21 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     margin-bottom:12px;
     letter-spacing:0;
   }
+  .chart-body{
+    min-height:0;
+  }
   .chart-card-stack{
     display:flex;
     flex-direction:column;
     gap:12px;
+    height:auto;
   }
   .chart-card-stack>#attribution-chart{
     padding-top:0;
     min-height:0;
+  }
+  .chart-card-insight{
+    height:auto;
   }
   .chart-card-insight .chart-body{
     padding-top:0;
@@ -1237,10 +1248,15 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     color:var(--text-primary);
     margin-bottom:10px;
   }
+  .mini-chart-card>div{
+    flex:0 0 auto;
+    min-height:0;
+  }
   .base-chart-wrap{
     flex-direction:column;
     align-items:center;
     gap:14px;
+    height:auto;
   }
   .base-donut{
     width:96px;
@@ -1265,6 +1281,11 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .chart-legend{
     width:100%;
     gap:7px;
+  }
+  .source-chart-list{
+    justify-content:flex-start;
+    height:auto;
+    gap:0;
   }
   .source-chart-row{
     grid-template-columns:minmax(0,1fr);
@@ -1340,6 +1361,14 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .category-bar-wrap,
   .attribution-bar-wrap{
     width:100%;
+  }
+  #funnel-chart,
+  #category-chart,
+  #attribution-chart,
+  #base-chart,
+  #source-chart,
+  #insight-content{
+    min-height:0;
   }
   .ai-rich-meta,
   .ai-rich-note{
