@@ -34,6 +34,8 @@ const DEFAULT_PP=['表达不清','知识盲区','紧张','准备不足','Case分
 const COLORS=['#60a5fa','#a78bfa','#4ade80','#fb923c','#f87171','#fbbf24','#34d399','#f472b6','#818cf8','#a3e635'];
 const DEFAULT_COLS=[{id:'company_name',label:'公司',show:true,system:true},{id:'position_title',label:'岗位',show:true,system:true},{id:'position_category',label:'类别',show:true,system:true},{id:'base_location',label:'Base地',show:true,system:true},{id:'status',label:'状态',show:true,system:true},{id:'applied_date',label:'投递日期',show:true,system:true},{id:'waiting',label:'等待',show:true,system:true},{id:'preference_level',label:'偏好',show:true,system:true},{id:'source_channel',label:'渠道',show:true,system:true},{id:'jd',label:'JD',show:true,system:true},{id:'actions',label:'操作',show:true,system:true}];
 const AI_CFG={openrouter:{url:'https://openrouter.ai/api/v1/chat/completions',key:'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',models:[{id:'qwen/qwen3-next-80b-a3b-instruct:free',label:'Qwen3 Next 免费版'},{id:'qwen/qwen3-coder:free',label:'Qwen3 Coder 免费版'}]}};
+const RT_GUEST_MODE_KEY='rt_guest_mode';
+const RT_GUEST_DATA_KEY='rt_guest_data';
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -89,6 +91,52 @@ function getDefaultSettings(){
     return {intlMode:false,weeklyGoal:legacy,profileNickname:'',profileAvatar:''};
 }
 
+window.rtGuestStore={
+    isEnabled:function(){
+        return localStorage.getItem(RT_GUEST_MODE_KEY)==='1';
+    },
+    enable:function(){
+        localStorage.setItem(RT_GUEST_MODE_KEY,'1');
+    },
+    disable:function(){
+        localStorage.removeItem(RT_GUEST_MODE_KEY);
+    },
+    load:function(){
+        try{
+            const raw=localStorage.getItem(RT_GUEST_DATA_KEY);
+            return raw?JSON.parse(raw):null;
+        }catch(err){
+            console.warn('[RT guest] load failed',err);
+            return null;
+        }
+    },
+    save:function(store){
+        const payload={
+            apps:cloneData(store.apps),
+            resumes:cloneData(store.resumes),
+            refs:cloneData(store.refs),
+            logs:cloneData(store.logs),
+            settings:cloneData(store.settings),
+            categories:cloneData(store.categories),
+            pain_points:cloneData(store.painPoints),
+            table_cols:cloneData(store.tableCols)
+        };
+        localStorage.setItem(RT_GUEST_DATA_KEY,JSON.stringify(payload));
+        return true;
+    },
+    clear:function(){
+        localStorage.removeItem(RT_GUEST_DATA_KEY);
+    },
+    ensureData:function(){
+        let data=this.load();
+        if(!data||window.rtShouldSeedStarterData&&window.rtShouldSeedStarterData(data)){
+            data=window.rtCreateStarterData?window.rtCreateStarterData({profileNickname:localStorage.getItem('rt_nickname')||'',profileAvatar:''}):null;
+            if(data)localStorage.setItem(RT_GUEST_DATA_KEY,JSON.stringify(data));
+        }
+        return data;
+    }
+};
+
 class Store{
     constructor(){
         this.resetState();
@@ -126,6 +174,16 @@ class Store{
         this.tableCols=snapshot.tableCols;
     }
     async save(reason){
+        if(window.rtGuestStore&&window.rtGuestStore.isEnabled()){
+            try{
+                window.rtGuestStore.save(this);
+                return true;
+            }catch(err){
+                console.error('[RT guest] save failed',reason,err);
+                if(typeof toast==='function')toast('本地保存失败，请重试','error');
+                return false;
+            }
+        }
         if(typeof cloudStore!=='undefined'){
             try{
                 await cloudStore.saveFrom(this,reason||'store.save');
@@ -341,6 +399,22 @@ class Store{
         });
     }
     async clearAllData(){
+        if(window.rtGuestStore&&window.rtGuestStore.isEnabled()){
+            this.resetState();
+            const starter=window.rtGuestStore.ensureData();
+            if(starter){
+                this.apps=(starter.apps||[]).map(normalizeAppRecord);
+                this.resumes=cloneData(starter.resumes||[]);
+                this.refs=cloneData(starter.refs||[]);
+                this.logs=cloneData(starter.logs||[]);
+                this.settings=Object.assign(getDefaultSettings(),starter.settings||{});
+                this.categories=cloneData(starter.categories||[]);
+                this.painPoints=cloneData(starter.pain_points||DEFAULT_PP);
+                this.tableCols=normalizeTableColumns(starter.table_cols||DEFAULT_COLS);
+            }
+            window.rtGuestStore.save(this);
+            return true;
+        }
         if(typeof cloudStore!=='undefined'&&typeof cloudStore.clearAllData==='function'){
             try{
                 await cloudStore.clearAllData(this);

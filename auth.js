@@ -2,9 +2,21 @@
 var rtSession=sb.getSession();
 var profileAvatarDraft='';
 var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
+var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
+}
+
+function getGuestDefaultNickname(){
+    return RT_GUEST_DEFAULT_NICKNAME;
+}
+
+function ensureGuestNickname(){
+    var current=(typeof getProfileNickname==='function'&&getProfileNickname())||localStorage.getItem('rt_nickname')||'';
+    if(current&&current.trim())return current.trim();
+    localStorage.setItem('rt_nickname',getGuestDefaultNickname());
+    return getGuestDefaultNickname();
 }
 
 function getAvatarCropStageSize(){
@@ -82,6 +94,46 @@ function updateAppShell(isLoggedIn){
     document.getElementById('app').style.display=isLoggedIn?'flex':'none';
 }
 
+function syncGuestDebug(){
+    if(window.rtDebug&&window.rtGuestStore&&window.rtGuestStore.isEnabled()){
+        window.rtDebug.update({
+            email:'体验模式',
+            userId:'local-device',
+            sessionExists:'local'
+        });
+    }
+}
+
+function enterGuestMode(){
+    if(!window.rtGuestStore)return;
+    window.rtGuestStore.enable();
+    sb.clearSession('guest.enter');
+    clearLocalBusinessData();
+    var guestNickname=ensureGuestNickname();
+    const data=window.rtGuestStore.ensureData();
+    if(data){
+        store.apps=(data.apps||[]).map(normalizeAppRecord);
+        store.resumes=cloneData(data.resumes||[]);
+        store.refs=cloneData(data.refs||[]);
+        store.logs=cloneData(data.logs||[]);
+        store.settings=Object.assign(getDefaultSettings(),data.settings||{});
+        if(!store.settings.profileNickname)store.settings.profileNickname=guestNickname;
+        store.categories=cloneData(data.categories||[]);
+        store.painPoints=cloneData(data.pain_points||DEFAULT_PP);
+        store.tableCols=normalizeTableColumns(data.table_cols||DEFAULT_COLS);
+        if(window.rtGuestStore&&window.rtGuestStore.isEnabled())window.rtGuestStore.save(store);
+    }
+    updateAppShell(true);
+    syncGuestDebug();
+    updateAvatar();
+    if(typeof initFilters==='function')initFilters();
+    if(typeof updIntl==='function')updIntl();
+    if(typeof refresh==='function')refresh();
+    if(typeof switchView==='function')switchView('pipeline');
+    showMsg('当前为本地体验模式，数据仅保存在本机。',false);
+    setTimeout(function(){hideMsg();},1800);
+}
+
 async function checkAuth(){
     var sessionSnapshot=sb.getSession();
     console.log('[RT auth] checkAuth start',{
@@ -119,14 +171,24 @@ async function checkAuth(){
             return false;
         }
     }
+    if(window.rtGuestStore&&window.rtGuestStore.isEnabled()){
+        enterGuestMode();
+        return true;
+    }
     updateAppShell(false);
     return false;
 }
 
 function updateAvatar(){
-    if(!rtSession)return;
     var av=document.getElementById('sidebar-avatar');
     if(av){
+        if(window.rtGuestStore&&window.rtGuestStore.isEnabled()&&!rtSession){
+            var guestNick=ensureGuestNickname();
+            var guestAvatar=(typeof getProfileAvatar==='function'&&getProfileAvatar())||'';
+            applyAvatarContent(av,guestAvatar,guestNick?guestNick[0].toUpperCase():'体');
+            return;
+        }
+        if(!rtSession)return;
         var nick=(typeof getProfileNickname==='function'&&getProfileNickname())||'';
         var email=rtSession.user&&rtSession.user.email||'';
         var avatar=(typeof getProfileAvatar==='function'&&getProfileAvatar())||'';
@@ -154,6 +216,7 @@ function clearLocalBusinessData(){
 }
 
 function onSuccess(result){
+    if(window.rtGuestStore)window.rtGuestStore.disable();
     clearLocalBusinessData();
     if(result&&result.user&&result.user.email&&!localStorage.getItem('rt_nickname')){
         localStorage.setItem('rt_nickname',getDefaultNicknameFromEmail(result.user.email));
@@ -193,8 +256,8 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
                 onSuccess(retryLogin);
                 return;
             }
-            showMsg('账号已创建，请重新点击开始使用登录',false);
-            submitBtn.textContent='开始使用';
+            showMsg('账号已创建，请重新点击注册 / 登录',false);
+            submitBtn.textContent='注册 / 登录';
             submitBtn.disabled=false;
             return;
         }
@@ -202,7 +265,7 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
             var signUpErr=signUpRes.error_description||signUpRes.msg||signUpRes.error||'';
             if(signUpErr.indexOf('Error sending confirmation email')>=0){
                 showMsg('Supabase 当前开启了邮箱确认，但项目没有可用的发信通道。请到后台的 Authentication > Providers > Email，部分版本会显示在 Authentication > Settings，关闭 Confirm email，或先配置自定义 SMTP。',true);
-                submitBtn.textContent='开始使用';
+                submitBtn.textContent='注册 / 登录';
                 submitBtn.disabled=false;
                 return;
             }
@@ -211,7 +274,7 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
             }else{
                 showMsg(signUpErr||'注册失败',true);
             }
-            submitBtn.textContent='开始使用';
+            submitBtn.textContent='注册 / 登录';
             submitBtn.disabled=false;
             return;
         }
@@ -222,8 +285,23 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     }else{
         showMsg(errMsg||'登录失败',true);
     }
-    submitBtn.textContent='开始使用';
+    submitBtn.textContent='注册 / 登录';
     submitBtn.disabled=false;
+});
+
+var guestBtn=document.getElementById('login-guest');
+if(guestBtn)guestBtn.addEventListener('click',function(){
+    hideMsg();
+    enterGuestMode();
+});
+
+var pwdToggle=document.getElementById('login-password-toggle');
+if(pwdToggle)pwdToggle.addEventListener('click',function(){
+    var input=document.getElementById('login-password');
+    if(!input)return;
+    var nextType=input.type==='password'?'text':'password';
+    input.type=nextType;
+    pwdToggle.classList.toggle('is-active',nextType==='text');
 });
 
 var verifyBtn=document.getElementById('verify-submit');
@@ -250,16 +328,19 @@ if(pwdInput)pwdInput.addEventListener('keydown',function(e){
 });
 
 function openProfileModal(){
-    if(!rtSession)return;
-    var u=rtSession.user||{};
-    var nick=(store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||getDefaultNicknameFromEmail(u.email)||'';
+    var isGuest=window.rtGuestStore&&window.rtGuestStore.isEnabled()&&!rtSession;
+    if(!rtSession&&!isGuest)return;
+    var u=rtSession&&rtSession.user||{};
+    var nick=isGuest?ensureGuestNickname():((store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||getDefaultNicknameFromEmail(u.email)||'');
     profileAvatarDraft=(store&&store.settings&&store.settings.profileAvatar)||'';
     document.getElementById('profile-nickname').value=nick;
     document.getElementById('profile-nickname-display').textContent=nick||'用户';
     applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft,nick?(nick[0].toUpperCase()):(u.email?(u.email[0].toUpperCase()):'👤'));
-    document.getElementById('profile-login-method').textContent=u.email||'';
+    document.getElementById('profile-login-method').textContent=isGuest?'体验模式 · 当前设备保存':(u.email||'');
     var emailEl=document.getElementById('profile-email-display');
-    if(emailEl)emailEl.textContent=u.email||'—';
+    if(emailEl)emailEl.textContent=isGuest?'未登录，数据仅保存在本机':(u.email||'—');
+    var logoutBtn=document.getElementById('profile-logout');
+    if(logoutBtn)logoutBtn.textContent=isGuest?'返回登录':'退出登录';
     var weeklyGoalEl=document.getElementById('settings-weekly-goal');
     if(weeklyGoalEl&&typeof getWeeklyGoal==='function')weeklyGoalEl.value=getWeeklyGoal();
     if(typeof syncIntlToggles==='function')syncIntlToggles();
@@ -285,6 +366,7 @@ if(profileSave)profileSave.addEventListener('click',async function(){
         if(avatarOk===false)return;
     }
     localStorage.setItem('rt_nickname',nickname);
+    if(window.rtGuestStore&&window.rtGuestStore.isEnabled())window.rtGuestStore.save(store);
     document.getElementById('profile-nickname-display').textContent=nickname||'用户';
     applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft||'',nickname?(nickname[0].toUpperCase()):((rtSession&&rtSession.user&&rtSession.user.email)?rtSession.user.email[0].toUpperCase():'👤'));
     document.getElementById('profile-modal-overlay').classList.remove('active');
@@ -390,7 +472,13 @@ if(avatarCropConfirm)avatarCropConfirm.addEventListener('click',function(){
 
 var profileLogout=document.getElementById('profile-logout');
 if(profileLogout)profileLogout.addEventListener('click',async function(){
-    if(!confirm('确定退出登录？'))return;
+    var isGuest=window.rtGuestStore&&window.rtGuestStore.isEnabled()&&!rtSession;
+    if(!confirm(isGuest?'返回登录页？本地体验数据会保留在当前设备。':'确定退出登录？'))return;
+    if(isGuest){
+        window.rtGuestStore.disable();
+        location.reload();
+        return;
+    }
     if(rtSession&&rtSession.access_token)await sb.signOut(rtSession.access_token);
     sb.clearSession('auth.logout');
     clearLocalBusinessData();
