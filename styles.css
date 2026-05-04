@@ -1031,10 +1031,12 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .resumes-toolbar{
     flex-direction:column;
     align-items:stretch;
-    gap:10px;
+    gap:8px;
   }
   .resumes-toolbar-left{
-    gap:10px;
+    flex-direction:row;
+    align-items:center;
+    gap:8px;
     flex-wrap:wrap;
     justify-content:space-between;
   }
@@ -1052,87 +1054,115 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     flex:0 0 auto;
   }
   #upload-resume-btn{
-    width:100%;
+    width:auto;
+    flex:0 0 auto;
     justify-content:center;
-    min-height:42px;
-    border-radius:14px;
+    min-height:38px;
+    border-radius:12px;
+    padding:0 14px;
   }
   .resumes-search{
-    min-height:42px;
-    border-radius:14px;
+    min-height:40px;
+    border-radius:13px;
   }
   .resumes-grid{
     display:grid;
     grid-auto-flow:column;
-    grid-auto-columns:min(calc(100vw - 42px),334px);
+    grid-auto-columns:min(calc(100vw - 34px),312px);
     grid-template-rows:1fr;
     justify-content:start;
     align-items:start;
-    gap:14px;
-    padding:14px 14px calc(28px + env(safe-area-inset-bottom));
+    gap:12px;
+    padding:12px 12px calc(22px + env(safe-area-inset-bottom));
     overflow-x:auto;
     overflow-y:visible;
     cursor:grab;
     scroll-snap-type:x mandatory;
-    scroll-padding-inline:14px;
+    scroll-padding-inline:12px;
     min-height:max-content;
     -webkit-overflow-scrolling:touch;
   }
   .resume-card{
-    width:min(calc(100vw - 42px),334px);
-    max-width:min(calc(100vw - 42px),334px);
+    width:min(calc(100vw - 34px),312px);
+    max-width:min(calc(100vw - 34px),312px);
     min-height:0;
   }
   .resume-card-banner{
-    height:70px;
+    height:64px;
   }
   .resume-card-body{
-    padding:14px;
-    gap:9px;
+    padding:12px;
+    gap:8px;
   }
   .resume-card-head{
     flex-direction:column;
-    gap:10px;
+    gap:8px;
   }
   .resume-card-controls{
     width:100%;
     flex-direction:row;
     justify-content:space-between;
     align-items:center;
-    gap:8px;
-    flex-wrap:wrap;
+    gap:6px;
+    flex-wrap:nowrap;
   }
   .resume-drag-handle,
   .resume-inline-edit{
-    flex:1 1 calc(50% - 4px);
+    flex:1 1 0;
     justify-content:center;
     min-width:0;
   }
   .resume-card-name{
-    font-size:16px;
+    font-size:15px;
+    line-height:1.22;
+  }
+  .resume-card-meta{
+    font-size:10px;
+  }
+  .resume-tag{
+    font-size:10px;
+    padding:4px 8px;
   }
   .resume-card-note{
     min-height:0;
     -webkit-line-clamp:2;
+    font-size:11px;
+    line-height:1.55;
+    padding:10px 11px;
   }
   .resume-card-linked{
     overflow:hidden;
+    gap:6px;
+    padding:9px 10px;
+  }
+  .resume-linked-head span,
+  .resume-linked-head em{
+    font-size:9px;
   }
   .resume-linked-scroller{
     padding:2px 2px 4px;
   }
   .resume-linked-item{
-    flex:0 0 min(188px,56vw);
+    flex:0 0 min(172px,52vw);
+    padding:9px 10px;
+  }
+  .resume-linked-company{
+    font-size:11px;
+  }
+  .resume-linked-role{
+    font-size:10px;
+    min-height:28px;
   }
   .resume-card-actions{
     grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:8px;
-    margin-top:2px;
+    gap:7px;
+    margin-top:1px;
   }
   .resume-action-btn{
-    min-height:40px;
-    font-size:12px;
-    padding:8px 8px;
+    min-height:36px;
+    font-size:11px;
+    padding:7px 7px;
+    border-radius:9px;
   }
   .reflections-header{
     padding:14px;

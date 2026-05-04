@@ -1164,6 +1164,59 @@ function renderResumeStats(){
     statsEl.innerHTML=total?`<span class="resume-stat-pill"><strong>${total}</strong> 份简历</span>`:'';
 }
 
+const resumePreviewUrls=new Set();
+
+async function makeResumePreviewUrl(dataUrl){
+    const response=await fetch(dataUrl);
+    if(!response.ok)throw new Error('preview fetch failed');
+    const blob=await response.blob();
+    const url=URL.createObjectURL(blob);
+    resumePreviewUrls.add(url);
+    return url;
+}
+
+function releaseResumePreviewUrl(url,delay){
+    setTimeout(function(){
+        if(!resumePreviewUrls.has(url))return;
+        URL.revokeObjectURL(url);
+        resumePreviewUrls.delete(url);
+    },delay||120000);
+}
+
+async function openResumePreview(resume){
+    if(!resume?.data_url){
+        toast('无预览数据，请重新上传','error');
+        return;
+    }
+    const type=(resume.file_type||'').toUpperCase();
+    if(type!=='PDF'){
+        const link=document.createElement('a');
+        link.href=resume.data_url;
+        link.download=resume.orig||`${resume.file_name||'resume'}.docx`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        toast('当前仅支持 PDF 直接预览，已为你下载文件','info');
+        return;
+    }
+    const popup=window.open('','_blank');
+    if(!popup){
+        toast('浏览器拦截了预览窗口，请允许弹窗后重试','error');
+        return;
+    }
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHTML(resume.file_name||'简历预览')}</title><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body{margin:0;height:100%;background:#0a0a0c;color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,\"SF Pro Display\",\"PingFang SC\",sans-serif}body{display:flex;align-items:center;justify-content:center}p{font-size:14px;color:#a1a1aa}</style></head><body><p>正在打开简历预览...</p></body></html>`);
+    popup.document.close();
+    try{
+        const previewUrl=await makeResumePreviewUrl(resume.data_url);
+        popup.location.replace(previewUrl);
+        releaseResumePreviewUrl(previewUrl);
+    }catch(err){
+        popup.document.body.innerHTML='<p>预览打开失败，请重新上传这份简历后再试。</p>';
+        console.error('[RT resume] preview failed',err);
+        toast('预览打开失败，请重试','error');
+    }
+}
+
 const resumeRailState={dragging:false,startX:0,startScrollLeft:0,moved:false,justDragged:false};
 const resumeReorderState={active:false,draggingId:null,card:null,placeholder:null,grid:null,ghost:null,startX:0,startY:0,lastClientX:0,lastClientY:0,pointerOffsetX:0,pointerOffsetY:0,targetGhostX:0,targetGhostY:0,currentGhostX:0,currentGhostY:0,lastSwapTrackX:0,lastSwapAt:0,lastSwapDirection:0,swapStreak:0,ghostFrame:0,moved:false,autoScrollFrame:0,justReorderedUntil:0};
 
@@ -1582,14 +1635,14 @@ function renderResumes(){
             return `<div class="resume-linked-item"><div class="resume-linked-company">${escapeHTML(a.company_name)}</div><div class="resume-linked-role">${escapeHTML(a.position_title)}</div></div>`;
         }).join('')}</div>`:'<div class="resume-linked-empty">建议补上适用岗位，后面回看会轻松很多。</div>';
         c.dataset.resumeId=r.id;
-        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-card-banner-top"><span class="resume-file-chip">${escapeHTML(r.file_type||'文件')}</span><span class="resume-linked-chip">${linkedText}</span></div><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-head"><div><div class="resume-card-name">${escapeHTML(r.file_name)}</div><div class="resume-card-meta">${fmtDT(r.updated_at||r.at)}${r.updated_at&&r.updated_at!==r.at?' 更新':''}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div></div><div class="resume-card-controls"><button class="resume-drag-handle" type="button" title="拖动排序"><span>⋮⋮</span><em>拖动排序</em></button><button class="resume-inline-edit" type="button">编辑资料</button></div></div>${tagHTML}${noteHTML}<div class="resume-card-linked"><div class="resume-linked-head"><span>适用记录</span>${linked.length?`<em>横向滑动查看全部</em>`:''}</div>${linkedList}</div><div class="resume-card-actions">${r.data_url?`<button class="resume-action-btn preview-btn">预览</button>`:''}<button class="resume-action-btn link-btn">关联岗位</button><button class="resume-action-btn edit-btn">修改标签备注</button><button class="resume-action-btn del-btn resume-action-danger">删除</button></div></div>`;
+        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-card-banner-top"><span class="resume-file-chip">${escapeHTML(r.file_type||'文件')}</span><span class="resume-linked-chip">${linkedText}</span></div><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-head"><div><div class="resume-card-name">${escapeHTML(r.file_name)}</div><div class="resume-card-meta">${fmtDT(r.updated_at||r.at)}${r.updated_at&&r.updated_at!==r.at?' 更新':''}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div></div><div class="resume-card-controls"><button class="resume-drag-handle" type="button" title="拖动排序"><span>⋮⋮</span><em>拖动排序</em></button><button class="resume-inline-edit" type="button">编辑资料</button></div></div>${tagHTML}${noteHTML}<div class="resume-card-linked"><div class="resume-linked-head"><span>适用记录</span>${linked.length?`<em>横向滑动查看全部</em>`:''}</div>${linkedList}</div><div class="resume-card-actions">${r.data_url&&(r.file_type||'').toUpperCase()==='PDF'?`<button class="resume-action-btn preview-btn">预览</button>`:''}<button class="resume-action-btn link-btn">关联岗位</button><button class="resume-action-btn edit-btn">修改标签备注</button><button class="resume-action-btn del-btn resume-action-danger">删除</button></div></div>`;
         c.addEventListener('click',()=>{if(Date.now()<resumeReorderState.justReorderedUntil)return;openResumeEditModal(r.id);});
         c.querySelector('.resume-drag-handle').addEventListener('pointerdown',function(e){
             e.preventDefault();
             e.stopPropagation();
             beginResumeReorder(c,r.id,e);
         });
-        c.querySelector('.preview-btn')?.addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>{if(r.data_url)window.open(r.data_url,'_blank');else toast('无预览数据，请重新上传','error');});});
+        c.querySelector('.preview-btn')?.addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>{await openResumePreview(r);});});
         c.querySelector('.link-btn').addEventListener('click',async e=>{e.stopPropagation();await withButtonBusy(e.currentTarget,async ()=>openResumeLinkModal(r.id));});
         c.querySelector('.resume-inline-edit').addEventListener('click',e=>{e.stopPropagation();openResumeEditModal(r.id);});
         c.querySelector('.edit-btn').addEventListener('click',e=>{e.stopPropagation();openResumeEditModal(r.id);});
