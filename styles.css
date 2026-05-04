@@ -1161,25 +1161,22 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   }
   .stat-cards{
     display:grid;
-    grid-auto-flow:column;
-    grid-auto-columns:minmax(128px,1fr);
-    grid-template-columns:none;
+    grid-template-columns:repeat(2,minmax(0,1fr));
     gap:8px;
-    overflow-x:auto;
-    overflow-y:hidden;
-    padding-bottom:2px;
-    scroll-snap-type:x proximity;
-    scrollbar-width:none;
   }
-  .stat-cards::-webkit-scrollbar{display:none}
   .stat-card{
-    padding:12px 13px;
+    padding:12px;
     border-radius:14px;
-    min-width:128px;
-    scroll-snap-align:start;
+    min-width:0;
+  }
+  .stat-card-label{
+    font-size:9px;
+    letter-spacing:.08em;
+    margin-bottom:5px;
   }
   .stat-card-value{
-    font-size:22px;
+    font-size:21px;
+    line-height:1;
   }
   #goal-card{
     order:2;
@@ -1194,14 +1191,14 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     display:flex;
     flex-direction:column;
   }
-  .chart-row-insight>.chart-card-insight{
+  .chart-row-insight>.chart-card-stack{
     order:1;
   }
-  .chart-row-insight>.chart-card-stack{
+  .chart-row-insight>.chart-card-insight{
     order:2;
   }
   .chart-card{
-    padding:14px;
+    padding:14px 13px;
     border-radius:16px;
   }
   .chart-card h3{
@@ -1217,9 +1214,11 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   }
   .chart-card-stack>#attribution-chart{
     padding-top:0;
+    min-height:0;
   }
   .chart-card-insight .chart-body{
     padding-top:0;
+    min-height:0;
   }
   .analytics-mini-grid{
     gap:12px;
@@ -1239,7 +1238,9 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     margin-bottom:10px;
   }
   .base-chart-wrap{
-    gap:12px;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
   }
   .base-donut{
     width:96px;
@@ -1250,24 +1251,51 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     inset:17px;
   }
   .legend-item{
-    gap:6px;
+    gap:8px;
+    grid-template-columns:auto minmax(0,1fr) auto;
   }
   .legend-label,
   .legend-value{
     font-size:9px;
   }
+  .legend-label{
+    white-space:normal;
+    line-height:1.35;
+  }
+  .chart-legend{
+    width:100%;
+    gap:7px;
+  }
   .source-chart-row{
-    gap:6px 8px;
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:
+      'label'
+      'track'
+      'metric';
+    gap:7px;
+    padding:10px 0;
+    border-bottom:1px solid rgba(255,255,255,.05);
+  }
+  .source-chart-row:last-child{
+    border-bottom:none;
+    padding-bottom:0;
   }
   .source-chart-label{
-    font-size:10px;
+    grid-area:label;
+    font-size:11px;
+    white-space:normal;
+    line-height:1.4;
   }
   .source-chart-track{
+    grid-area:track;
     height:16px;
   }
   .source-chart-metric{
-    gap:6px;
-    font-size:9px;
+    grid-area:metric;
+    justify-content:space-between;
+    gap:10px;
+    font-size:10px;
+    flex-wrap:wrap;
   }
   .source-chart-metric strong{
     font-size:12px;
@@ -1285,7 +1313,9 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .attribution-label{
     width:auto;
     text-align:left;
-    font-size:10px;
+    font-size:11px;
+    white-space:normal;
+    line-height:1.35;
   }
   .funnel-value,
   .attribution-count{
@@ -1295,12 +1325,21 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   .category-rate{
     width:auto;
     display:flex;
-    flex-direction:row;
-    align-items:baseline;
-    gap:8px;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:3px;
   }
   .category-rate strong{
     font-size:14px;
+  }
+  .category-rate-meta{
+    white-space:normal;
+    line-height:1.35;
+  }
+  .funnel-bar-wrap,
+  .category-bar-wrap,
+  .attribution-bar-wrap{
+    width:100%;
   }
   .ai-rich-meta,
   .ai-rich-note{
@@ -1318,7 +1357,7 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
   }
   .ai-rich-body p{
     font-size:12px;
-    line-height:1.75;
+    line-height:1.7;
   }
   .modal-overlay{
     padding:0;
