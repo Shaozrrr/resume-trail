@@ -17,15 +17,15 @@
             <div class="login-logo"><svg width="40" height="40" viewBox="0 0 28 28" fill="none"><path d="M4 8L14 3L24 8V20L14 25L4 20V8Z" stroke="currentColor" stroke-width="1.5"/><path d="M4 8L14 13M14 13L24 8M14 13V25" stroke="currentColor" stroke-width="1.5" opacity="0.5"/></svg><h1>履迹</h1><p>Resume Trail</p></div>
             <div class="login-form" id="login-form">
                 <div id="login-step1">
-                    <div class="form-group"><input type="email" id="login-email" placeholder="邮箱地址" style="padding:12px 16px;font-size:14px;border-radius:10px"></div>
-                    <div class="form-group"><input type="password" id="login-password" placeholder="密码（至少6位）" style="padding:12px 16px;font-size:14px;border-radius:10px"></div>
-                    <button class="btn-primary" style="width:100%;justify-content:center;padding:12px;font-size:14px;border-radius:10px;margin-top:4px" id="login-submit">开始使用</button>
+                    <div class="form-group"><input type="email" id="login-email" placeholder="邮箱地址"></div>
+                    <div class="form-group"><input type="password" id="login-password" placeholder="密码（至少6位）"></div>
+                    <button class="btn-primary" id="login-submit">开始使用</button>
                 </div>
                 <div id="login-step2" style="display:none">
                     <p style="font-size:13px;color:var(--text-secondary);text-align:center;margin-bottom:12px">验证码已发送到 <span id="verify-email-display" style="color:var(--text-primary);font-weight:500"></span></p>
-                    <div class="form-group"><input type="text" id="verify-code" placeholder="请输入验证码" maxlength="8" style="padding:12px 16px;font-size:18px;border-radius:10px;text-align:center;letter-spacing:6px"></div>
-                    <button class="btn-primary" style="width:100%;justify-content:center;padding:12px;font-size:14px;border-radius:10px" id="verify-submit">验证并注册</button>
-                    <button class="btn-ghost" style="width:100%;justify-content:center;padding:8px;font-size:12px;margin-top:6px" id="verify-back">← 返回</button>
+                    <div class="form-group"><input type="text" id="verify-code" placeholder="请输入验证码" maxlength="8" class="login-code-input"></div>
+                    <button class="btn-primary" id="verify-submit">验证并注册</button>
+                    <button class="btn-ghost login-secondary-btn" id="verify-back">← 返回</button>
                 </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
                 <p id="login-hint" style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:12px;line-height:1.5">首次使用自动创建账号<br>之后直接使用邮箱和密码登录</p>
@@ -35,9 +35,25 @@
 
     <div id="app" style="display:none">
         <nav id="sidebar">
-            <div class="sidebar-logo">
-                <div class="logo-icon"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M4 8L14 3L24 8V20L14 25L4 20V8Z" stroke="currentColor" stroke-width="1.5"/><path d="M4 8L14 13M14 13L24 8M14 13V25" stroke="currentColor" stroke-width="1.5" opacity="0.5"/></svg></div>
-                <span class="logo-text">履迹</span>
+            <div class="sidebar-logo" id="sidebar-brand" tabindex="0" aria-label="履迹 Resume Trail">
+                <div class="logo-stage">
+                    <div class="logo-backdrop"></div>
+                    <div class="logo-icon">
+                        <svg class="logo-cube" width="28" height="28" viewBox="0 0 28 28" fill="none">
+                            <path class="logo-cube-outline" d="M4 8L14 3L24 8V20L14 25L4 20V8Z" stroke="currentColor" stroke-width="1.5"/>
+                            <path class="logo-cube-inner" d="M4 8L14 13M14 13L24 8M14 13V25" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+                        </svg>
+                    </div>
+                    <span class="logo-glint"></span>
+                </div>
+                <div class="logo-wordmark">
+                    <span class="logo-text">履迹</span>
+                    <span class="logo-caption">Resume Trail</span>
+                </div>
+                <div class="logo-reveal" aria-hidden="true">
+                    <strong>Resume Trail</strong>
+                    <span>Quietly sharp job tracking</span>
+                </div>
             </div>
             <div class="nav-items">
                 <button class="nav-item active" data-view="pipeline" title="投递看板"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
