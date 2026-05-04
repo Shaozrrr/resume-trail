@@ -1029,10 +1029,14 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     margin-top:4px;
   }
   .resumes-toolbar{
+    flex-direction:column;
+    align-items:stretch;
     gap:10px;
   }
   .resumes-toolbar-left{
     gap:10px;
+    flex-wrap:wrap;
+    justify-content:space-between;
   }
   .resumes-stats{
     gap:8px;
@@ -1058,26 +1062,65 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     border-radius:14px;
   }
   .resumes-grid{
-    grid-auto-columns:min(calc(100vw - 28px),320px);
-    gap:14px;
-    padding:14px 14px 24px;
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    padding:14px 14px calc(24px + env(safe-area-inset-bottom));
+    overflow-x:visible;
+    overflow-y:visible;
+    cursor:default;
+    scroll-snap-type:none;
   }
   .resume-card{
-    width:min(calc(100vw - 28px),320px);
+    width:100%;
+    max-width:none;
+  }
+  .resume-card-banner{
+    height:70px;
   }
   .resume-card-body{
     padding:14px;
     gap:9px;
   }
+  .resume-card-head{
+    flex-direction:column;
+    gap:10px;
+  }
+  .resume-card-controls{
+    width:100%;
+    flex-direction:row;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
   .resume-card-name{
     font-size:16px;
   }
+  .resume-card-note{
+    min-height:0;
+    -webkit-line-clamp:3;
+  }
+  .resume-card-linked{
+    overflow:visible;
+  }
+  .resume-linked-scroller{
+    padding:2px 0 2px;
+    -webkit-mask-image:none;
+    mask-image:none;
+  }
+  .resume-linked-item{
+    flex:0 0 min(216px,68vw);
+  }
   .resume-card-actions{
-    gap:7px;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px;
+    margin-top:4px;
   }
   .resume-action-btn{
-    min-height:40px;
-    font-size:11px;
+    min-height:42px;
+    font-size:12px;
   }
   .reflections-header{
     padding:14px;
@@ -1178,10 +1221,19 @@ inset 0 1px 0 rgba(255,255,255,.8)!important;transform:translateY(-1px)}
     font-size:21px;
     line-height:1;
   }
+  .analytics-grid>.stat-cards{
+    order:1;
+  }
   #goal-card{
     order:2;
     padding:14px!important;
     border-radius:16px;
+  }
+  .analytics-grid>.chart-row:not(.chart-row-insight){
+    order:3;
+  }
+  .analytics-grid>.chart-row-insight{
+    order:4;
   }
   .chart-row{
     grid-template-columns:1fr;
