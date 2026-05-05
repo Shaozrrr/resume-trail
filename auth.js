@@ -1,8 +1,9 @@
-// 认证 - 统一邮箱密码登录/注册
+// 认证 - 首次邮箱登录走验证码注册，之后邮箱密码登录
 var rtSession=sb.getSession();
 var profileAvatarDraft='';
 var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
 var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
+var pendingOtpAuth={email:'',password:'',verifyType:'signup'};
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -68,8 +69,13 @@ function closeAvatarCropper(){
 
 function applyAvatarContent(el,avatarValue,fallbackText){
     if(!el)return;
+    el.textContent='';
     if(avatarValue){
-        el.innerHTML=`<img src="${avatarValue}" alt="avatar" class="avatar-image">`;
+        var img=document.createElement('img');
+        img.alt='avatar';
+        img.className='avatar-image';
+        img.src=avatarValue;
+        el.appendChild(img);
         return;
     }
     el.textContent=fallbackText||'👤';
@@ -152,7 +158,7 @@ async function checkAuth(){
             const loadResult=await cloudStore.loadInto(store);
             console.log('[RT auth] cloudStore.loadInto(store) returned',loadResult);
             var localNick=localStorage.getItem('rt_nickname')||'';
-            if(localNick&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
+            if(localNick&&localNick!==getGuestDefaultNickname()&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
                 await store.setSetting('profileNickname',localNick);
             }
             var emailDefaultNick=getDefaultNicknameFromEmail(session.user&&session.user.email||'');
@@ -210,6 +216,101 @@ function hideMsg(){
     if(el)el.style.display='none';
 }
 
+function getAuthErrorText(result){
+    return String(result&&(
+        result.error_description||
+        result.msg||
+        result.error||
+        ''
+    )||'');
+}
+
+function isEmailNotConfirmedError(message){
+    return message.toLowerCase().indexOf('email not confirmed')>=0;
+}
+
+function isInvalidLoginError(message){
+    var lower=message.toLowerCase();
+    return lower.indexOf('invalid login credentials')>=0||
+        lower.indexOf('invalid credentials')>=0||
+        lower.indexOf('invalid login')>=0;
+}
+
+function isConfirmationSendError(message){
+    return message.toLowerCase().indexOf('error sending confirmation email')>=0;
+}
+
+function isAlreadyRegisteredError(message){
+    var lower=message.toLowerCase();
+    return lower.indexOf('already registered')>=0||
+        lower.indexOf('already been registered')>=0||
+        lower.indexOf('user already registered')>=0||
+        lower.indexOf('already exists')>=0;
+}
+
+function showLoginStep(step){
+    var step1=document.getElementById('login-step1');
+    var step2=document.getElementById('login-step2');
+    var hint=document.getElementById('login-hint');
+    if(step1)step1.style.display=step===2?'none':'';
+    if(step2)step2.style.display=step===2?'':'none';
+    if(hint)hint.textContent=step===2?'请输入邮箱中的验证码，验证完成后即可直接用当前密码登录。':'首次使用会发送邮箱验证码，验证完成后即可保存到云端并支持多端同步。';
+}
+
+function openVerifyStep(email,password){
+    pendingOtpAuth.email=email;
+    pendingOtpAuth.password=password;
+    pendingOtpAuth.verifyType='signup';
+    var emailDisplay=document.getElementById('verify-email-display');
+    if(emailDisplay)emailDisplay.textContent=email;
+    var codeInput=document.getElementById('verify-code');
+    if(codeInput)codeInput.value='';
+    showLoginStep(2);
+}
+
+function setSubmitIdleState(){
+    if(!submitBtn)return;
+    submitBtn.textContent='注册 / 登录';
+    submitBtn.disabled=false;
+}
+
+function resetVerifyStep(){
+    pendingOtpAuth.email='';
+    pendingOtpAuth.password='';
+    pendingOtpAuth.verifyType='signup';
+    var codeInput=document.getElementById('verify-code');
+    if(codeInput)codeInput.value='';
+    showLoginStep(1);
+}
+
+async function resendSignupCode(email,password,successText){
+    const resendRes=await sb.resendSignup(email);
+    const resendErr=getAuthErrorText(resendRes);
+    if(resendRes.error){
+        if(isConfirmationSendError(resendErr)){
+            showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+        }else{
+            showMsg(resendErr||'验证码发送失败，请稍后重试。',true);
+        }
+        return false;
+    }
+    openVerifyStep(email,password);
+    showMsg(successText||'验证码已发送，请检查邮箱。',false);
+    return true;
+}
+
+async function verifyEmailCode(email,code,preferredType){
+    var firstType=preferredType||'signup';
+    var first=await sb.verifyOTP(email,code,firstType);
+    if(first&&first.access_token)return first;
+    if(firstType!=='email'){
+        var second=await sb.verifyOTP(email,code,'email');
+        if(second&&second.access_token)return second;
+        return second;
+    }
+    return first;
+}
+
 function clearLocalBusinessData(){
     if(typeof store==='undefined')return;
     store.resetState();
@@ -218,8 +319,12 @@ function clearLocalBusinessData(){
 function onSuccess(result){
     if(window.rtGuestStore)window.rtGuestStore.disable();
     clearLocalBusinessData();
-    if(result&&result.user&&result.user.email&&!localStorage.getItem('rt_nickname')){
-        localStorage.setItem('rt_nickname',getDefaultNicknameFromEmail(result.user.email));
+    if(result&&result.user&&result.user.email){
+        var emailNick=getDefaultNicknameFromEmail(result.user.email);
+        var currentNick=localStorage.getItem('rt_nickname')||'';
+        if(emailNick&&(!currentNick||currentNick===getGuestDefaultNickname())){
+            localStorage.setItem('rt_nickname',emailNick);
+        }
     }
     sb.setSession(result,'auth.onSuccess');
     syncSession(result);
@@ -243,55 +348,52 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         return;
     }
 
-    var errMsg=loginRes.error_description||loginRes.msg||loginRes.error||'';
-    if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0||errMsg.indexOf('Email not confirmed')>=0){
+    var errMsg=getAuthErrorText(loginRes);
+    if(isEmailNotConfirmedError(errMsg)){
+        await resendSignupCode(email,pwd,'这个邮箱还没有完成验证，已重新发送验证码。');
+        submitBtn.textContent='注册 / 登录';
+        submitBtn.disabled=false;
+        return;
+    }
+
+    if(isInvalidLoginError(errMsg)){
         var signUpRes=await sb.signUp(email,pwd);
         if(signUpRes.access_token){
             onSuccess(signUpRes);
             return;
         }
         if(signUpRes.user&&!signUpRes.error){
-            var retryLogin=await sb.signIn(email,pwd);
-            if(retryLogin.access_token){
-                onSuccess(retryLogin);
-                return;
-            }
-            showMsg('账号已创建，请重新点击注册 / 登录',false);
+            openVerifyStep(email,pwd);
+            showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
             submitBtn.textContent='注册 / 登录';
             submitBtn.disabled=false;
             return;
         }
-        if(signUpRes.error){
-            var signUpErr=signUpRes.error_description||signUpRes.msg||signUpRes.error||'';
-            if(signUpErr.indexOf('Error sending confirmation email')>=0){
-                showMsg('Supabase 当前开启了邮箱确认，但项目没有可用的发信通道。请到后台的 Authentication > Providers > Email，部分版本会显示在 Authentication > Settings，关闭 Confirm email，或先配置自定义 SMTP。',true);
-                submitBtn.textContent='注册 / 登录';
-                submitBtn.disabled=false;
-                return;
-            }
-            if(signUpErr.indexOf('already')>=0||signUpErr.indexOf('exists')>=0){
-                showMsg('邮箱号或密码错误，请重试',true);
-            }else{
-                showMsg(signUpErr||'注册失败',true);
-            }
-            submitBtn.textContent='注册 / 登录';
-            submitBtn.disabled=false;
+        var signUpErr=getAuthErrorText(signUpRes);
+        if(isConfirmationSendError(signUpErr)){
+            showMsg('注册邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+            setSubmitIdleState();
             return;
         }
+        if(isAlreadyRegisteredError(signUpErr)){
+            showMsg('邮箱或密码不正确，请重试。',true);
+            resetVerifyStep();
+            setSubmitIdleState();
+            return;
+        }
+        showMsg('暂时无法完成注册或登录，请稍后重试。',true);
+        setSubmitIdleState();
+        return;
     }
 
-    if(errMsg.indexOf('Invalid login')>=0||errMsg.indexOf('invalid')>=0){
-        showMsg('邮箱号或密码错误，请重试',true);
-    }else{
-        showMsg(errMsg||'登录失败',true);
-    }
-    submitBtn.textContent='注册 / 登录';
-    submitBtn.disabled=false;
+    showMsg('邮箱或密码不正确，请重试。',true);
+    setSubmitIdleState();
 });
 
 var guestBtn=document.getElementById('login-guest');
 if(guestBtn)guestBtn.addEventListener('click',function(){
     hideMsg();
+    resetVerifyStep();
     enterGuestMode();
 });
 
@@ -306,15 +408,46 @@ if(pwdToggle)pwdToggle.addEventListener('click',function(){
 
 var verifyBtn=document.getElementById('verify-submit');
 if(verifyBtn)verifyBtn.addEventListener('click',async function(){
-    showMsg('当前版本已切换为邮箱密码注册登录，无需验证码。',false);
+    var email=pendingOtpAuth.email||document.getElementById('login-email').value.trim();
+    var code=(document.getElementById('verify-code').value||'').trim();
+    if(!email){
+        showMsg('请先返回填写邮箱。',true);
+        return;
+    }
+    if(!code||code.length<6){
+        showMsg('请输入邮箱中的验证码。',true);
+        return;
+    }
+    verifyBtn.textContent='验证中...';
+    verifyBtn.disabled=true;
+    var verifyRes=await verifyEmailCode(email,code,pendingOtpAuth.verifyType||'signup');
+    if(verifyRes&&verifyRes.access_token){
+        onSuccess(verifyRes);
+        return;
+    }
+    showMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
+    verifyBtn.textContent='验证并进入';
+    verifyBtn.disabled=false;
+});
+
+var resendBtn=document.getElementById('verify-resend');
+if(resendBtn)resendBtn.addEventListener('click',async function(){
+    var email=pendingOtpAuth.email||document.getElementById('login-email').value.trim();
+    if(!email||!email.includes('@')){
+        showMsg('请先返回填写邮箱。',true);
+        return;
+    }
+    resendBtn.textContent='发送中...';
+    resendBtn.disabled=true;
+    await resendSignupCode(email,pendingOtpAuth.password||document.getElementById('login-password').value,'验证码已重新发送，请检查邮箱。');
+    resendBtn.textContent='重新发送验证码';
+    resendBtn.disabled=false;
 });
 
 var backBtn=document.getElementById('verify-back');
 if(backBtn)backBtn.addEventListener('click',function(){
-    document.getElementById('login-step1').style.display='';
-    document.getElementById('login-step2').style.display='none';
-    document.getElementById('login-hint').style.display='';
     hideMsg();
+    resetVerifyStep();
 });
 
 var codeInput=document.getElementById('verify-code');

@@ -173,22 +173,22 @@ const sb={
     return this.unwrapAuthResponse('auth.signIn',result);
   },
 
-  async signInOTP(email){
-    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/otp',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},
-      body:JSON.stringify({email:email,create_user:true})
-    });
-    return this.unwrapAuthResponse('auth.signInOTP',result);
-  },
-
-  async verifyOTP(email,token){
+  async verifyOTP(email,token,type){
     const result=await this.requestJson(SUPABASE_URL+'/auth/v1/verify',{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},
-      body:JSON.stringify({email:email,token:token,type:'email'})
+      body:JSON.stringify({email:email,token:token,type:type||'email'})
     });
     return this.unwrapAuthResponse('auth.verifyOTP',result);
+  },
+
+  async resendSignup(email){
+    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/resend',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},
+      body:JSON.stringify({email:email,type:'signup'})
+    });
+    return this.unwrapAuthResponse('auth.resendSignup',result);
   },
 
   async signOut(token){

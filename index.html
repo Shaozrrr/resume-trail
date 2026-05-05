@@ -37,12 +37,18 @@
                 </div>
                 <div id="login-step2" style="display:none">
                     <p style="font-size:13px;color:var(--text-secondary);text-align:center;margin-bottom:12px">验证码已发送到 <span id="verify-email-display" style="color:var(--text-primary);font-weight:500"></span></p>
-                    <div class="form-group"><input type="text" id="verify-code" placeholder="请输入验证码" maxlength="8" class="login-code-input"></div>
-                    <button class="btn-primary" id="verify-submit">验证并注册</button>
-                    <button class="btn-ghost login-secondary-btn" id="verify-back">← 返回</button>
+                    <div class="form-group login-input-group">
+                        <span class="login-input-icon" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3 4 7v5c0 5 3.4 8.6 8 9 4.6-.4 8-4 8-9V7l-8-4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m9.5 12 1.7 1.7 3.8-3.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </span>
+                        <input type="text" id="verify-code" placeholder="请输入 6 位验证码" maxlength="8" class="login-code-input">
+                    </div>
+                    <button class="btn-primary" id="verify-submit">验证并进入</button>
+                    <button class="btn-ghost login-secondary-btn" id="verify-resend">重新发送验证码</button>
+                    <button class="btn-ghost login-secondary-btn" id="verify-back">返回修改邮箱或密码</button>
                 </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
-                <p id="login-hint" class="login-hint-text">登录后保存云端，多端同步</p>
+                <p id="login-hint" class="login-hint-text">首次使用会发送邮箱验证码，验证完成后即可直接用密码登录</p>
             </div>
         </div>
     </div>
@@ -131,7 +137,7 @@
                     <div class="resumes-header-main">
                         <div class="resumes-lead">
                             <div class="resumes-kicker">版本管理</div>
-                            <div class="resumes-subtitle">给不同方向的简历补充标签、备注和适用投递，后面回看会轻松很多。</div>
+                            <div class="resumes-subtitle">为不同求职方向维护清晰的版本标签、备注与适用岗位，便于后续检索、复用与投递复盘。</div>
                         </div>
                     </div>
                     <div class="resumes-toolbar">
@@ -191,6 +197,11 @@
                 <div class="form-row"><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
                 <div class="form-group"><label>下一步行动</label><input type="text" id="form-next-action" placeholder="如：准备行为面试题"></div>
                 <div class="form-group"><label>下一步 DDL</label><input type="datetime-local" id="form-deadline"></div>
+                <div class="followup-fields">
+                    <div class="followup-fields-head"><span>跟进</span><em>轻量记录，不单独维护 CRM</em></div>
+                    <div class="form-row"><div class="form-group"><label>联系人</label><input type="text" id="form-contact" placeholder="如：HR / 内推人"></div><div class="form-group"><label>下次跟进</label><input type="date" id="form-next-followup"></div></div>
+                    <div class="form-row"><div class="form-group"><label>上次跟进</label><input type="date" id="form-last-followup"></div><div class="form-group"><label>跟进备注</label><input type="text" id="form-followup-note" placeholder="如：已发邮件，等回复"></div></div>
+                </div>
                 <div class="form-group"><label>JD 截图 <span style="font-weight:normal;color:var(--text-muted)">Ctrl+V 粘贴</span></label><div class="jd-paste-zone" id="jd-paste-zone" tabindex="0"><span class="jd-paste-hint" id="jd-paste-hint">点击后粘贴截图或拖拽图片</span></div></div>
                 <div class="form-group"><label>备注</label><textarea id="form-notes" rows="3" placeholder="其他备注..."></textarea></div>
                 <div id="custom-fields-area"></div>
@@ -203,7 +214,7 @@
     <div class="modal-overlay" id="rejection-modal-overlay">
         <div class="modal modal-sm">
             <div class="modal-header"><h2>标记失败原因</h2><button class="modal-close" id="rejection-modal-close">&times;</button></div>
-            <div class="modal-body"><p class="modal-desc">请选择挂在哪个环节：</p><div class="rejection-options" id="rejection-options"><label class="radio-card"><input type="radio" name="rejection" value="RESUME_SCREEN"><span>📄 简历筛选挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="OA_FAIL"><span>📝 笔试挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="ROUND1_BIZ"><span>💼 一面业务挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="GROUP_INTERVIEW"><span>👥 群面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="FINAL_FAIL"><span>🎯 终面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="HR_FAIL"><span>🤝 HR面挂</span></label><label class="radio-card"><input type="radio" name="rejection" value="OTHER"><span>❓ 其他</span></label></div></div>
+            <div class="modal-body"><p class="modal-desc">请选择未通过环节：</p><div class="rejection-options" id="rejection-options"><label class="radio-card"><input type="radio" name="rejection" value="RESUME_SCREEN"><span>📄 简历筛选未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="OA_FAIL"><span>📝 笔试未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="ROUND1_BIZ"><span>💼 一面业务未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="GROUP_INTERVIEW"><span>👥 群面未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="FINAL_FAIL"><span>🎯 终面未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="HR_FAIL"><span>🤝 HR 面未通过</span></label><label class="radio-card"><input type="radio" name="rejection" value="OTHER"><span>❓ 其他</span></label></div></div>
             <div class="modal-footer"><button class="btn-primary" id="rejection-confirm">确认</button></div>
         </div>
     </div>
@@ -225,7 +236,7 @@
             <div class="modal-header"><h2 id="reflection-modal-title">新建复盘</h2><button class="modal-close" id="reflection-modal-close">&times;</button></div>
             <div class="modal-body">
                 <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option></select></div></div>
-                <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
+                <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="reflection-template" class="reflection-template"></div><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
                 <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
                 <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
             </div>
