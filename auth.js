@@ -336,9 +336,17 @@ function openProfileModal(){
     document.getElementById('profile-nickname').value=nick;
     document.getElementById('profile-nickname-display').textContent=nick||'用户';
     applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft,nick?(nick[0].toUpperCase()):(u.email?(u.email[0].toUpperCase()):'👤'));
+    var subtitleEl=document.getElementById('profile-modal-subtitle');
+    if(subtitleEl)subtitleEl.textContent=isGuest?'本地体验 · 数据仅保存在当前设备':'邮箱登录 · 设置即时同步到云端';
     document.getElementById('profile-login-method').textContent=isGuest?'体验模式 · 当前设备保存':(u.email||'');
+    var authChipEl=document.getElementById('profile-auth-chip');
+    if(authChipEl)authChipEl.textContent=isGuest?'本地体验模式':'邮箱密码登录';
+    var syncDescEl=document.getElementById('profile-sync-desc');
+    if(syncDescEl)syncDescEl.textContent=isGuest?'昵称、偏好和标签会保存在当前设备，登录后才可同步到云端。':'昵称、偏好和标签都会跟随账号一起同步。';
     var emailEl=document.getElementById('profile-email-display');
     if(emailEl)emailEl.textContent=isGuest?'未登录，数据仅保存在本机':(u.email||'—');
+    var footerNoteEl=document.getElementById('profile-footer-note-text');
+    if(footerNoteEl)footerNoteEl.textContent=isGuest?'当前仅保存在本地，登录后才可保存云端并多端同步':'业务数据自动保存到云端';
     var logoutBtn=document.getElementById('profile-logout');
     if(logoutBtn)logoutBtn.textContent=isGuest?'返回登录':'退出登录';
     var weeklyGoalEl=document.getElementById('settings-weekly-goal');

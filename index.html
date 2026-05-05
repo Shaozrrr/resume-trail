@@ -267,7 +267,7 @@
     <!-- 用户资料弹窗 -->
     <div class="modal-overlay" id="profile-modal-overlay">
         <div class="modal modal-profile">
-            <div class="modal-header account-modal-header"><div><h2>我的资料</h2><p>邮箱登录 · 设置即时同步到云端</p></div><button class="modal-close" id="profile-modal-close">&times;</button></div>
+            <div class="modal-header account-modal-header"><div><h2>我的资料</h2><p id="profile-modal-subtitle">邮箱登录 · 设置即时同步到云端</p></div><button class="modal-close" id="profile-modal-close">&times;</button></div>
             <div class="modal-body account-modal-body">
                 <section class="account-hero">
                     <div class="account-avatar-wrap">
@@ -278,14 +278,14 @@
                     <div class="account-hero-meta">
                         <div id="profile-nickname-display" class="account-hero-name">用户</div>
                         <div id="profile-login-method" class="account-hero-email"></div>
-                        <div class="account-auth-chip">邮箱密码登录</div>
+                        <div id="profile-auth-chip" class="account-auth-chip">邮箱密码登录</div>
                     </div>
                 </section>
 
                 <section class="account-section">
                     <div class="account-section-head">
                         <div class="account-section-title">账户资料</div>
-                        <div class="account-section-desc">昵称、偏好和标签都会跟随账号一起同步。</div>
+                        <div id="profile-sync-desc" class="account-section-desc">昵称、偏好和标签都会跟随账号一起同步。</div>
                     </div>
                     <div class="account-grid">
                         <div class="account-input-card account-field">
@@ -361,7 +361,7 @@
                 </section>
             </div>
             <div class="modal-footer profile-modal-footer">
-                <div class="profile-footer-note"><span class="profile-footer-dot"></span>业务数据自动保存到云端</div>
+                <div class="profile-footer-note"><span class="profile-footer-dot"></span><span id="profile-footer-note-text">业务数据自动保存到云端</span></div>
                 <div class="profile-footer-actions">
                     <button class="profile-logout-btn" id="profile-logout">退出登录</button>
                     <button class="profile-save-btn" id="profile-save">保存资料</button>
