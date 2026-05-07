@@ -2320,13 +2320,22 @@ function renderResumes(){
     bindResumeRailDrag();
     renderResumeStats();
     const query=($('#resume-search')?.value||'').toLowerCase().trim();
-    if(!store.resumes.length){g.innerHTML='<div class="empty-state"><p>还没有简历</p><span>上传第一份简历吧</span></div>';return;}
+    g.classList.remove('is-empty');
+    if(!store.resumes.length){
+        g.classList.add('is-empty');
+        g.innerHTML='<div class="empty-state resume-empty-state"><p>还没有简历</p><span>上传第一份简历吧</span></div>';
+        return;
+    }
     const resumes=getOrderedResumes().filter(function(r){
         if(!query)return true;
         const haystack=[r.file_name,r.orig,r.notes,(r.tags||[]).join(' ')].join(' ').toLowerCase();
         return haystack.includes(query);
     });
-    if(!resumes.length){g.innerHTML='<div class="empty-state"><p>没有匹配结果</p><span>试试换个关键词，或者补充更清晰的标签和备注</span></div>';return;}
+    if(!resumes.length){
+        g.classList.add('is-empty');
+        g.innerHTML='<div class="empty-state resume-empty-state"><p>没有匹配结果</p><span>试试换个关键词，或者补充更清晰的标签和备注</span></div>';
+        return;
+    }
     g.innerHTML='';
     resumes.forEach(r=>{
         const linked=store.apps.filter(a=>a.resume_id===r.id);

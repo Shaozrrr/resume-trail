@@ -175,6 +175,10 @@ radial-gradient(circle at bottom left,rgba(96,165,250,.08),transparent 34%)}
 .resumes-grid{display:grid;grid-auto-flow:column;grid-auto-columns:340px;grid-template-rows:minmax(0,1fr);justify-content:start;align-items:start;gap:18px;padding:10px 24px;overflow-x:auto;overflow-y:hidden;flex:1;scroll-snap-type:x proximity;scrollbar-width:none;cursor:grab}
 .resumes-grid::-webkit-scrollbar{display:none}
 .resumes-grid.is-dragging,.resumes-grid.is-reordering{cursor:grabbing}
+.resumes-grid.is-empty{display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden;cursor:default}
+.resume-empty-state{width:min(100%,440px);min-height:min(420px,calc(100dvh - 300px));padding:24px 20px}
+.resume-empty-state p{font-size:18px;margin-bottom:8px}
+.resume-empty-state span{font-size:13px;line-height:1.65}
 .resume-card{background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);padding:16px;transition:all .25s var(--ease)}
 .resume-card:hover{border-color:var(--border);transform:translateY(-2px);box-shadow:var(--shadow)}
 .resume-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
@@ -882,6 +886,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
   .resumes-toolbar-left{flex-wrap:wrap}
   .resumes-search{min-width:0}
   .resumes-grid{grid-auto-columns:min(calc(100vw - 36px),340px);padding:16px 18px 28px}
+  .resumes-grid.is-empty{padding:20px 18px 24px}
+  .resume-empty-state{width:100%;min-height:min(300px,calc(100dvh - 260px));padding:20px 16px}
+  .resume-empty-state p{font-size:17px}
+  .resume-empty-state span{font-size:12px}
   .resume-card{width:min(calc(100vw - 36px),340px)}
   .resume-card-actions{grid-template-columns:1fr}
   .resume-linked-head{align-items:flex-start;flex-direction:column}
