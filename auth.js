@@ -4,7 +4,6 @@ var profileAvatarDraft='';
 var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
 var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
 var pendingOtpAuth={email:'',password:'',verifyType:'signup'};
-var pendingRecoverySession=null;
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -256,17 +255,13 @@ function isAlreadyRegisteredError(message){
 function showLoginStep(step){
     var step1=document.getElementById('login-step1');
     var step2=document.getElementById('login-step2');
-    var step3=document.getElementById('login-step3');
     var hint=document.getElementById('login-hint');
     if(step1)step1.style.display=step===1?'':'none';
     if(step2)step2.style.display=step===2?'':'none';
-    if(step3)step3.style.display=step===3?'':'none';
     if(hint){
         hint.textContent=step===2
             ?'请输入邮箱中的验证码，验证完成后即可直接用当前密码登录。'
-            :step===3
-                ?'重置链接已验证，请直接设置新的登录密码。'
-                :'首次使用会发送邮箱验证码，验证完成后即可保存到云端并支持多端同步。';
+            :'首次使用会发送邮箱验证码，验证完成后即可保存到云端并支持多端同步。';
     }
 }
 
@@ -291,37 +286,9 @@ function resetVerifyStep(){
     pendingOtpAuth.email='';
     pendingOtpAuth.password='';
     pendingOtpAuth.verifyType='signup';
-    pendingRecoverySession=null;
     var codeInput=document.getElementById('verify-code');
     if(codeInput)codeInput.value='';
-    var resetPasswordInput=document.getElementById('reset-password');
-    if(resetPasswordInput)resetPasswordInput.value='';
-    var resetPasswordConfirmInput=document.getElementById('reset-password-confirm');
-    if(resetPasswordConfirmInput)resetPasswordConfirmInput.value='';
     showLoginStep(1);
-}
-
-async function beginPasswordRecoveryFlow(){
-    var hash=(location.hash||'').replace(/^#/,'');
-    if(!hash)return false;
-    var params=new URLSearchParams(hash);
-    if(params.get('type')!=='recovery')return false;
-    var accessToken=params.get('access_token');
-    if(!accessToken)return false;
-    var session={
-        access_token:accessToken,
-        refresh_token:params.get('refresh_token')||'',
-        token_type:params.get('token_type')||'bearer',
-        expires_in:parseInt(params.get('expires_in')||'0',10)||0
-    };
-    var userResult=await sb.getUser(accessToken);
-    if(userResult.ok&&userResult.data)session.user=userResult.data;
-    pendingRecoverySession=session;
-    updateAppShell(false);
-    showLoginStep(3);
-    hideMsg();
-    showMsg('重置链接已生效，请设置新的密码。',false);
-    return true;
 }
 
 async function resendSignupCode(email,password,successText){
@@ -440,22 +407,7 @@ if(guestBtn)guestBtn.addEventListener('click',function(){
 
 var forgotBtn=document.getElementById('login-forgot');
 if(forgotBtn)forgotBtn.addEventListener('click',async function(){
-    var email=document.getElementById('login-email').value.trim();
-    if(!email||!email.includes('@')){
-        showMsg('请先输入注册邮箱。',true);
-        return;
-    }
-    forgotBtn.textContent='发送中...';
-    forgotBtn.disabled=true;
-    var resetRes=await sb.sendPasswordReset(email,getCleanLocationHref());
-    var resetErr=getAuthErrorText(resetRes);
-    if(resetRes.error){
-        showMsg(resetErr||'找回密码邮件发送失败，请稍后重试。',true);
-    }else{
-        showMsg('找回密码邮件已发送，请前往邮箱打开重置链接。',false);
-    }
-    forgotBtn.textContent='忘记密码';
-    forgotBtn.disabled=false;
+    openForgotModal();
 });
 
 var pwdToggle=document.getElementById('login-password-toggle');
@@ -511,42 +463,100 @@ if(backBtn)backBtn.addEventListener('click',function(){
     resetVerifyStep();
 });
 
-var resetPasswordBtn=document.getElementById('reset-password-submit');
-if(resetPasswordBtn)resetPasswordBtn.addEventListener('click',async function(){
-    var newPassword=(document.getElementById('reset-password').value||'').trim();
-    var confirmPassword=(document.getElementById('reset-password-confirm').value||'').trim();
-    if(!pendingRecoverySession||!pendingRecoverySession.access_token){
-        showMsg('重置链接已失效，请重新发送找回密码邮件。',true);
-        showLoginStep(1);
+function showForgotMsg(text,isErr){
+    var el=document.getElementById('forgot-msg');
+    if(!el)return;
+    el.style.display='block';
+    el.style.color=isErr?'var(--red)':'var(--green)';
+    el.textContent=text;
+}
+
+function hideForgotMsg(){
+    var el=document.getElementById('forgot-msg');
+    if(el)el.style.display='none';
+}
+
+function openForgotModal(){
+    hideForgotMsg();
+    var loginEmail=(document.getElementById('login-email').value||'').trim();
+    var forgotEmail=document.getElementById('forgot-email');
+    if(forgotEmail)forgotEmail.value=loginEmail||forgotEmail.value||'';
+    var forgotCode=document.getElementById('forgot-code');
+    if(forgotCode)forgotCode.value='';
+    var newPassword=document.getElementById('forgot-new-password');
+    if(newPassword)newPassword.value='';
+    var confirmPassword=document.getElementById('forgot-confirm-password');
+    if(confirmPassword)confirmPassword.value='';
+    document.getElementById('forgot-modal-overlay').classList.add('active');
+}
+
+function closeForgotModal(){
+    document.getElementById('forgot-modal-overlay').classList.remove('active');
+    hideForgotMsg();
+}
+
+var forgotModalClose=document.getElementById('forgot-modal-close');
+if(forgotModalClose)forgotModalClose.addEventListener('click',closeForgotModal);
+var forgotCancel=document.getElementById('forgot-cancel');
+if(forgotCancel)forgotCancel.addEventListener('click',closeForgotModal);
+
+var forgotSendCodeBtn=document.getElementById('forgot-send-code');
+if(forgotSendCodeBtn)forgotSendCodeBtn.addEventListener('click',async function(){
+    var email=(document.getElementById('forgot-email').value||'').trim();
+    if(!email||!email.includes('@')){
+        showForgotMsg('请输入有效的注册邮箱。',true);
+        return;
+    }
+    forgotSendCodeBtn.textContent='发送中...';
+    forgotSendCodeBtn.disabled=true;
+    var otpRes=await sb.sendEmailOtp(email,false);
+    if(otpRes&&otpRes.error){
+        showForgotMsg(getAuthErrorText(otpRes)||'验证码发送失败，请稍后重试。',true);
+    }else{
+        showForgotMsg('验证码已发送，请查收邮箱。',false);
+    }
+    forgotSendCodeBtn.textContent='发送验证码';
+    forgotSendCodeBtn.disabled=false;
+});
+
+var forgotConfirmBtn=document.getElementById('forgot-confirm');
+if(forgotConfirmBtn)forgotConfirmBtn.addEventListener('click',async function(){
+    var email=(document.getElementById('forgot-email').value||'').trim();
+    var code=(document.getElementById('forgot-code').value||'').trim();
+    var newPassword=(document.getElementById('forgot-new-password').value||'').trim();
+    var confirmPassword=(document.getElementById('forgot-confirm-password').value||'').trim();
+    if(!email||!email.includes('@')){
+        showForgotMsg('请输入有效的注册邮箱。',true);
+        return;
+    }
+    if(!code||code.length<6){
+        showForgotMsg('请输入邮箱中的验证码。',true);
         return;
     }
     if(!newPassword||newPassword.length<6){
-        showMsg('新密码至少 6 位。',true);
+        showForgotMsg('新密码至少 6 位。',true);
         return;
     }
     if(newPassword!==confirmPassword){
-        showMsg('两次输入的新密码不一致，请重新确认。',true);
+        showForgotMsg('两次输入的新密码不一致，请重新确认。',true);
         return;
     }
-    resetPasswordBtn.textContent='保存中...';
-    resetPasswordBtn.disabled=true;
-    var updateRes=await sb.updatePassword(pendingRecoverySession.access_token,newPassword);
-    if(updateRes&& !updateRes.error){
-        var nextSession=Object.assign({},pendingRecoverySession,{user:updateRes.user||pendingRecoverySession.user||null});
-        onSuccess(nextSession);
-        return;
+    forgotConfirmBtn.textContent='验证中...';
+    forgotConfirmBtn.disabled=true;
+    var verifyRes=await sb.verifyOTP(email,code,'email');
+    if(verifyRes&&verifyRes.access_token){
+        var updateRes=await sb.updatePassword(verifyRes.access_token,newPassword);
+        if(updateRes&&!updateRes.error){
+            closeForgotModal();
+            onSuccess(Object.assign({},verifyRes,{user:updateRes.user||verifyRes.user||null}));
+            return;
+        }
+        showForgotMsg(getAuthErrorText(updateRes)||'新密码保存失败，请重新获取验证码后再试。',true);
+    }else{
+        showForgotMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
     }
-    showMsg(getAuthErrorText(updateRes)||'新密码保存失败，请重新打开邮件中的重置链接再试一次。',true);
-    resetPasswordBtn.textContent='保存新密码';
-    resetPasswordBtn.disabled=false;
-});
-
-var resetPasswordBackBtn=document.getElementById('reset-password-back');
-if(resetPasswordBackBtn)resetPasswordBackBtn.addEventListener('click',function(){
-    pendingRecoverySession=null;
-    syncSession(null);
-    hideMsg();
-    location.replace(getCleanLocationHref());
+    forgotConfirmBtn.textContent='验证并登录';
+    forgotConfirmBtn.disabled=false;
 });
 
 var codeInput=document.getElementById('verify-code');
@@ -730,8 +740,4 @@ if(profileClose)profileClose.addEventListener('click',function(){
     document.getElementById('profile-modal-overlay').classList.remove('active');
 });
 
-(async function initAuth(){
-    var inRecovery=await beginPasswordRecoveryFlow();
-    if(inRecovery)return;
-    checkAuth();
-})();
+checkAuth();

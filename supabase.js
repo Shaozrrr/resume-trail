@@ -191,15 +191,18 @@ const sb={
     return this.unwrapAuthResponse('auth.resendSignup',result);
   },
 
-  async sendPasswordReset(email,redirectTo){
-    const payload={email:email};
-    if(redirectTo)payload.redirect_to=redirectTo;
-    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/recover',{
+  async sendEmailOtp(email,createUser){
+    const payload={
+      email:email,
+      create_user:!!createUser,
+      should_create_user:!!createUser
+    };
+    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/otp',{
       method:'POST',
       headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},
       body:JSON.stringify(payload)
     });
-    return this.unwrapAuthResponse('auth.sendPasswordReset',result);
+    return this.unwrapAuthResponse('auth.sendEmailOtp',result);
   },
 
   async updatePassword(token,password){

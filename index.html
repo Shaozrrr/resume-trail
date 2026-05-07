@@ -33,8 +33,10 @@
                         </button>
                     </div>
                     <button class="btn-primary" id="login-submit">注册 / 登录</button>
-                    <button class="btn-ghost login-guest-btn" id="login-guest">先体验看看</button>
-                    <button class="btn-ghost login-secondary-btn" id="login-forgot">忘记密码</button>
+                    <div class="login-aux-row">
+                        <button class="btn-ghost login-aux-btn" id="login-guest">先体验看看</button>
+                        <button class="btn-ghost login-aux-btn" id="login-forgot">忘记密码</button>
+                    </div>
                 </div>
                 <div id="login-step2" style="display:none">
                     <p style="font-size:13px;color:var(--text-secondary);text-align:center;margin-bottom:12px">验证码已发送到 <span id="verify-email-display" style="color:var(--text-primary);font-weight:500"></span></p>
@@ -48,25 +50,46 @@
                     <button class="btn-ghost login-secondary-btn" id="verify-resend">重新发送验证码</button>
                     <button class="btn-ghost login-secondary-btn" id="verify-back">返回修改邮箱或密码</button>
                 </div>
-                <div id="login-step3" style="display:none">
-                    <p style="font-size:13px;color:var(--text-secondary);text-align:center;margin-bottom:12px">请设置新的登录密码</p>
-                    <div class="form-group login-input-group">
-                        <span class="login-input-icon" aria-hidden="true">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="10" width="16" height="10" rx="2.5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="15" r="1.2" fill="currentColor"/></svg>
-                        </span>
-                        <input type="password" id="reset-password" placeholder="新密码（至少6位）">
-                    </div>
-                    <div class="form-group login-input-group">
-                        <span class="login-input-icon" aria-hidden="true">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="4" y="10" width="16" height="10" rx="2.5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="15" r="1.2" fill="currentColor"/></svg>
-                        </span>
-                        <input type="password" id="reset-password-confirm" placeholder="确认新密码">
-                    </div>
-                    <button class="btn-primary" id="reset-password-submit">保存新密码</button>
-                    <button class="btn-ghost login-secondary-btn" id="reset-password-back">返回登录</button>
-                </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
                 <p id="login-hint" class="login-hint-text">首次使用会发送邮箱验证码，验证完成后即可直接用密码登录</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="forgot-modal-overlay">
+        <div class="modal forgot-modal">
+            <div class="modal-header forgot-modal-header">
+                <div>
+                    <h2>找回密码</h2>
+                    <p>输入邮箱、验证码和新密码，验证后会直接登录。</p>
+                </div>
+                <button class="modal-close" id="forgot-modal-close">&times;</button>
+            </div>
+            <div class="modal-body forgot-modal-body">
+                <div class="form-group">
+                    <label>注册邮箱</label>
+                    <input type="email" id="forgot-email" placeholder="请输入注册邮箱">
+                </div>
+                <div class="form-group forgot-code-row">
+                    <div class="forgot-code-main">
+                        <label>验证码</label>
+                        <input type="text" id="forgot-code" placeholder="请输入 6 位验证码" maxlength="8">
+                    </div>
+                    <button class="btn-ghost forgot-send-btn" id="forgot-send-code" type="button">发送验证码</button>
+                </div>
+                <div class="form-group">
+                    <label>新密码</label>
+                    <input type="password" id="forgot-new-password" placeholder="至少 6 位">
+                </div>
+                <div class="form-group">
+                    <label>确认新密码</label>
+                    <input type="password" id="forgot-confirm-password" placeholder="再次输入新密码">
+                </div>
+                <div id="forgot-msg" class="forgot-msg" style="display:none"></div>
+            </div>
+            <div class="modal-footer forgot-modal-footer">
+                <button class="btn-secondary" id="forgot-cancel">取消</button>
+                <button class="btn-primary" id="forgot-confirm">验证并登录</button>
             </div>
         </div>
     </div>
