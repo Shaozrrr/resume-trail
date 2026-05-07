@@ -35,7 +35,12 @@ function renderCalendar(){
             const today=toDateKey(new Date())===ds;
             const adjacent=current.getMonth()!==m;
             const evts=getEventsForDate(ds);
-            const visibleEvents=evts.slice(0,maxVisible).map(e=>`<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy"><strong>${escapeHTML(e.label)}</strong><span class="cal-event-company">${escapeHTML(e.company)}</span><span class="cal-event-role">${escapeHTML(e.position)}</span></div></div>`).join('');
+            const visibleEvents=evts.slice(0,maxVisible).map(e=>{
+                const mobileCopy=isMobileMonth
+                    ?`<strong>${escapeHTML(e.label)}</strong><span class="cal-event-company">${escapeHTML(e.company)}</span>`
+                    :`<strong>${escapeHTML(e.label)}</strong><span class="cal-event-company">${escapeHTML(e.company)}</span><span class="cal-event-role">${escapeHTML(e.position)}</span>`;
+                return `<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy">${mobileCopy}</div></div>`;
+            }).join('');
             const more=evts.length>maxVisible?`<div class="cal-event-more">+${evts.length-maxVisible} 个待处理</div>`:'';
             html+=`<div class="cal-day ${today?'today':''} ${adjacent?'adjacent':''}" data-date="${ds}"><span class="cal-day-num">${current.getDate()}</span><div class="cal-day-events">${visibleEvents}${more}</div></div>`;
         }
