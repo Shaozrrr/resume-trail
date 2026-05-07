@@ -25,7 +25,7 @@ function renderCalendar(){
         title.textContent=`${y}年${m+1}月`;
         const first=new Date(y,m,1),startDay=first.getDay();
         const monthStart=new Date(y,m,1-startDay);
-        const maxVisible=window.innerWidth<=560?2:3;
+        const maxVisible=window.innerWidth<=560?1:3;
         let html='<div class="cal-header"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="cal-days">';
         for(let i=0;i<42;i++){
             const current=new Date(monthStart);
