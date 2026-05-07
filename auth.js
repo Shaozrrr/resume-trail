@@ -114,6 +114,7 @@ function enterGuestMode(){
     if(!window.rtGuestStore)return;
     window.rtGuestStore.enable();
     sb.clearSession('guest.enter');
+    if(window.rtAnalytics&&typeof window.rtAnalytics.reset==='function')window.rtAnalytics.reset();
     clearLocalBusinessData();
     var guestNickname=ensureGuestNickname();
     const data=window.rtGuestStore.ensureData();
@@ -136,6 +137,7 @@ function enterGuestMode(){
     if(typeof updIntl==='function')updIntl();
     if(typeof refresh==='function')refresh();
     if(typeof switchView==='function')switchView('pipeline');
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_guest_mode_started',{entry:'login_page'});
     showMsg('当前为本地体验模式，数据仅保存在本机。',false);
     setTimeout(function(){hideMsg();},1800);
 }
@@ -153,6 +155,7 @@ async function checkAuth(){
     if(session&&session.access_token){
         updateAppShell(true);
         updateAvatar();
+        if(typeof window.rtIdentifyUser==='function')window.rtIdentifyUser(session.user,{auth_state:'authenticated'});
         console.log('[RT auth] active user',{userId:session.user&&session.user.id||null,email:session.user&&session.user.email||null});
         try{
             const loadResult=await cloudStore.loadInto(store);
@@ -182,6 +185,7 @@ async function checkAuth(){
         return true;
     }
     updateAppShell(false);
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_login_page_view',{auth_state:'logged_out'});
     return false;
 }
 
@@ -303,6 +307,7 @@ async function resendSignupCode(email,password,successText){
         return false;
     }
     openVerifyStep(email,password);
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_resend'});
     showMsg(successText||'验证码已发送，请检查邮箱。',false);
     return true;
 }
@@ -324,7 +329,7 @@ function clearLocalBusinessData(){
     store.resetState();
 }
 
-function onSuccess(result){
+function onSuccess(result,meta){
     if(window.rtGuestStore)window.rtGuestStore.disable();
     clearLocalBusinessData();
     if(result&&result.user&&result.user.email){
@@ -336,6 +341,14 @@ function onSuccess(result){
     }
     sb.setSession(result,'auth.onSuccess');
     syncSession(result);
+    if(typeof window.rtIdentifyUser==='function'&&result&&result.user)window.rtIdentifyUser(result.user,{
+        auth_state:'authenticated',
+        signup_method:'email_otp'
+    });
+    if(typeof window.rtTrackEvent==='function'){
+        window.rtTrackEvent('rt_login_success',{flow:meta&&meta.flow||'password'});
+        if(meta&&meta.isNewUser)window.rtTrackEvent('rt_sign_up_completed',{flow:meta.flow||'password'});
+    }
     showMsg('欢迎！正在进入...',false);
     setTimeout(function(){location.replace(getCleanLocationHref());},600);
 }
@@ -349,10 +362,11 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     hideMsg();
     submitBtn.textContent='请稍候...';
     submitBtn.disabled=true;
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_auth_started',{entry:'login_form'});
 
     var loginRes=await sb.signIn(email,pwd);
     if(loginRes.access_token){
-        onSuccess(loginRes);
+        onSuccess(loginRes,{flow:'password'});
         return;
     }
 
@@ -365,13 +379,15 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     }
 
     if(isInvalidLoginError(errMsg)){
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_sign_up_started',{entry:'login_form'});
         var signUpRes=await sb.signUp(email,pwd);
         if(signUpRes.access_token){
-            onSuccess(signUpRes);
+            onSuccess(signUpRes,{flow:'signup_direct',isNewUser:true});
             return;
         }
         if(signUpRes.user&&!signUpRes.error){
             openVerifyStep(email,pwd);
+            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup'});
             showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
             submitBtn.textContent='注册 / 登录';
             submitBtn.disabled=false;
@@ -435,7 +451,8 @@ if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     verifyBtn.disabled=true;
     var verifyRes=await verifyEmailCode(email,code,pendingOtpAuth.verifyType||'signup');
     if(verifyRes&&verifyRes.access_token){
-        onSuccess(verifyRes);
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'signup'});
+        onSuccess(verifyRes,{flow:'signup_otp',isNewUser:true});
         return;
     }
     showMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
@@ -513,6 +530,10 @@ if(forgotSendCodeBtn)forgotSendCodeBtn.addEventListener('click',async function()
     if(otpRes&&otpRes.error){
         showForgotMsg(getAuthErrorText(otpRes)||'验证码发送失败，请稍后重试。',true);
     }else{
+        if(typeof window.rtTrackEvent==='function'){
+            window.rtTrackEvent('rt_password_reset_started',{entry:'forgot_modal'});
+            window.rtTrackEvent('rt_otp_sent',{flow:'password_reset'});
+        }
         showForgotMsg('验证码已发送，请查收邮箱。',false);
     }
     forgotSendCodeBtn.textContent='发送验证码';
@@ -545,10 +566,12 @@ if(forgotConfirmBtn)forgotConfirmBtn.addEventListener('click',async function(){
     forgotConfirmBtn.disabled=true;
     var verifyRes=await sb.verifyOTP(email,code,'email');
     if(verifyRes&&verifyRes.access_token){
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'password_reset'});
         var updateRes=await sb.updatePassword(verifyRes.access_token,newPassword);
         if(updateRes&&!updateRes.error){
+            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_password_reset_completed',{entry:'forgot_modal'});
             closeForgotModal();
-            onSuccess(Object.assign({},verifyRes,{user:updateRes.user||verifyRes.user||null}));
+            onSuccess(Object.assign({},verifyRes,{user:updateRes.user||verifyRes.user||null}),{flow:'password_reset'});
             return;
         }
         showForgotMsg(getAuthErrorText(updateRes)||'新密码保存失败，请重新获取验证码后再试。',true);
@@ -621,6 +644,9 @@ if(profileSave)profileSave.addEventListener('click',async function(){
     applyAvatarContent(document.getElementById('profile-avatar-display'),profileAvatarDraft||'',nickname?(nickname[0].toUpperCase()):((rtSession&&rtSession.user&&rtSession.user.email)?rtSession.user.email[0].toUpperCase():'👤'));
     document.getElementById('profile-modal-overlay').classList.remove('active');
     updateAvatar();
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_profile_saved',{
+        guest_mode:!!(window.rtGuestStore&&window.rtGuestStore.isEnabled())
+    });
     toast('已保存','success');
 });
 
@@ -726,11 +752,14 @@ if(profileLogout)profileLogout.addEventListener('click',async function(){
     if(!confirm(isGuest?'返回登录页？本地体验数据会保留在当前设备。':'确定退出登录？'))return;
     if(isGuest){
         window.rtGuestStore.disable();
+        if(window.rtAnalytics&&typeof window.rtAnalytics.reset==='function')window.rtAnalytics.reset();
         location.reload();
         return;
     }
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_logged_out',{entry:'profile_modal'});
     if(rtSession&&rtSession.access_token)await sb.signOut(rtSession.access_token);
     sb.clearSession('auth.logout');
+    if(window.rtAnalytics&&typeof window.rtAnalytics.reset==='function')window.rtAnalytics.reset();
     clearLocalBusinessData();
     location.reload();
 });

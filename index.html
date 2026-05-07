@@ -450,6 +450,19 @@
     </div>
 
     <div id="toast-container"></div>
+    <script>
+        window.RT_ANALYTICS_CONFIG=Object.assign({
+            provider:'posthog',
+            apiKey:'phc_thzmNVy5TyufBucV5y3HQ3N2MPPN54aVokiY9q3qiqKG',
+            apiHost:'https://us.i.posthog.com',
+            personProfiles:'identified_only',
+            autocapture:true,
+            capturePageview:true,
+            capturePageleave:true,
+            debug:false
+        },window.RT_ANALYTICS_CONFIG||{});
+    </script>
+    <script src="analytics.js"></script>
     <script src="particles.js"></script>
     <script src="app.js"></script>
     <script src="supabase.js"></script>

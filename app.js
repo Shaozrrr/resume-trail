@@ -105,6 +105,27 @@ function createEl(tag,className,text){
     return el;
 }
 
+function getAnalyticsBaseProps(extra){
+    return Object.assign({
+        guest_mode:!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()),
+        current_view:typeof curView==='string'&&curView?curView:'login',
+        device_type:window.innerWidth<=720?'mobile':'desktop'
+    },extra||{});
+}
+
+window.rtTrackEvent=function(name,props){
+    if(!window.rtAnalytics||typeof window.rtAnalytics.capture!=='function')return false;
+    return window.rtAnalytics.capture(name,getAnalyticsBaseProps(props));
+};
+
+window.rtIdentifyUser=function(user,props){
+    if(!window.rtAnalytics||typeof window.rtAnalytics.identify!=='function'||!user||!user.id)return false;
+    return window.rtAnalytics.identify(user.id,Object.assign({
+        email:user.email||'',
+        device_type:window.innerWidth<=720?'mobile':'desktop'
+    },props||{}));
+};
+
 function appendTextLines(target,text){
     String(text||'').split('\n').forEach(function(line,index){
         if(index)target.appendChild(document.createElement('br'));
@@ -322,7 +343,7 @@ class Store{
         return log;
     }
     async addApp(a){
-        return this.commit('app.add',draft=>{
+        const result=await this.commit('app.add',draft=>{
             const app=Object.assign({},cloneData(a),{
                 id:crypto.randomUUID(),
                 created_at:new Date().toISOString()
@@ -336,6 +357,15 @@ class Store{
             draft.addLog(app.id,null,app.status);
             return app;
         });
+        if(result&&result!==false&&window.rtTrackEvent){
+            window.rtTrackEvent('rt_application_created',{
+                status:result.status||'APPLIED',
+                category:result.position_category||'',
+                source_channel:result.source_channel||'',
+                has_resume:!!result.resume_id
+            });
+        }
+        return result;
     }
     async updateApp(id,u){
         return this.commit('app.update',draft=>{
@@ -370,7 +400,7 @@ class Store{
         });
     }
     async addResume(r){
-        return this.commit('resume.add',draft=>{
+        const result=await this.commit('resume.add',draft=>{
             const now=new Date().toISOString();
             const maxOrder=draft.resumes.reduce(function(max,resume){
                 return Math.max(max,Number.isFinite(resume.sort_order)?resume.sort_order:-1);
@@ -379,6 +409,20 @@ class Store{
             draft.resumes.push(resume);
             return resume;
         });
+        if(result&&result!==false&&window.rtTrackEvent){
+            window.rtTrackEvent('rt_resume_created',{
+                file_type:result.file_type||'',
+                has_file:!!result.data_url,
+                tag_count:(result.tags||[]).length
+            });
+            if(result.data_url){
+                window.rtTrackEvent('rt_resume_uploaded',{
+                    file_type:result.file_type||'',
+                    size_kb:result.size?Math.round(result.size/1024):0
+                });
+            }
+        }
+        return result;
     }
     async updateResume(id,patch){
         return this.commit('resume.update',draft=>{
@@ -424,11 +468,19 @@ class Store{
         });
     }
     async addRef(r){
-        return this.commit('reflection.add',draft=>{
+        const result=await this.commit('reflection.add',draft=>{
             const ref=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:new Date().toISOString()});
             draft.refs.push(ref);
             return ref;
         });
+        if(result&&result!==false&&window.rtTrackEvent){
+            window.rtTrackEvent('rt_reflection_created',{
+                interview_round:result.interview_round||'',
+                input_type:result.input_type||'TEXT',
+                pain_point_count:(result.pain_points||[]).length
+            });
+        }
+        return result;
     }
     async updateRef(id,u){
         return this.commit('reflection.update',draft=>{
@@ -544,7 +596,7 @@ class Store{
         return true;
     }
     async importApps(rows){
-        return this.commit('app.import',draft=>{
+        const result=await this.commit('app.import',draft=>{
             rows.forEach(function(d){
                 if(d.category&&!draft.categories.includes(d.category))draft.categories.push(d.category);
                 const app={
@@ -565,6 +617,12 @@ class Store{
             });
             return rows.length;
         });
+        if(result&&result!==false&&window.rtTrackEvent){
+            window.rtTrackEvent('rt_application_imported',{
+                row_count:result
+            });
+        }
+        return result;
     }
 }
 const store=new Store();
@@ -1352,6 +1410,14 @@ function switchView(v){
     $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${v}"]`)?.classList.add('active');
     $('#view-title').textContent=tm[v]||'';$('#view-subtitle').textContent=v==='pipeline'?`${store.apps.length} 条投递`:'';
     if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
+    if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
+        window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
+            view:v,
+            application_count:store.apps.length,
+            resume_count:store.resumes.length,
+            reflection_count:store.refs.length
+        }));
+    }
 }
 $$('.nav-item[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 initSidebarBrand();
