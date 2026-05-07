@@ -33,7 +33,9 @@ function renderCalendar(){
             const today=toDateKey(new Date())===ds;
             const adjacent=current.getMonth()!==m;
             const evts=getEventsForDate(ds);
-            html+=`<div class="cal-day ${today?'today':''} ${adjacent?'adjacent':''}" data-date="${ds}"><span class="cal-day-num">${current.getDate()}</span>${evts.map(e=>`<div class="cal-event" style="background:${e.color}" title="${e.company} · ${e.position}">${e.company.slice(0,4)} ${e.label}</div>`).join('')}</div>`;
+            const visibleEvents=evts.slice(0,3).map(e=>`<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy"><strong>${escapeHTML(e.label)}</strong><span>${escapeHTML(e.company)}</span></div></div>`).join('');
+            const more=evts.length>3?`<div class="cal-event-more">+${evts.length-3} 个待处理</div>`:'';
+            html+=`<div class="cal-day ${today?'today':''} ${adjacent?'adjacent':''}" data-date="${ds}"><span class="cal-day-num">${current.getDate()}</span><div class="cal-day-events">${visibleEvents}${more}</div></div>`;
         }
         html+='</div>';grid.innerHTML=html;
     }else{
@@ -46,7 +48,7 @@ function renderCalendar(){
             const d=new Date(ws.getTime()+i*864e5),ds=toDateKey(d);
             const today=toDateKey(new Date())===ds;
             const evts=getEventsForDate(ds);
-            html+=`<div class="cal-week-day ${today?'today':''}"><div class="cal-week-header"><span>${dayN[i]}</span><span class="cal-day-num">${d.getDate()}</span></div>${evts.map(e=>`<div class="cal-event-lg" style="border-left:3px solid ${e.color}"><div style="font-weight:500;font-size:12px">${e.company}</div><div style="font-size:10px;color:var(--text-muted)">${e.position} · ${e.label}</div></div>`).join('')}</div>`;
+            html+=`<div class="cal-week-day ${today?'today':''}"><div class="cal-week-header"><span class="cal-weekday-name">${dayN[i]}</span><span class="cal-day-num">${d.getDate()}</span></div>${evts.map(e=>`<div class="cal-event-lg" style="--event:${e.color}"><span class="cal-event-lg-rail"></span><div class="cal-event-lg-copy"><div class="cal-event-lg-label">${escapeHTML(e.label)}</div><div class="cal-event-lg-company">${escapeHTML(e.company)}</div><div class="cal-event-lg-role">${escapeHTML(e.position)}</div></div></div>`).join('')}</div>`;
         }
         html+='</div>';grid.innerHTML=html;
     }
@@ -54,7 +56,7 @@ function renderCalendar(){
 }
 function getEventsForDate(ds){
     const evts=[];if(typeof store==='undefined')return evts;
-    const colors={'笔试/OA':'#a78bfa','一面':'#60a5fa','二面':'#818cf8','三面':'#f472b6','四面':'#fb923c','群面':'#34d399','HR面':'#fbbf24','Offer':'#4ade80','挂了':'#f87171'};
+    const colors={'笔试/OA':'#8b5cf6','一面':'#60a5fa','二面':'#818cf8','三面':'#d946ef','四面':'#fb923c','群面':'#34d399','HR面':'#fbbf24','Offer':'#4ade80','挂了':'#f87171','未通过':'#f87171'};
     store.apps.forEach(a=>{
         if(a.timeline)a.timeline.forEach(t=>{if(t.date===ds&&t.name!=='已投递')evts.push({label:t.name,company:a.company_name,position:a.position_title,color:colors[t.name]||'#60a5fa'});});
         if(a.next_deadline&&a.next_deadline.startsWith(ds))evts.push({label:'DDL'+(a.next_action?' '+a.next_action:''),company:a.company_name,position:a.position_title,color:'#f87171'});
@@ -79,7 +81,6 @@ $$('.cal-view-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.cal-view-bt
 // ---- 浏览器通知 ----
 function checkNotif(){
     if(!('Notification' in window)||typeof store==='undefined')return;
-    if(Notification.permission==='default')Notification.requestPermission();
     if(Notification.permission!=='granted')return;
     const today=toDateKey(new Date()),tmr=toDateKey(new Date(Date.now()+864e5));
     store.apps.forEach(a=>{if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd===today||dd===tmr){const k='n_'+a.id+'_'+dd;if(!localStorage.getItem(k)){new Notification('履迹 · 提醒',{body:`${a.company_name} · ${a.next_action||'DDL'}${dd===today?' 今天到期！':' 明天到期！'}`});localStorage.setItem(k,'1');}}}});

@@ -19,15 +19,55 @@ const REJECTION_STAGES={RESUME_SCREEN:'简历筛选未通过',OA_FAIL:'笔试未
 const ROUND_LABELS={OA_TEST:'笔试/OA',ROUND_1:'一面',ROUND_2:'二面',ROUND_3:'三面',ROUND_4:'四面',GROUP:'群面',HR:'HR面'};
 const TL_TO_STATUS={'已投递':'APPLIED','笔试/OA':'OA_TEST','一面':'ROUND_1','二面':'ROUND_2','三面':'ROUND_3','四面':'ROUND_4','Offer':'OFFER','挂了':'REJECTED','未通过':'REJECTED'};
 const TL_OPTIONS=['已投递','笔试/OA','一面','二面','三面','四面','群面','HR面','Offer','未通过'];
+const STATUS_TO_TL={APPLIED:'已投递',OA_TEST:'笔试/OA',ROUND_1:'一面',ROUND_2:'二面',ROUND_3:'三面',ROUND_4:'四面',OFFER:'Offer',REJECTED:'未通过'};
+const TIMELINE_STAGE_ORDER={'已投递':0,'笔试/OA':1,'一面':2,'群面':2,'HR面':2,'二面':3,'三面':4,'四面':5,'Offer':6,'未通过':7,'挂了':7};
+function getTimelineNameForStatus(status){
+    return STATUS_TO_TL[status]||'';
+}
+function parseTimelineDateValue(value){
+    if(!value)return null;
+    const date=new Date(value);
+    if(Number.isNaN(date.getTime()))return null;
+    return date.getTime();
+}
+function compareTimelineItems(a,b){
+    const aTime=parseTimelineDateValue(a?.date);
+    const bTime=parseTimelineDateValue(b?.date);
+    if(aTime!==null&&bTime!==null&&aTime!==bTime)return aTime-bTime;
+    if(aTime===null&&bTime!==null)return -1;
+    if(aTime!==null&&bTime===null)return 1;
+    const aOrder=TIMELINE_STAGE_ORDER[a?.name]??999;
+    const bOrder=TIMELINE_STAGE_ORDER[b?.name]??999;
+    if(aOrder!==bOrder)return aOrder-bOrder;
+    return String(a?.name||'').localeCompare(String(b?.name||''),'zh-CN');
+}
+function sortTimeline(items){
+    return cloneData(items||[]).filter(item=>item&&item.name).sort(compareTimelineItems);
+}
+function getLatestTimelineEntry(timeline){
+    const ordered=sortTimeline(timeline).filter(item=>TL_TO_STATUS[item.name]);
+    return ordered.length?ordered[ordered.length-1]:null;
+}
+function validateTimelineChronology(timeline){
+    const ordered=sortTimeline(timeline);
+    let maxRank=-1;
+    for(let i=0;i<ordered.length;i++){
+        const item=ordered[i];
+        const rank=TIMELINE_STAGE_ORDER[item.name];
+        const currentTime=parseTimelineDateValue(item.date);
+        if(typeof rank!=='number'||currentTime===null)continue;
+        if(rank<maxRank){
+            return `${item.name} 的时间不能早于前一阶段，请检查时间线顺序。`;
+        }
+        maxRank=Math.max(maxRank,rank);
+    }
+    return '';
+}
 // 从时间线推导状态
 function deriveStatus(timeline){
-    if(!timeline||!timeline.length)return'WATCHING';
-    // 找最后一个有状态映射的条目
-    for(let i=timeline.length-1;i>=0;i--){
-        const s=TL_TO_STATUS[timeline[i].name];
-        if(s)return s;
-    }
-    return'APPLIED';
+    const latest=getLatestTimelineEntry(timeline);
+    if(!latest)return'WATCHING';
+    return TL_TO_STATUS[latest.name]||'APPLIED';
 }
 const PREF_OPTIONS=[{v:'1',l:'⭐ 保底'},{v:'2',l:'⭐⭐ 一般'},{v:'3',l:'⭐⭐⭐ 心仪'},{v:'4',l:'⭐⭐⭐⭐ 梦想'}];
 const DEFAULT_PP=['表达不清','知识盲区','紧张','准备不足','Case分析薄弱','行为面试不佳','技术题不熟练'];
@@ -123,13 +163,15 @@ function normalizeTableColumns(cols){
 
 function normalizeAppRecord(app){
     const source=app||{};
-    const timeline=cloneData(source.timeline||source.tl||[]);
+    const timeline=sortTimeline(source.timeline||source.tl||[]);
+    const latestTimeline=getLatestTimelineEntry(timeline);
     const next=Object.assign({},source,{
         company_name:source.company_name||source.cn||'',
         position_title:source.position_title||source.pt||'',
         position_category:source.position_category||source.pc||'',
         base_location:source.base_location||source.base||'',
         applied_date:source.applied_date||source.ad||'',
+        current_status_date:source.current_status_date||source.csd||latestTimeline?.date||source.applied_date||source.ad||'',
         preference_level:source.preference_level||source.pl||'3',
         source_channel:source.source_channel||source.sc||'',
         source_link:source.source_link||'',
@@ -137,6 +179,8 @@ function normalizeAppRecord(app){
         timeline:timeline,
         customFields:source.customFields&&typeof source.customFields==='object'?source.customFields:{}
     });
+    const appliedEntry=timeline.find(item=>item.name==='已投递');
+    if(appliedEntry&&appliedEntry.date)next.applied_date=appliedEntry.date;
     if(!next.status)next.status=deriveStatus(timeline);
     return next;
 }
@@ -285,6 +329,9 @@ class Store{
             });
             app.updated_at=app.created_at;
             if(!app.timeline)app.timeline=[];
+            app.timeline=sortTimeline(app.timeline);
+            app.status=app.status||deriveStatus(app.timeline);
+            app.current_status_date=app.current_status_date||getLatestTimelineEntry(app.timeline)?.date||app.applied_date||'';
             draft.apps.push(app);
             draft.addLog(app.id,null,app.status);
             return app;
@@ -296,6 +343,9 @@ class Store{
             if(idx<0)return null;
             const old=draft.apps[idx];
             const updates=cloneData(u||{});
+            if(updates.timeline)updates.timeline=sortTimeline(updates.timeline);
+            if(updates.timeline&&!updates.status)updates.status=deriveStatus(updates.timeline);
+            if(updates.timeline&&!updates.current_status_date)updates.current_status_date=getLatestTimelineEntry(updates.timeline)?.date||old.current_status_date||old.applied_date||'';
             if(updates.status&&updates.status!==old.status)draft.addLog(id,old.status,updates.status,updates._rej);
             delete updates._rej;
             Object.assign(draft.apps[idx],updates,{updated_at:new Date().toISOString()});
@@ -386,6 +436,12 @@ class Store{
             if(idx<0)return null;
             Object.assign(draft.refs[idx],cloneData(u||{}));
             return draft.refs[idx];
+        });
+    }
+    async delRef(id){
+        return this.commit('reflection.delete',draft=>{
+            draft.refs=draft.refs.filter(r=>r.id!==id);
+            return true;
         });
     }
     getApp(id){return this.apps.find(a=>a.id===id);}
@@ -608,23 +664,323 @@ function renderSourcePerformanceChart(entries){
         target.innerHTML='<div class="empty-state compact"><p>暂无</p></div>';
         return;
     }
+    const topEntries=entries.slice(0,6);
+    target.textContent='';
+    const shell=createEl('div','source-donut-shell');
+    const donut=createEl('div','source-donut');
+    donut.style.background=`conic-gradient(${buildConicGradient(topEntries.map(function(entry,index){return {value:entry.total,color:COLORS[index%COLORS.length]};}))})`;
+    const center=createEl('div','source-donut-center');
+    center.appendChild(createEl('div','source-donut-total',String(topEntries.reduce(function(sum,entry){return sum+entry.total;},0))));
+    center.appendChild(createEl('div','source-donut-label','总投递数'));
+    donut.appendChild(center);
+    shell.appendChild(donut);
+    const list=createEl('div','source-metric-list');
+    const head=createEl('div','source-metric-head');
+    head.innerHTML='<span>渠道</span><span>投递</span><span>推进</span><span>转化</span>';
+    list.appendChild(head);
+    topEntries.forEach(function(entry,index){
+        const row=createEl('div','source-metric-row');
+        const left=createEl('div','source-metric-left');
+        const dot=createEl('span','source-metric-dot');
+        dot.style.background=COLORS[index%COLORS.length];
+        left.appendChild(dot);
+        left.appendChild(createEl('div','source-metric-name',entry.label));
+        row.appendChild(left);
+        row.appendChild(createEl('strong','source-metric-count',String(entry.total)));
+        row.appendChild(createEl('strong','source-metric-count',String(entry.progress)));
+        row.appendChild(createEl('strong','source-stat-rate',`${entry.rate}%`));
+        list.appendChild(row);
+    });
+    shell.appendChild(list);
+    target.appendChild(shell);
+}
+
+function createSvgEl(tag,attrs){
+    const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+    Object.entries(attrs||{}).forEach(function(pair){
+        const key=pair[0],value=pair[1];
+        if(typeof value!=='undefined'&&value!==null)el.setAttribute(key,String(value));
+    });
+    return el;
+}
+
+let analyticsTrendGranularity='day';
+
+function buildTrendRange(apps,granularity='day'){
+    const today=new Date();
+    today.setHours(0,0,0,0);
+    const points=new Map();
+    function hit(dateStr,key){
+        if(!dateStr)return;
+        const d=new Date(dateStr);
+        if(Number.isNaN(d.getTime()))return;
+        d.setHours(0,0,0,0);
+        let bucketKey='';
+        let label='';
+        if(granularity==='month'){
+            bucketKey=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            label=`${String(d.getMonth()+1).padStart(2,'0')}月`;
+        }else if(granularity==='week'){
+            const start=new Date(d);
+            start.setDate(d.getDate()-d.getDay());
+            bucketKey=start.toISOString().split('T')[0];
+            const end=new Date(start);
+            end.setDate(start.getDate()+6);
+            label=`${String(start.getMonth()+1).padStart(2,'0')}/${String(start.getDate()).padStart(2,'0')}`;
+        }else{
+            bucketKey=d.toISOString().split('T')[0];
+            label=`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+        }
+        if(!points.has(bucketKey))points.set(bucketKey,{key:bucketKey,label:label,applied:0,interview:0});
+        points.get(bucketKey)[key]++;
+    }
+    apps.forEach(function(app){
+        hit(app.applied_date,'applied');
+        (app.timeline||[]).forEach(function(item){
+            if(['一面','二面','三面','四面','群面','HR面'].includes(item.name))hit(item.date,'interview');
+        });
+    });
+    if(granularity==='month'){
+        const result=[];
+        for(let i=5;i>=0;i--){
+            const d=new Date(today.getFullYear(),today.getMonth()-i,1);
+            const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            const entry=points.get(key)||{applied:0,interview:0,label:`${String(d.getMonth()+1).padStart(2,'0')}月`};
+            result.push({label:entry.label,applied:entry.applied,interview:entry.interview});
+        }
+        return result;
+    }
+    if(granularity==='week'){
+        const result=[];
+        const startWeek=new Date(today);
+        startWeek.setDate(today.getDate()-today.getDay()-7*7);
+        startWeek.setHours(0,0,0,0);
+        for(let i=0;i<8;i++){
+            const bucket=new Date(startWeek);
+            bucket.setDate(startWeek.getDate()+i*7);
+            const key=bucket.toISOString().split('T')[0];
+            const entry=points.get(key)||{applied:0,interview:0,label:`${String(bucket.getMonth()+1).padStart(2,'0')}/${String(bucket.getDate()).padStart(2,'0')}`};
+            result.push({label:entry.label,applied:entry.applied,interview:entry.interview});
+        }
+        return result;
+    }
+    const result=[];
+    const start=new Date(today);
+    start.setDate(today.getDate()-27);
+    for(let i=0;i<28;i++){
+        const bucket=new Date(start);
+        bucket.setDate(start.getDate()+i);
+        const key=bucket.toISOString().split('T')[0];
+        const entry=points.get(key)||{applied:0,interview:0,label:`${String(bucket.getMonth()+1).padStart(2,'0')}/${String(bucket.getDate()).padStart(2,'0')}`};
+        result.push({label:entry.label,applied:entry.applied,interview:entry.interview});
+    }
+    return result;
+}
+
+function renderTrendChart(series){
+    const target=document.getElementById('trend-chart');
+    if(!target)return;
+    if(!series.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无趋势</p></div>';
+        return;
+    }
+    const width=560,height=220,pad={t:18,r:14,b:30,l:36};
+    const innerW=width-pad.l-pad.r,innerH=height-pad.t-pad.b;
+    const maxVal=Math.max(1,...series.map(function(item){return Math.max(item.applied,item.interview);}));
+    const stepX=series.length>1?innerW/(series.length-1):0;
+    const yFor=function(value){return pad.t+innerH-(value/maxVal)*innerH;};
+    const xFor=function(index){return pad.l+index*stepX;};
+    const buildPath=function(key){
+        return series.map(function(item,index){
+            return `${index?'L':'M'} ${xFor(index).toFixed(1)} ${yFor(item[key]).toFixed(1)}`;
+        }).join(' ');
+    };
+    const svg=createSvgEl('svg',{viewBox:`0 0 ${width} ${height}`,class:'trend-chart-svg',preserveAspectRatio:'none'});
+    [0,.25,.5,.75,1].forEach(function(tick){
+        const y=pad.t+innerH-(innerH*tick);
+        svg.appendChild(createSvgEl('line',{x1:pad.l,y1:y,x2:width-pad.r,y2:y,class:'trend-grid-line'}));
+        const label=Math.round(maxVal*tick);
+        const text=createSvgEl('text',{x:pad.l-8,y:y+4,class:'trend-axis-label','text-anchor':'end'});
+        text.textContent=String(label);
+        svg.appendChild(text);
+    });
+    let xTicks=[];
+    if(analyticsTrendGranularity==='month'){
+        xTicks=series.map(function(_,index){return index;});
+    }else if(analyticsTrendGranularity==='week'){
+        xTicks=[0,2,4,6,series.length-1].filter(function(v,i,a){
+            return v<series.length&&a.indexOf(v)===i;
+        });
+    }else{
+        xTicks=[0,7,14,21,series.length-1].filter(function(v,i,a){
+            return v<series.length&&a.indexOf(v)===i;
+        });
+    }
+    xTicks.forEach(function(index){
+        const x=xFor(index);
+        const text=createSvgEl('text',{x:x,y:height-8,class:'trend-axis-label','text-anchor':'middle'});
+        text.textContent=series[index].label;
+        svg.appendChild(text);
+    });
+    const appliedPath=createSvgEl('path',{d:buildPath('applied'),class:'trend-line applied'});
+    const interviewPath=createSvgEl('path',{d:buildPath('interview'),class:'trend-line interview'});
+    svg.appendChild(appliedPath);
+    svg.appendChild(interviewPath);
+    ['applied','interview'].forEach(function(key){
+        const color=key==='applied'?'#8b5cf6':'#4ade80';
+        const last=series[series.length-1];
+        svg.appendChild(createSvgEl('circle',{cx:xFor(series.length-1),cy:yFor(last[key]),r:4,fill:color,class:'trend-point'}));
+    });
+    target.textContent='';
+    const shell=createEl('div','trend-chart-shell');
+    const topBar=createEl('div','trend-chart-topbar');
+    const legend=createEl('div','trend-chart-legend');
+    [['投递数','applied'],['面试数','interview']].forEach(function(item){
+        const badge=createEl('div','trend-legend-item');
+        badge.appendChild(createEl('span',`trend-legend-dot ${item[1]}`));
+        badge.appendChild(createEl('span','',item[0]));
+        legend.appendChild(badge);
+    });
+    topBar.appendChild(legend);
+    shell.appendChild(topBar);
+    shell.appendChild(svg);
+    target.appendChild(shell);
+}
+
+function renderCityDistributionChart(entries){
+    const target=document.getElementById('city-chart');
+    if(!target)return;
+    if(!entries.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无城市分布</p></div>';
+        return;
+    }
+    const top=entries.slice(0,6);
+    const maxValue=Math.max(...top.map(function(entry){return entry.value;}),1);
+    target.textContent='';
+    const chart=createEl('div','city-chart');
+    top.forEach(function(entry,index){
+        const item=createEl('div','city-bar-item');
+        item.appendChild(createEl('div','city-bar-value',String(entry.value)));
+        const col=createEl('div','city-bar-column');
+        const bar=createEl('div','city-bar-fill');
+        bar.style.height=`${Math.max(18,Math.round(entry.value/maxValue*100))}%`;
+        bar.style.background=`linear-gradient(180deg, ${COLORS[index%COLORS.length]}, rgba(99,102,241,.38))`;
+        col.appendChild(bar);
+        item.appendChild(col);
+        item.appendChild(createEl('div','city-bar-label',entry.label));
+        chart.appendChild(item);
+    });
+    target.appendChild(chart);
+}
+
+function renderFunnelChart(entries){
+    const target=document.getElementById('funnel-chart');
+    if(!target)return;
+    if(!entries.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无漏斗</p></div>';
+        return;
+    }
+    const topCount=Math.max(entries[0].c,1);
+    target.textContent='';
+    const wrap=createEl('div','funnel-modern');
+    const visual=createEl('div','funnel-visual');
+    const svg=createSvgEl('svg',{viewBox:'0 0 360 236',class:'funnel-svg',preserveAspectRatio:'xMidYMid meet'});
+    const defs=createSvgEl('defs');
+    svg.appendChild(defs);
+    const shadow=createSvgEl('filter',{id:'funnelShadow',x:'-40%',y:'-40%',width:'180%',height:'180%'});
+    shadow.appendChild(createSvgEl('feDropShadow',{dx:'0',dy:'20',stdDeviation:'18','flood-color':'#05070c','flood-opacity':'0.42'}));
+    defs.appendChild(shadow);
+    const centerX=156;
+    const topY=18;
+    const segH=34;
+    const gap=7;
+    const widths=[236,188,142,102,60];
+    svg.appendChild(createSvgEl('path',{
+        d:'M 38 18 L 274 18 L 196 223 L 116 223 Z',
+        fill:'rgba(255,255,255,.018)',
+        stroke:'rgba(255,255,255,.055)',
+        'stroke-width':'1'
+    }));
+    entries.forEach(function(entry,index){
+        const nextWidth=widths[index+1]||22;
+        const y=topY+index*(segH+gap);
+        const topW=widths[index];
+        const bottomW=nextWidth;
+        const gradient=createSvgEl('linearGradient',{id:`funnelGrad${index}`,x1:'0%',y1:'0%',x2:'100%',y2:'100%'});
+        gradient.appendChild(createSvgEl('stop',{offset:'0%','stop-color':entry.co,'stop-opacity':'0.98'}));
+        gradient.appendChild(createSvgEl('stop',{offset:'56%','stop-color':entry.co,'stop-opacity':'0.76'}));
+        gradient.appendChild(createSvgEl('stop',{offset:'100%','stop-color':entry.co,'stop-opacity':'0.5'}));
+        defs.appendChild(gradient);
+        const sheen=createSvgEl('linearGradient',{id:`funnelSheen${index}`,x1:'0%',y1:'0%',x2:'100%',y2:'0%'});
+        sheen.appendChild(createSvgEl('stop',{offset:'0%','stop-color':'#ffffff','stop-opacity':'0.24'}));
+        sheen.appendChild(createSvgEl('stop',{offset:'38%','stop-color':'#ffffff','stop-opacity':'0.08'}));
+        sheen.appendChild(createSvgEl('stop',{offset:'100%','stop-color':'#ffffff','stop-opacity':'0'}));
+        defs.appendChild(sheen);
+        const points=[
+            `${centerX-topW/2},${y}`,
+            `${centerX+topW/2},${y}`,
+            `${centerX+bottomW/2},${y+segH}`,
+            `${centerX-bottomW/2},${y+segH}`
+        ].join(' ');
+        svg.appendChild(createSvgEl('polygon',{points:points,fill:`url(#funnelGrad${index})`,class:'funnel-polygon',filter:'url(#funnelShadow)'}));
+        svg.appendChild(createSvgEl('polygon',{points:points,fill:`url(#funnelSheen${index})`,opacity:index===0?'.72':'.5'}));
+        svg.appendChild(createSvgEl('polygon',{points:points,fill:'none',stroke:'rgba(255,255,255,.14)','stroke-width':'0.9'}));
+        svg.appendChild(createSvgEl('line',{
+            x1:centerX-topW/2+14,
+            y1:y+1,
+            x2:centerX+topW/2-14,
+            y2:y+1,
+            stroke:'rgba(255,255,255,.11)',
+            'stroke-width':'1'
+        }));
+    });
+    visual.appendChild(svg);
+    const metrics=createEl('div','funnel-metrics');
+    const head=createEl('div','funnel-metric-head');
+    head.innerHTML='<span>阶段</span><span>数量</span><span>占比</span>';
+    metrics.appendChild(head);
+    entries.forEach(function(entry){
+        const row=createEl('div','funnel-metric-row');
+        const nameWrap=createEl('div','funnel-metric-name-wrap');
+        const dot=createEl('span','funnel-metric-dot');
+        dot.style.background=entry.co;
+        nameWrap.appendChild(dot);
+        nameWrap.appendChild(createEl('span','funnel-metric-name',entry.l));
+        row.appendChild(nameWrap);
+        row.appendChild(createEl('strong','funnel-metric-count',String(entry.c)));
+        row.appendChild(createEl('strong','funnel-metric-rate',`${Math.round(entry.c/topCount*100)}%`));
+        metrics.appendChild(row);
+    });
+    wrap.appendChild(visual);
+    wrap.appendChild(metrics);
+    target.appendChild(wrap);
+}
+
+function renderCategoryChart(entries){
+    const target=document.getElementById('category-chart');
+    if(!target)return;
+    if(!entries.length){
+        target.innerHTML='<div class="empty-state compact"><p>暂无</p></div>';
+        return;
+    }
     const maxTotal=Math.max(...entries.map(function(entry){return entry.total;}),1);
     target.textContent='';
-    const list=createEl('div','source-chart-list');
+    const list=createEl('div','category-metric-list');
+    const head=createEl('div','category-metric-head');
+    head.innerHTML='<span>类别</span><span>推进势能</span><span>投递</span><span>推进</span><span>转化</span>';
+    list.appendChild(head);
     entries.forEach(function(entry,index){
-        const row=createEl('div','source-chart-row');
-        row.appendChild(createEl('div','source-chart-label',entry.label));
-        const track=createEl('div','source-chart-track');
-        const fill=createEl('div','source-chart-fill');
-        fill.style.width=Math.max(Math.round(entry.total/maxTotal*100),10)+'%';
+        const row=createEl('div','category-metric-row');
+        row.appendChild(createEl('div','category-name',entry.label));
+        const track=createEl('div','category-bar-wrap');
+        const fill=createEl('div','category-bar');
+        fill.style.width=`${Math.max(Math.round(entry.total/maxTotal*100),12)}%`;
         fill.style.background=COLORS[index%COLORS.length];
         track.appendChild(fill);
         row.appendChild(track);
-        const metric=createEl('div','source-chart-metric');
-        metric.appendChild(createEl('span','',`投递 ${entry.total}`));
-        metric.appendChild(createEl('span','',`推进 ${entry.progress}`));
-        metric.appendChild(createEl('strong','',`${entry.rate}%`));
-        row.appendChild(metric);
+        row.appendChild(createEl('strong','category-metric-count',String(entry.total)));
+        row.appendChild(createEl('strong','category-metric-count',String(entry.progress)));
+        row.appendChild(createEl('strong','category-stat-rate',`${entry.rate}%`));
         list.appendChild(row);
     });
     target.appendChild(list);
@@ -1300,24 +1656,69 @@ jdZ.addEventListener('paste',e=>{const items=e.clipboardData?.items;if(!items)re
 jdZ.addEventListener('dragover',e=>e.preventDefault());
 jdZ.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f?.type.startsWith('image/')){const rd=new FileReader();rd.onload=ev=>{jdImg=ev.target.result;renderJdDropzone(jdImg);};rd.readAsDataURL(f);}});
 let editId=null;
-function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';$('#form-visa').value=a?.visa_requirement||'UNKNOWN';$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';$('#form-contact').value=a?.contact_name||'';$('#form-next-followup').value=a?.next_followup_date||'';$('#form-last-followup').value=a?.last_followup_date||'';$('#form-followup-note').value=a?.followup_note||'';$('#form-jd-url').value=a?.jd_url||'';$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
+function syncTimelineFromForm(oldTimeline,status,appliedDate,statusDate){
+    const nextTimeline=sortTimeline(oldTimeline||[]);
+    const appliedValue=appliedDate||'';
+    const appliedEntry=nextTimeline.find(item=>item.name==='已投递');
+    if(appliedValue){
+        if(appliedEntry)appliedEntry.date=appliedValue;
+        else nextTimeline.push({name:'已投递',date:appliedValue});
+    }
+    const timelineName=getTimelineNameForStatus(status);
+    if(status&&status!=='WATCHING'&&status!=='APPLIED'&&timelineName){
+        const resolvedStatusDate=statusDate||appliedValue||new Date().toISOString().split('T')[0];
+        const previousStatus=deriveStatus(oldTimeline||[]);
+        const sameStageEntries=nextTimeline.filter(item=>item.name===timelineName);
+        const latestSameStage=sameStageEntries.length?sortTimeline(sameStageEntries).at(-1):null;
+        if(previousStatus===status&&latestSameStage){
+            latestSameStage.date=resolvedStatusDate;
+        }else if(!nextTimeline.some(item=>item.name===timelineName&&item.date===resolvedStatusDate)){
+            nextTimeline.push({name:timelineName,date:resolvedStatusDate});
+        }
+    }
+    return sortTimeline(nextTimeline);
+}
+function getStatusDateForApp(app){
+    if(!app)return'';
+    if(app.current_status_date)return app.current_status_date;
+    const latest=getLatestTimelineEntry(app.timeline||[]);
+    return latest?.date||app.applied_date||'';
+}
+function setFieldValue(id,value){
+    const element=$(id);
+    if(element)element.value=value??'';
+}
+function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-status-date').value=getStatusDateForApp(a)||(a?.applied_date||new Date().toISOString().split('T')[0]);$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';$('#form-visa').value=a?.visa_requirement||'UNKNOWN';$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';setFieldValue('#form-contact',a?.contact_name||'');setFieldValue('#form-next-followup',a?.next_followup_date||'');setFieldValue('#form-last-followup',a?.last_followup_date||'');setFieldValue('#form-followup-note',a?.followup_note||'');$('#form-jd-url').value=a?.jd_url||'';$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
 // 渲染自定义字段
 const cfa=$('#custom-fields-area');cfa.innerHTML='';
 const customCols=store.tableCols.filter(c=>c.custom);
 if(customCols.length){customCols.forEach(col=>{const val=a?.customFields?.[col.id]||'';const group=createEl('div','form-group');group.appendChild(createEl('label','',col.label));const input=document.createElement('input');input.type='text';input.className='custom-field-input';input.dataset.colId=col.id;input.value=val;input.placeholder=`输入${col.label}...`;group.appendChild(input);cfa.appendChild(group);});}
 updIntl();$('#modal-overlay').classList.add('active');}
-async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const appliedDate=$('#form-date').value;const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:$('#form-visa').value,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact').value.trim(),next_followup_date:$('#form-next-followup').value,last_followup_date:$('#form-last-followup').value,followup_note:$('#form-followup-note').value.trim(),jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value};
+async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const selectedStatus=$('#form-status').value||'APPLIED';const statusDate=$('#form-status-date').value||'';const appliedDate=$('#form-date').value;if(!appliedDate){toast('请填写投递日期','error');return;}if(selectedStatus!=='WATCHING'&&!statusDate){toast('请填写当前状态日期','error');return;}const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,current_status_date:statusDate||appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:$('#form-visa').value,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact')?.value.trim()||'',next_followup_date:$('#form-next-followup')?.value||'',last_followup_date:$('#form-last-followup')?.value||'',followup_note:$('#form-followup-note')?.value.trim()||'',jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value,status:selectedStatus};
 // 收集自定义字段
 const cf={};$$('.custom-field-input').forEach(inp=>{cf[inp.dataset.colId]=inp.value.trim();});if(Object.keys(cf).length)d.customFields=cf;
 if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.customFields||{},cf);
-// 同步投递日期到时间线
-if(old.timeline&&old.timeline.length){const nextTimeline=cloneData(old.timeline);const ae=nextTimeline.find(t=>t.name==='已投递');if(ae)ae.date=appliedDate;d.timeline=nextTimeline;}
-const ok=await store.updateApp(editId,d);if(!ok){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{d.timeline=[{name:'已投递',date:appliedDate}];d.status=$('#form-status').value||'APPLIED';d.customFields=cf;const ok=await store.addApp(d);if(!ok){toast('保存失败，请重试','error');return;}toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
+        d.timeline=syncTimelineFromForm(old?.timeline||[],selectedStatus,appliedDate,statusDate);
+        const timelineError=validateTimelineChronology(d.timeline);
+        if(timelineError){toast(timelineError,'error');return;}
+        d.status=deriveStatus(d.timeline);
+        d.current_status_date=getLatestTimelineEntry(d.timeline)?.date||statusDate||appliedDate;
+const ok=await store.updateApp(editId,d);if(!ok){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{d.timeline=syncTimelineFromForm([],selectedStatus,appliedDate,statusDate);const timelineError=validateTimelineChronology(d.timeline);if(timelineError){toast(timelineError,'error');return;}d.status=deriveStatus(d.timeline);d.current_status_date=getLatestTimelineEntry(d.timeline)?.date||statusDate||appliedDate;d.customFields=cf;const ok=await store.addApp(d);if(!ok){toast('保存失败，请重试','error');return;}toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
 $('#add-application-btn').addEventListener('click',()=>openAppModal());
 $('#modal-save').addEventListener('click',()=>saveApp(false));
 $('#modal-save-continue').addEventListener('click',()=>saveApp(true));
 $('#modal-cancel').addEventListener('click',()=>{$('#modal-overlay').classList.remove('active');editId=null;});
 $('#modal-close').addEventListener('click',()=>{$('#modal-overlay').classList.remove('active');editId=null;});
+$('#form-status')?.addEventListener('change',function(){
+    if(this.value==='APPLIED'){
+        $('#form-status-date').value=$('#form-date').value||$('#form-status-date').value;
+    }
+});
+$('#form-date')?.addEventListener('change',function(){
+    if($('#form-status').value==='APPLIED'){
+        $('#form-status-date').value=this.value;
+    }
+});
 
 // ---- 侧边栏（时间线可编辑，自定义轮次）----
 let curDId=null,tlEditing=false;
@@ -1329,6 +1730,7 @@ function renderDInfo(a){
     const fields=[
         {label:'岗位类别',text:a.position_category||'—'},
         {label:'Base地',text:a.base_location||'—'},
+        {label:'当前阶段日期',text:a.current_status_date?fmtD(a.current_status_date):'—'},
         {label:'偏好度',text:stars(a.preference_level)},
         {label:'渠道',text:a.source_channel||'—',link:safeHttpUrl(a.source_link),linkText:a.source_channel||a.source_link},
         {label:'薪资',text:a.salary_expectation||'—'},
@@ -1379,7 +1781,7 @@ function renderDInfo(a){
 }
 function renderDTL(a,edit=false){
     const tl=$('#tab-timeline');tl.innerHTML='';
-    const timeline=a.timeline||[];
+    const timeline=sortTimeline(a.timeline||[]);
     if(edit){
         tl.innerHTML='<div style="margin-bottom:10px;font-size:12px;color:var(--text-secondary)">编辑面试流程（状态会自动跟随最新轮次）：</div>';
         const list=document.createElement('div');list.id='tl-edit';
@@ -1399,18 +1801,23 @@ function renderDTL(a,edit=false){
         tl.appendChild(btns);
         $('#tl-add').addEventListener('click',async ()=>{const nextTimeline=cloneData(timeline);nextTimeline.push({name:'一面',date:''});const ok=await store.updateApp(a.id,{timeline:nextTimeline});if(ok!==false){a.timeline=nextTimeline;renderDTL(a,true);}});
         $('#tl-save').addEventListener('click',async ()=>{
-            const nextTimeline=cloneData(timeline);
+            const nextTimeline=sortTimeline(timeline);
             $$('#tl-edit select, #tl-edit input').forEach(el=>{const i=parseInt(el.dataset.i),f=el.dataset.f;if(!isNaN(i)&&nextTimeline[i])nextTimeline[i][f]=el.value;});
+            const orderedTimeline=sortTimeline(nextTimeline);
+            const timelineError=validateTimelineChronology(orderedTimeline);
+            if(timelineError){toast(timelineError,'error');return;}
             // 从时间线推导状态
-            const newStatus=deriveStatus(nextTimeline);
+            const newStatus=deriveStatus(orderedTimeline);
             // 同步"已投递"日期到 applied_date
-            const appliedEntry=nextTimeline.find(t=>t.name==='已投递');
-            const updates={timeline:nextTimeline,status:newStatus};
+            const appliedEntry=orderedTimeline.find(t=>t.name==='已投递');
+            const latestEntry=getLatestTimelineEntry(orderedTimeline);
+            const updates={timeline:orderedTimeline,status:newStatus,current_status_date:latestEntry?.date||a.current_status_date||a.applied_date||''};
             if(appliedEntry&&appliedEntry.date)updates.applied_date=appliedEntry.date;
             const ok=await store.updateApp(a.id,updates);
             if(ok===false)return;
-            a.timeline=nextTimeline;
+            a.timeline=orderedTimeline;
             a.status=newStatus;
+            a.current_status_date=updates.current_status_date;
             tlEditing=false;
             // 刷新侧边栏头部状态
             const si=getSI(newStatus);$('#drawer-status').className=`status-badge ${si.cls}`;$('#drawer-status').textContent=si.label;
@@ -1927,14 +2334,15 @@ function renderResumes(){
         const c=document.createElement('div');c.className='resume-card';
         const gradients=['linear-gradient(135deg,rgba(96,165,250,.15),rgba(167,139,250,.1))','linear-gradient(135deg,rgba(74,222,128,.12),rgba(96,165,250,.1))','linear-gradient(135deg,rgba(251,146,60,.12),rgba(248,113,113,.08))','linear-gradient(135deg,rgba(167,139,250,.15),rgba(244,114,182,.1))'];
         const gi=store.resumes.indexOf(r)%gradients.length;
-        const tagHTML=(r.tags||[]).length?`<div class="resume-card-tags">${r.tags.map(t=>`<span class="resume-tag">${escapeHTML(t)}</span>`).join('')}</div>`:'';
+        const tagHTML=(r.tags||[]).length?`<div class="resume-card-tags">${r.tags.map(t=>`<span class="resume-tag">${escapeHTML(t)}</span>`).join('')}</div>`:'<div class="resume-card-tags is-empty"><span class="resume-tag resume-tag-ghost">暂无标签</span></div>';
         const noteHTML=(r.notes||'').trim()?`<div class="resume-card-note">${escapeHTML(r.notes)}</div>`:'<div class="resume-card-note is-empty">还没有备注，适合补充岗位方向、版本重点和使用建议。</div>';
         const linkedText=linked.length?`${linked.length} 条已关联`:'未关联投递';
         const linkedList=linked.length?`<div class="resume-linked-scroller">${linked.map(function(a){
             return `<div class="resume-linked-item"><div class="resume-linked-company">${escapeHTML(a.company_name)}</div><div class="resume-linked-role">${escapeHTML(a.position_title)}</div></div>`;
         }).join('')}</div>`:'<div class="resume-linked-empty">建议补上适用岗位，后面回看会轻松很多。</div>';
+        const previewDisabled=!(r.data_url&&(r.file_type||'').toUpperCase()==='PDF');
         c.dataset.resumeId=r.id;
-        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-card-banner-top"><span class="resume-file-chip">${escapeHTML(r.file_type||'文件')}</span><span class="resume-linked-chip">${linkedText}</span></div><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-head"><div><div class="resume-card-name">${escapeHTML(r.file_name)}</div><div class="resume-card-meta">${fmtDT(r.updated_at||r.at)}${r.updated_at&&r.updated_at!==r.at?' 更新':''}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div></div><div class="resume-card-controls"><button class="resume-drag-handle" type="button" title="拖动排序"><span>⋮⋮</span><em>拖动排序</em></button><button class="resume-inline-edit" type="button">编辑资料</button></div></div><div class="resume-performance"><span><strong>${perf.linked}</strong>投递</span><span><strong>${perf.progress}</strong>推进</span><span><strong>${perf.interviews}</strong>面试</span></div>${tagHTML}${noteHTML}<div class="resume-card-linked"><div class="resume-linked-head"><span>适用记录</span>${linked.length?`<em>横向滑动查看全部</em>`:''}</div>${linkedList}</div><div class="resume-card-actions">${r.data_url&&(r.file_type||'').toUpperCase()==='PDF'?`<button class="resume-action-btn preview-btn">预览</button>`:''}<button class="resume-action-btn link-btn">关联岗位</button><button class="resume-action-btn edit-btn">修改标签备注</button><button class="resume-action-btn del-btn resume-action-danger">删除</button></div></div>`;
+        c.innerHTML=`<div class="resume-card-banner" style="background:${gradients[gi]}"><div class="resume-card-banner-top"><span class="resume-file-chip">${escapeHTML(r.file_type||'文件')}</span><span class="resume-linked-chip">${linkedText}</span></div><div class="resume-icon-lg">📄</div></div><div class="resume-card-body"><div class="resume-card-head"><div><div class="resume-card-name">${escapeHTML(r.file_name)}</div><div class="resume-card-meta">${fmtDT(r.updated_at||r.at)}${r.updated_at&&r.updated_at!==r.at?' 更新':''}${r.size?(' · '+(r.size/1024).toFixed(0)+'KB'):''}</div></div><div class="resume-card-controls"><button class="resume-drag-handle" type="button" title="拖动排序"><span>⋮⋮</span><em>拖动排序</em></button><button class="resume-inline-edit" type="button">编辑资料</button></div></div><div class="resume-performance"><span><strong>${perf.linked}</strong>投递</span><span><strong>${perf.progress}</strong>推进</span><span><strong>${perf.interviews}</strong>面试</span></div><div class="resume-card-support">${tagHTML}${noteHTML}</div><div class="resume-card-linked"><div class="resume-linked-head"><span>适用记录</span>${linked.length?`<em>横向滑动查看全部</em>`:''}</div>${linkedList}</div><div class="resume-card-actions"><button class="resume-action-btn preview-btn${previewDisabled?' is-disabled':''}" ${previewDisabled?'disabled aria-disabled="true"':''}>预览</button><button class="resume-action-btn link-btn">关联岗位</button><button class="resume-action-btn edit-btn">修改标签备注</button><button class="resume-action-btn del-btn resume-action-danger">删除</button></div></div>`;
         c.addEventListener('click',()=>{if(Date.now()<resumeReorderState.justReorderedUntil)return;openResumeEditModal(r.id);});
         c.querySelector('.resume-drag-handle').addEventListener('pointerdown',function(e){
             e.preventDefault();
@@ -2035,6 +2443,23 @@ function renderRefs(){
         l.appendChild(header);
         g.refs.forEach(ref=>{
             const c=buildReflectionCard(ref,true);
+            const cardHeader=c.querySelector('.reflection-card-header');
+            const rightWrap=createEl('div','reflection-card-header-right');
+            const timeNode=cardHeader.querySelector('span:last-child');
+            if(timeNode)rightWrap.appendChild(timeNode);
+            const delBtn=createEl('button','reflection-delete-btn','删除');
+            delBtn.type='button';
+            delBtn.addEventListener('click',async function(e){
+                e.stopPropagation();
+                if(!confirm('删除这条复盘记录？'))return;
+                const ok=await store.delRef(ref.id);
+                if(ok===false)return;
+                renderRefs();
+                if(curDId)openDrawer(curDId);
+                toast('复盘已删除','info');
+            });
+            rightWrap.appendChild(delBtn);
+            cardHeader.appendChild(rightWrap);
             c.addEventListener('click',()=>openRefModal(ref.id));l.appendChild(c);
         });
     });
@@ -2190,16 +2615,18 @@ function renderAnalytics(){
     const rc=apps.filter(a=>['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,rr=ap.length?Math.round(rc/ap.length*100):0;
     $('#stat-cards').innerHTML=`<div class="stat-card"><div class="stat-card-label">总投递</div><div class="stat-card-value">${ap.length}</div></div><div class="stat-card"><div class="stat-card-label">活跃</div><div class="stat-card-value">${ac.length}</div></div><div class="stat-card"><div class="stat-card-label">面试中</div><div class="stat-card-value">${iv.length}</div></div><div class="stat-card"><div class="stat-card-label">Offer</div><div class="stat-card-value" style="color:var(--green)">${of.length}</div></div><div class="stat-card"><div class="stat-card-label">回复率</div><div class="stat-card-value">${rr}%</div></div><div class="stat-card"><div class="stat-card-label">未通过</div><div class="stat-card-value" style="color:var(--red)">${rj.length}</div></div>`;
     const fd=[{l:'投递',c:ap.length,co:'#60a5fa'},{l:'笔试',c:apps.filter(a=>['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#a78bfa'},{l:'一面+',c:apps.filter(a=>['ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#818cf8'},{l:'二面+',c:apps.filter(a=>['ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status)).length,co:'#fb923c'},{l:'Offer',c:of.length,co:'#4ade80'}];
-    const mf=Math.max(fd[0].c,1);$('#funnel-chart').innerHTML=fd.map(d=>`<div class="funnel-stage"><span class="funnel-label">${d.l}</span><div class="funnel-bar-wrap"><div class="funnel-bar" style="width:${Math.max(Math.round(d.c/mf*100),5)}%;background:${d.co}">${d.c}</div></div><span class="funnel-value">${fd[0].c?Math.round(d.c/fd[0].c*100):0}%</span></div>`).join('');
+    renderFunnelChart(fd);
     const cs={};ap.forEach(a=>{const c=a.position_category||'其他';if(!cs[c])cs[c]={t:0,r:0};cs[c].t++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))cs[c].r++;});
-    const ce=Object.entries(cs).sort((a,b)=>b[1].t-a[1].t||b[1].r-a[1].r||a[0].localeCompare(b[0],'zh-CN')),mc=Math.max(...ce.map(([,v])=>v.t),1);
-    $('#category-chart').innerHTML=ce.length?ce.map(([c,v],i)=>`<div class="category-bar-item"><span class="category-name">${escapeHTML(c)}</span><div class="category-bar-wrap"><div class="category-bar" style="width:${Math.max(Math.round(v.t/mc*100),8)}%;background:${COLORS[i%COLORS.length]};opacity:.78"></div></div><span class="category-rate"><span class="category-rate-meta">${v.t} 投递 / ${v.r} 推进</span><strong>${Math.round(v.r/v.t*100)}%</strong></span></div>`).join(''):'<div class="empty-state"><p>暂无</p></div>';
+    const ce=Object.entries(cs).sort((a,b)=>b[1].t-a[1].t||b[1].r-a[1].r||a[0].localeCompare(b[0],'zh-CN')).map(function(entry){
+        const name=entry[0],stats=entry[1];
+        return {label:name,total:stats.t,progress:stats.r,rate:stats.t?Math.round(stats.r/stats.t*100):0};
+    });
+    renderCategoryChart(ce);
     const rs={};store.logs.filter(l=>l.to==='REJECTED'&&l.rej).forEach(l=>{rs[l.rej]=(rs[l.rej]||0)+1;});
-    const re=Object.entries(rs).sort((a,b)=>b[1]-a[1]),mr=Math.max(...re.map(([,v])=>v),1);
-    $('#attribution-chart').innerHTML=re.length?re.map(([s,c])=>`<div class="attribution-item"><span class="attribution-label">${REJECTION_STAGES[s]||s}</span><div class="attribution-bar-wrap"><div class="attribution-bar" style="width:${Math.max(Math.round(c/mr*100),8)}%"></div></div><span class="attribution-count">${c}</span></div>`).join(''):'<div class="empty-state"><p>暂无归因</p></div>';
     const baseStats={};ap.forEach(a=>{const key=a.base_location||'未填写';baseStats[key]=(baseStats[key]||0)+1;});
     const baseEntries=Object.entries(baseStats).sort((a,b)=>b[1]-a[1]).map(function(entry){return{label:entry[0],value:entry[1]};});
-    renderBaseDistributionChart(baseEntries,ap.length);
+    renderTrendChart(buildTrendRange(ap,analyticsTrendGranularity));
+    renderCityDistributionChart(baseEntries);
     const sourceStats={};ap.forEach(a=>{const key=a.source_channel||'未填写';if(!sourceStats[key])sourceStats[key]={total:0,progress:0};sourceStats[key].total++;if(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'].includes(a.status))sourceStats[key].progress++;});
     const sourceEntries=Object.entries(sourceStats).sort((a,b)=>{
         const ar=a[1].total? a[1].progress/a[1].total:0;
@@ -2219,9 +2646,20 @@ async function doInsight(ap,cs,rs){
         el.innerHTML='<div class="empty-state"><p>投递3条以上解锁</p></div>';
         return;
     }
-    const result={text:buildAnalyticsFallback(ap,cs,rs),mode:'fallback',label:'内置数据分析',badge:'基于当前投递、推进、失分和渠道数据自动生成。'};
-    renderAIBlocks(el,result.text,'insight',result);
+    const result={text:buildAnalyticsFallback(ap,cs,rs)};
+    renderAIBlocks(el,result.text,'insight');
 }
+
+$$('#trend-granularity .chart-segment').forEach(function(button){
+    button.addEventListener('click',function(){
+        if(analyticsTrendGranularity===button.dataset.granularity)return;
+        analyticsTrendGranularity=button.dataset.granularity||'day';
+        $$('#trend-granularity .chart-segment').forEach(function(item){
+            item.classList.toggle('is-active',item===button);
+        });
+        if(curView==='analytics')renderAnalytics();
+    });
+});
 
 // ---- 设置 ----
 document.getElementById('settings-btn')?.addEventListener('click',()=>{document.getElementById('profile-btn')?.click();});
