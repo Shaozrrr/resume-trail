@@ -191,6 +191,31 @@ const sb={
     return this.unwrapAuthResponse('auth.resendSignup',result);
   },
 
+  async sendPasswordReset(email,redirectTo){
+    const payload={email:email};
+    if(redirectTo)payload.redirect_to=redirectTo;
+    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/recover',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload)
+    });
+    return this.unwrapAuthResponse('auth.sendPasswordReset',result);
+  },
+
+  async updatePassword(token,password){
+    const result=await this.requestJson(SUPABASE_URL+'/auth/v1/user',{
+      method:'PUT',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':SUPABASE_KEY,
+        'Authorization':'Bearer '+token
+      },
+      body:JSON.stringify({password:password})
+    });
+    rtLog('auth.updatePassword',{ok:result.ok,status:result.status,error:result.error||null});
+    return result.ok?result.data:Object.assign({},result.data&&typeof result.data==='object'?result.data:{},{error:result.error||('HTTP '+result.status),status:result.status});
+  },
+
   async signOut(token){
     const result=await this.requestJson(SUPABASE_URL+'/auth/v1/logout',{
       method:'POST',

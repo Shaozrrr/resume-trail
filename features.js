@@ -25,6 +25,7 @@ function renderCalendar(){
         title.textContent=`${y}年${m+1}月`;
         const first=new Date(y,m,1),startDay=first.getDay();
         const monthStart=new Date(y,m,1-startDay);
+        const maxVisible=window.innerWidth<=560?2:3;
         let html='<div class="cal-header"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div class="cal-days">';
         for(let i=0;i<42;i++){
             const current=new Date(monthStart);
@@ -33,8 +34,8 @@ function renderCalendar(){
             const today=toDateKey(new Date())===ds;
             const adjacent=current.getMonth()!==m;
             const evts=getEventsForDate(ds);
-            const visibleEvents=evts.slice(0,3).map(e=>`<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy"><strong>${escapeHTML(e.label)}</strong><span>${escapeHTML(e.company)}</span></div></div>`).join('');
-            const more=evts.length>3?`<div class="cal-event-more">+${evts.length-3} 个待处理</div>`:'';
+            const visibleEvents=evts.slice(0,maxVisible).map(e=>`<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy"><strong>${escapeHTML(e.label)}</strong><span>${escapeHTML(e.company)}</span></div></div>`).join('');
+            const more=evts.length>maxVisible?`<div class="cal-event-more">+${evts.length-maxVisible} 个待处理</div>`:'';
             html+=`<div class="cal-day ${today?'today':''} ${adjacent?'adjacent':''}" data-date="${ds}"><span class="cal-day-num">${current.getDate()}</span><div class="cal-day-events">${visibleEvents}${more}</div></div>`;
         }
         html+='</div>';grid.innerHTML=html;
@@ -56,7 +57,7 @@ function renderCalendar(){
 }
 function getEventsForDate(ds){
     const evts=[];if(typeof store==='undefined')return evts;
-    const colors={'笔试/OA':'#8b5cf6','一面':'#60a5fa','二面':'#818cf8','三面':'#d946ef','四面':'#fb923c','群面':'#34d399','HR面':'#fbbf24','Offer':'#4ade80','挂了':'#f87171','未通过':'#f87171'};
+    const colors={'笔试/OA':'#8b5cf6','一面':'#60a5fa','二面':'#818cf8','三面':'#d946ef','四面':'#fb923c','群面':'#34d399','HR面':'#fbbf24','Offer':'#4ade80','挂了':'#f87171','未通过':'#f87171','流程终止':'#f87171'};
     store.apps.forEach(a=>{
         if(a.timeline)a.timeline.forEach(t=>{if(t.date===ds&&t.name!=='已投递')evts.push({label:t.name,company:a.company_name,position:a.position_title,color:colors[t.name]||'#60a5fa'});});
         if(a.next_deadline&&a.next_deadline.startsWith(ds))evts.push({label:'DDL'+(a.next_action?' '+a.next_action:''),company:a.company_name,position:a.position_title,color:'#f87171'});
