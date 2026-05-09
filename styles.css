@@ -963,7 +963,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
   background:linear-gradient(180deg,rgba(255,248,239,.72),rgba(249,242,231,.5))!important;
   border:1px solid rgba(255,255,255,.8)!important;
   box-shadow:0 34px 90px rgba(72,58,43,.16),inset 0 1px 0 rgba(255,255,255,.96)!important;
-  animation:lightLoginFloat 7s ease-in-out infinite;
+  animation:none!important;
 }
 :root[data-theme=light] .login-card::before{
   background:
@@ -972,7 +972,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
     radial-gradient(circle at 76% 76%,rgba(210,189,158,.18),transparent 30%);
   opacity:1;
   mix-blend-mode:normal;
-  animation:lightLoginShimmer 12s linear infinite;
+  animation:none!important;
 }
 :root[data-theme=light] .login-card::after{
   background:
@@ -980,16 +980,16 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
     radial-gradient(circle at 50% 120%,rgba(180,156,126,.1),transparent 48%);
 }
 :root[data-theme=light] .login-card:hover{
-  transform:translateY(-2px);
-  box-shadow:0 38px 96px rgba(72,58,43,.18),inset 0 1px 0 rgba(255,255,255,.98)!important;
+  transform:none;
+  box-shadow:0 34px 90px rgba(72,58,43,.16),inset 0 1px 0 rgba(255,255,255,.96)!important;
 }
 :root[data-theme=light] .login-logo svg{
   filter:drop-shadow(0 12px 24px rgba(214,184,144,.18));
-  transition:transform .45s var(--ease),filter .45s var(--ease);
+  transition:filter .35s var(--ease);
 }
 :root[data-theme=light] .login-card:hover .login-logo svg{
-  transform:translateY(-2px) scale(1.02);
-  filter:drop-shadow(0 16px 28px rgba(214,184,144,.24));
+  transform:none;
+  filter:drop-shadow(0 12px 24px rgba(214,184,144,.18));
 }
 :root[data-theme=light] .login-logo p{color:rgba(71,85,105,.58)}
 :root[data-theme=light] .login-input-icon,
