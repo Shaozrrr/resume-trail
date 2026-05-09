@@ -105,9 +105,14 @@ function createEl(tag,className,text){
     return el;
 }
 
+function getAnalyticsAuthMode(){
+    return !!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled())?'guest':'email';
+}
+
 function getAnalyticsBaseProps(extra){
     return Object.assign({
         guest_mode:!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()),
+        auth_mode:getAnalyticsAuthMode(),
         current_view:typeof curView==='string'&&curView?curView:'login',
         device_type:window.innerWidth<=720?'mobile':'desktop'
     },extra||{});
@@ -122,6 +127,7 @@ window.rtIdentifyUser=function(user,props){
     if(!window.rtAnalytics||typeof window.rtAnalytics.identify!=='function'||!user||!user.id)return false;
     return window.rtAnalytics.identify(user.id,Object.assign({
         email:user.email||'',
+        auth_mode:getAnalyticsAuthMode(),
         device_type:window.innerWidth<=720?'mobile':'desktop'
     },props||{}));
 };

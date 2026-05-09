@@ -137,6 +137,12 @@ function enterGuestMode(){
     if(typeof updIntl==='function')updIntl();
     if(typeof refresh==='function')refresh();
     if(typeof switchView==='function')switchView('pipeline');
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_workspace_entered',{
+        entry:'guest_mode',
+        application_count:store.apps.length,
+        resume_count:store.resumes.length,
+        reflection_count:store.refs.length
+    });
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_guest_mode_started',{entry:'login_page'});
     showMsg('当前为本地体验模式，数据仅保存在本机。',false);
     setTimeout(function(){hideMsg();},1800);
@@ -173,6 +179,12 @@ async function checkAuth(){
             if(typeof updIntl==='function')updIntl();
             if(typeof refresh==='function')refresh();
             if(typeof switchView==='function')switchView('pipeline');
+            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_workspace_entered',{
+                entry:'email_auth',
+                application_count:store.apps.length,
+                resume_count:store.resumes.length,
+                reflection_count:store.refs.length
+            });
             return true;
         }catch(err){
             console.error('[RT auth] cloud load failed',err);
@@ -343,6 +355,7 @@ function onSuccess(result,meta){
     syncSession(result);
     if(typeof window.rtIdentifyUser==='function'&&result&&result.user)window.rtIdentifyUser(result.user,{
         auth_state:'authenticated',
+        auth_mode:'email',
         signup_method:'email_otp'
     });
     if(typeof window.rtTrackEvent==='function'){
