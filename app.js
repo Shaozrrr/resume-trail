@@ -75,6 +75,8 @@ const COLORS=['#60a5fa','#a78bfa','#4ade80','#fb923c','#f87171','#fbbf24','#34d3
 const DEFAULT_COLS=[{id:'company_name',label:'公司',show:true,system:true},{id:'position_title',label:'岗位',show:true,system:true},{id:'position_category',label:'类别',show:true,system:true},{id:'base_location',label:'Base地',show:true,system:true},{id:'status',label:'状态',show:true,system:true},{id:'applied_date',label:'投递日期',show:true,system:true},{id:'waiting',label:'等待',show:true,system:true},{id:'preference_level',label:'偏好',show:true,system:true},{id:'source_channel',label:'渠道',show:true,system:true},{id:'jd',label:'JD',show:true,system:true},{id:'actions',label:'操作',show:true,system:true}];
 const RT_GUEST_MODE_KEY='rt_guest_mode';
 const RT_GUEST_DATA_KEY='rt_guest_data';
+const RT_THEME_MODE_KEY='rt_theme_mode';
+const RT_THEME_DIRTY_KEY='rt_theme_dirty';
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -114,9 +116,128 @@ function getAnalyticsBaseProps(extra){
         guest_mode:!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()),
         auth_mode:getAnalyticsAuthMode(),
         current_view:typeof curView==='string'&&curView?curView:'login',
-        device_type:window.innerWidth<=720?'mobile':'desktop'
+        device_type:window.innerWidth<=720?'mobile':'desktop',
+        theme_mode:getStoredThemeMode()
     },extra||{});
 }
+
+function normalizeThemeMode(mode){
+    return mode==='light'?'light':'dark';
+}
+
+function getStoredThemeMode(){
+    try{
+        const stored=localStorage.getItem(RT_THEME_MODE_KEY);
+        if(stored==='light'||stored==='dark')return stored;
+    }catch(err){}
+    return document.documentElement.dataset.theme==='light'?'light':'dark';
+}
+
+function rememberThemeMode(mode){
+    try{
+        localStorage.setItem(RT_THEME_MODE_KEY,normalizeThemeMode(mode));
+    }catch(err){}
+}
+
+function markThemeDirty(mode){
+    rememberThemeMode(mode);
+    try{
+        localStorage.setItem(RT_THEME_DIRTY_KEY,'1');
+    }catch(err){}
+}
+
+function clearThemeDirty(){
+    try{
+        localStorage.removeItem(RT_THEME_DIRTY_KEY);
+    }catch(err){}
+}
+
+function isThemeDirty(){
+    try{
+        return localStorage.getItem(RT_THEME_DIRTY_KEY)==='1';
+    }catch(err){
+        return false;
+    }
+}
+
+function syncThemeToggle(){
+    const mode=getStoredThemeMode();
+    const nextMode=mode==='dark'?'light':'dark';
+    document.querySelectorAll('.theme-toggle').forEach(function(toggle){
+        const icon=toggle.querySelector('.theme-toggle-icon');
+        const text=toggle.querySelector('.theme-toggle-text');
+        if(icon)icon.textContent=nextMode==='light'?'☀︎':'☾';
+        if(text)text.textContent=nextMode==='light'?'浅色模式':'深色模式';
+        toggle.setAttribute('aria-label',nextMode==='light'?'切换浅色模式':'切换深色模式');
+        toggle.dataset.mode=mode;
+    });
+}
+
+function syncThemeToggleVisibility(isLoggedIn){
+    const loginToggle=document.getElementById('theme-toggle-login');
+    const appToggle=document.getElementById('theme-toggle-app');
+    if(loginToggle)loginToggle.style.display=isLoggedIn?'none':'inline-flex';
+    if(appToggle)appToggle.style.display=isLoggedIn?'inline-flex':'none';
+}
+
+function applyThemeMode(mode,options){
+    const normalized=normalizeThemeMode(mode);
+    document.documentElement.dataset.theme=normalized;
+    document.documentElement.style.colorScheme=normalized;
+    if(!options||options.remember!==false)rememberThemeMode(normalized);
+    syncThemeToggle();
+    window.dispatchEvent(new CustomEvent('rt:themechange',{detail:{mode:normalized}}));
+    return normalized;
+}
+
+async function setThemeMode(mode,options){
+    const normalized=applyThemeMode(mode,options);
+    const shouldPersist=!options||options.persist!==false;
+    if(!shouldPersist){
+        markThemeDirty(normalized);
+        return true;
+    }
+    if(typeof store!=='undefined'&&store&&store.settings){
+        const current=normalizeThemeMode(store.settings.themeMode||getDefaultSettings().themeMode);
+        if(current!==normalized&&typeof store.setSetting==='function'){
+            const ok=await store.setSetting('themeMode',normalized);
+            if(ok===false){
+                applyThemeMode(current,{remember:true});
+                return false;
+            }
+        }
+        if(store.settings)store.settings.themeMode=normalized;
+        clearThemeDirty();
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_theme_changed',{theme_mode:normalized});
+        return true;
+    }
+    markThemeDirty(normalized);
+    return true;
+}
+
+async function syncThemeModeWithStore(){
+    if(typeof store==='undefined'||!store||!store.settings)return applyThemeMode(getStoredThemeMode(),{remember:true});
+    const localMode=getStoredThemeMode();
+    const storeMode=normalizeThemeMode(store.settings.themeMode||getDefaultSettings().themeMode);
+    if(isThemeDirty()){
+        if(localMode!==storeMode&&typeof store.setSetting==='function'){
+            const ok=await store.setSetting('themeMode',localMode);
+            if(ok!==false){
+                store.settings.themeMode=localMode;
+                clearThemeDirty();
+                return applyThemeMode(localMode,{remember:true});
+            }
+        }
+        clearThemeDirty();
+    }
+    store.settings.themeMode=storeMode;
+    return applyThemeMode(storeMode,{remember:true});
+}
+
+window.rtSetThemeMode=setThemeMode;
+window.rtSyncThemeModeWithStore=syncThemeModeWithStore;
+window.rtApplyThemeMode=applyThemeMode;
+window.rtSyncThemeToggleVisibility=syncThemeToggleVisibility;
 
 window.rtTrackEvent=function(name,props){
     if(!window.rtAnalytics||typeof window.rtAnalytics.capture!=='function')return false;
@@ -218,7 +339,7 @@ function getDefaultSettings(){
         var oldSettings=JSON.parse(localStorage.getItem('rt_set')||'{}');
         if(oldSettings&&oldSettings.weeklyGoal)legacy=parseInt(oldSettings.weeklyGoal)||10;
     }catch(err){}
-    return {intlMode:false,weeklyGoal:legacy,profileNickname:'',profileAvatar:''};
+    return {intlMode:false,weeklyGoal:legacy,profileNickname:'',profileAvatar:'',themeMode:getStoredThemeMode()};
 }
 
 window.rtGuestStore={
@@ -944,6 +1065,7 @@ function renderFunnelChart(entries){
         target.innerHTML='<div class="empty-state compact"><p>暂无漏斗</p></div>';
         return;
     }
+    const lightTheme=getStoredThemeMode()==='light';
     const topCount=Math.max(entries[0].c,1);
     target.textContent='';
     const wrap=createEl('div','funnel-modern');
@@ -952,7 +1074,7 @@ function renderFunnelChart(entries){
     const defs=createSvgEl('defs');
     svg.appendChild(defs);
     const shadow=createSvgEl('filter',{id:'funnelShadow',x:'-40%',y:'-40%',width:'180%',height:'180%'});
-    shadow.appendChild(createSvgEl('feDropShadow',{dx:'0',dy:'20',stdDeviation:'18','flood-color':'#05070c','flood-opacity':'0.42'}));
+    shadow.appendChild(createSvgEl('feDropShadow',{dx:'0',dy:'20',stdDeviation:'18','flood-color':lightTheme?'#cbd5e1':'#05070c','flood-opacity':lightTheme?'0.24':'0.42'}));
     defs.appendChild(shadow);
     const centerX=156;
     const topY=18;
@@ -961,8 +1083,8 @@ function renderFunnelChart(entries){
     const widths=[236,188,142,102,60];
     svg.appendChild(createSvgEl('path',{
         d:'M 38 18 L 274 18 L 196 223 L 116 223 Z',
-        fill:'rgba(255,255,255,.018)',
-        stroke:'rgba(255,255,255,.055)',
+        fill:lightTheme?'rgba(15,23,42,.035)':'rgba(255,255,255,.018)',
+        stroke:lightTheme?'rgba(148,163,184,.28)':'rgba(255,255,255,.055)',
         'stroke-width':'1'
     }));
     entries.forEach(function(entry,index){
@@ -976,8 +1098,8 @@ function renderFunnelChart(entries){
         gradient.appendChild(createSvgEl('stop',{offset:'100%','stop-color':entry.co,'stop-opacity':'0.5'}));
         defs.appendChild(gradient);
         const sheen=createSvgEl('linearGradient',{id:`funnelSheen${index}`,x1:'0%',y1:'0%',x2:'100%',y2:'0%'});
-        sheen.appendChild(createSvgEl('stop',{offset:'0%','stop-color':'#ffffff','stop-opacity':'0.24'}));
-        sheen.appendChild(createSvgEl('stop',{offset:'38%','stop-color':'#ffffff','stop-opacity':'0.08'}));
+        sheen.appendChild(createSvgEl('stop',{offset:'0%','stop-color':lightTheme?'#ffffff':'#ffffff','stop-opacity':lightTheme?'0.52':'0.24'}));
+        sheen.appendChild(createSvgEl('stop',{offset:'38%','stop-color':'#ffffff','stop-opacity':lightTheme?'0.14':'0.08'}));
         sheen.appendChild(createSvgEl('stop',{offset:'100%','stop-color':'#ffffff','stop-opacity':'0'}));
         defs.appendChild(sheen);
         const points=[
@@ -988,13 +1110,13 @@ function renderFunnelChart(entries){
         ].join(' ');
         svg.appendChild(createSvgEl('polygon',{points:points,fill:`url(#funnelGrad${index})`,class:'funnel-polygon',filter:'url(#funnelShadow)'}));
         svg.appendChild(createSvgEl('polygon',{points:points,fill:`url(#funnelSheen${index})`,opacity:index===0?'.72':'.5'}));
-        svg.appendChild(createSvgEl('polygon',{points:points,fill:'none',stroke:'rgba(255,255,255,.14)','stroke-width':'0.9'}));
+        svg.appendChild(createSvgEl('polygon',{points:points,fill:'none',stroke:lightTheme?'rgba(255,255,255,.86)':'rgba(255,255,255,.14)','stroke-width':'0.9'}));
         svg.appendChild(createSvgEl('line',{
             x1:centerX-topW/2+14,
             y1:y+1,
             x2:centerX+topW/2-14,
             y2:y+1,
-            stroke:'rgba(255,255,255,.11)',
+            stroke:lightTheme?'rgba(255,255,255,.74)':'rgba(255,255,255,.11)',
             'stroke-width':'1'
         }));
     });
@@ -2866,6 +2988,17 @@ window.rtCreateStarterData=buildStarterData;
 window.rtShouldSeedStarterData=function(data){
     return !data||(!data.apps?.length&&!data.resumes?.length&&!data.refs?.length&&!data.logs?.length&&!data.categories?.length);
 };
+document.querySelectorAll('.theme-toggle').forEach(function(themeToggleBtn){
+    themeToggleBtn.addEventListener('click',async function(){
+        const current=getStoredThemeMode();
+        const next=current==='dark'?'light':'dark';
+        const hasActiveStore=typeof store!=='undefined'&&store&&store.settings&&(typeof rtSession!=='undefined'&&rtSession||(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()));
+        const ok=await setThemeMode(next,{persist:!!hasActiveStore});
+        if(ok!==false&&typeof toast==='function')toast(next==='light'?'已切换为浅色模式':'已切换为深色模式','success');
+    });
+});
+applyThemeMode(getStoredThemeMode(),{remember:true});
+syncThemeToggleVisibility(false);
 function init(){
     initFilters();
     renderTableControlOptions();

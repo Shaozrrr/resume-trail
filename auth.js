@@ -98,6 +98,7 @@ window.addEventListener('rt:session',function(event){
 function updateAppShell(isLoggedIn){
     document.getElementById('login-page').style.display=isLoggedIn?'none':'flex';
     document.getElementById('app').style.display=isLoggedIn?'flex':'none';
+    if(typeof window.rtSyncThemeToggleVisibility==='function')window.rtSyncThemeToggleVisibility(!!isLoggedIn);
 }
 
 function syncGuestDebug(){
@@ -130,6 +131,7 @@ function enterGuestMode(){
         store.tableCols=normalizeTableColumns(data.table_cols||DEFAULT_COLS);
         if(window.rtGuestStore&&window.rtGuestStore.isEnabled())window.rtGuestStore.save(store);
     }
+    if(typeof window.rtSyncThemeModeWithStore==='function')window.rtSyncThemeModeWithStore();
     updateAppShell(true);
     syncGuestDebug();
     updateAvatar();
@@ -174,6 +176,7 @@ async function checkAuth(){
             if(emailDefaultNick&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
                 await store.setSetting('profileNickname',emailDefaultNick);
             }
+            if(typeof window.rtSyncThemeModeWithStore==='function')await window.rtSyncThemeModeWithStore();
             if(typeof syncIntlToggles==='function')syncIntlToggles();
             if(typeof initFilters==='function')initFilters();
             if(typeof updIntl==='function')updIntl();

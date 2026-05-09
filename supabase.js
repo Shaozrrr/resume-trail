@@ -21,7 +21,7 @@ function rtDefaultUserData(){
     logs:[],
     categories:[],
     pain_points:(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]),
-    settings:{intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:''},
+    settings:{intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:'',themeMode:'dark'},
     table_cols:(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[])
   };
 }
@@ -435,7 +435,7 @@ const cloudStore={
     store.logs=data.logs;
     store.categories=data.categories;
     store.painPoints=data.pain_points;
-    store.settings=Object.assign({intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:''},data.settings||{});
+    store.settings=Object.assign({intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:'',themeMode:'dark'},data.settings||{});
     store.tableCols=typeof normalizeTableColumns==='function'?normalizeTableColumns(data.table_cols):data.table_cols;
   },
 
@@ -475,7 +475,7 @@ const cloudStore={
 
       let row=rowResult.data;
       if(!row){
-        const created=await sb.persistUserData(null,this.buildPayloadFromStore({apps:[],resumes:[],refs:[],logs:[],categories:[],painPoints:(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]),settings:{intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:''},tableCols:(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[])}));
+        const created=await sb.persistUserData(null,this.buildPayloadFromStore({apps:[],resumes:[],refs:[],logs:[],categories:[],painPoints:(typeof DEFAULT_PP!=='undefined'?[...DEFAULT_PP]:[]),settings:{intlMode:false,weeklyGoal:10,profileNickname:'',profileAvatar:'',themeMode:'dark'},tableCols:(typeof DEFAULT_COLS!=='undefined'?[...DEFAULT_COLS]:[])}));
         if(!created.ok)throw new Error(created.error||'创建 user_data 失败');
         row=created.data;
       }
@@ -483,7 +483,7 @@ const cloudStore={
       this.rowId=row&&row.id||null;
       let decoded=sb.decodeUserDataRow(row);
       if(rtNeedsStarterSeed(decoded)){
-        const seededPayload=rtStarterUserData(decoded&&decoded.settings?{profileNickname:decoded.settings.profileNickname||'',profileAvatar:decoded.settings.profileAvatar||''}:{});
+        const seededPayload=rtStarterUserData(decoded&&decoded.settings?{profileNickname:decoded.settings.profileNickname||'',profileAvatar:decoded.settings.profileAvatar||'',themeMode:decoded.settings.themeMode||'dark'}:{});
         const seededResult=await sb.persistUserData(this.rowId,seededPayload);
         if(!seededResult.ok)throw new Error(seededResult.error||'初始化演示数据失败');
         this.rowId=seededResult.data&&seededResult.data.id||this.rowId;
@@ -552,7 +552,7 @@ const cloudStore={
     const uid=sb.getUserId();
     if(!uid)throw new Error('未登录，无法清空云端数据');
     console.log('[RT cloud] clearAllData start',{userId:uid,rowId:this.rowId});
-    const starter=rtStarterUserData(store&&store.settings?{profileNickname:store.settings.profileNickname||'',profileAvatar:store.settings.profileAvatar||''}:{});
+    const starter=rtStarterUserData(store&&store.settings?{profileNickname:store.settings.profileNickname||'',profileAvatar:store.settings.profileAvatar||'',themeMode:store.settings.themeMode||'dark'}:{});
     const deleted=await sb.deleteUserDataRowsByUserId(uid);
     console.log('[RT cloud] clearAllData delete response',deleted);
     let finalRowResult=null;

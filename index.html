@@ -4,12 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>履迹 Resume Trail</title>
+    <script>
+        (function(){
+            try{
+                var stored=localStorage.getItem('rt_theme_mode');
+                document.documentElement.dataset.theme=stored==='light'?'light':'dark';
+            }catch(err){
+                document.documentElement.dataset.theme='dark';
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <canvas id="particles-canvas"></canvas>
+    <button id="theme-toggle-login" class="theme-toggle theme-toggle-login" type="button" aria-label="切换浅色模式">
+        <span class="theme-toggle-icon" aria-hidden="true">☀︎</span>
+        <span class="theme-toggle-text">浅色模式</span>
+    </button>
 
     <!-- 登录页 -->
     <div id="login-page" class="login-page">
@@ -133,6 +147,10 @@
             <header id="top-bar">
                 <div class="top-bar-left"><h1 id="view-title">投递看板</h1><span id="view-subtitle" class="subtitle"></span></div>
                 <div class="top-bar-right">
+                    <button id="theme-toggle-app" class="theme-toggle theme-toggle-app" type="button" aria-label="切换浅色模式">
+                        <span class="theme-toggle-icon" aria-hidden="true">☀︎</span>
+                        <span class="theme-toggle-text">浅色模式</span>
+                    </button>
                     <div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input type="text" id="global-search" placeholder="搜索公司或岗位..."></div>
                     <button id="import-btn" class="btn-ghost btn-sm" title="批量导入">📥 导入</button>
                     <button id="add-application-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建投递</button>

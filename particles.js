@@ -10,6 +10,25 @@
     const CONNECTION_DIST = 150;
     const MOUSE_DIST = 200;
 
+    function getThemePalette() {
+        const isLight = document.documentElement.dataset.theme === 'light';
+        return isLight
+            ? {
+                particle: '20, 28, 45',
+                line: '51, 65, 85',
+                particleOpacity: 0.16,
+                lineOpacity: 0.08,
+                mouseOpacity: 0.12
+            }
+            : {
+                particle: '255, 255, 255',
+                line: '255, 255, 255',
+                particleOpacity: 1,
+                lineOpacity: 1,
+                mouseOpacity: 1
+            };
+    }
+
     function resize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -35,28 +54,31 @@
     }
 
     function drawParticle(p) {
+        const palette = getThemePalette();
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+        ctx.fillStyle = `rgba(${palette.particle}, ${p.opacity * palette.particleOpacity})`;
         ctx.fill();
     }
 
     function drawConnection(p1, p2, dist) {
-        const opacity = (1 - dist / CONNECTION_DIST) * 0.15;
+        const palette = getThemePalette();
+        const opacity = (1 - dist / CONNECTION_DIST) * 0.15 * palette.lineOpacity;
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.strokeStyle = `rgba(${palette.line}, ${opacity})`;
         ctx.lineWidth = 0.5;
         ctx.stroke();
     }
 
     function drawMouseConnection(p, dist) {
-        const opacity = (1 - dist / MOUSE_DIST) * 0.25;
+        const palette = getThemePalette();
+        const opacity = (1 - dist / MOUSE_DIST) * 0.25 * palette.mouseOpacity;
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(mouse.x, mouse.y);
-        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.strokeStyle = `rgba(${palette.line}, ${opacity})`;
         ctx.lineWidth = 0.8;
         ctx.stroke();
     }
