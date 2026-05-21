@@ -2866,6 +2866,33 @@ $$('#trend-granularity .chart-segment').forEach(function(button){
 
 // ---- 设置 ----
 document.getElementById('settings-btn')?.addEventListener('click',()=>{document.getElementById('profile-btn')?.click();});
+function openCommunityModal(){
+    $('#community-modal-overlay')?.classList.add('active');
+}
+function closeCommunityModal(){
+    $('#community-modal-overlay')?.classList.remove('active');
+}
+$('#login-community-entry')?.addEventListener('click',openCommunityModal);
+$('#app-community-entry')?.addEventListener('click',openCommunityModal);
+$('#community-modal-close')?.addEventListener('click',closeCommunityModal);
+$('#community-modal-overlay')?.addEventListener('click',function(e){
+    if(e.target===e.currentTarget)closeCommunityModal();
+});
+$('#login-community-entry')?.addEventListener('pointermove',function(e){
+    const rect=e.currentTarget.getBoundingClientRect();
+    const x=(e.clientX-rect.left)/rect.width;
+    const y=(e.clientY-rect.top)/rect.height;
+    e.currentTarget.style.setProperty('--mx',Math.round(x*100)+'%');
+    e.currentTarget.style.setProperty('--my',Math.round(y*100)+'%');
+    e.currentTarget.style.setProperty('--rx',((.5-y)*3).toFixed(2)+'deg');
+    e.currentTarget.style.setProperty('--ry',((x-.5)*4).toFixed(2)+'deg');
+});
+$('#login-community-entry')?.addEventListener('pointerleave',function(e){
+    e.currentTarget.style.setProperty('--mx','78%');
+    e.currentTarget.style.setProperty('--my','50%');
+    e.currentTarget.style.setProperty('--rx','0deg');
+    e.currentTarget.style.setProperty('--ry','0deg');
+});
 function renderSetCats(){
     const el=$('#settings-categories');
     el.innerHTML='';

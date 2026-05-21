@@ -66,6 +66,14 @@
                 </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
                 <p id="login-hint" class="login-hint-text">首次使用会发送邮箱验证码，验证完成后即可直接用密码登录</p>
+                <button class="community-entry-card" id="login-community-entry" type="button">
+                    <span class="community-entry-light" aria-hidden="true"></span>
+                    <div class="community-entry-copy">
+                        <span class="community-entry-kicker">Co-create</span>
+                        <strong>加入履迹共创群</strong>
+                        <span>把建议放进下一次迭代。</span>
+                    </div>
+                </button>
             </div>
         </div>
     </div>
@@ -145,7 +153,17 @@
         </nav>
         <main id="main-content">
             <header id="top-bar">
-                <div class="top-bar-left"><h1 id="view-title">投递看板</h1><span id="view-subtitle" class="subtitle"></span></div>
+                <div class="top-bar-left">
+                    <button class="topbar-community-entry" id="app-community-entry" type="button" title="加入用户群">
+                        <span class="topbar-community-dot" aria-hidden="true"></span>
+                        <span class="topbar-community-copy">
+                            <strong>共创</strong>
+                            <small>用户群</small>
+                        </span>
+                    </button>
+                    <h1 id="view-title">投递看板</h1>
+                    <span id="view-subtitle" class="subtitle"></span>
+                </div>
                 <div class="top-bar-right">
                     <button id="theme-toggle-app" class="theme-toggle theme-toggle-app" type="button" aria-label="切换浅色模式">
                         <span class="theme-toggle-icon" aria-hidden="true">☀︎</span>
@@ -451,6 +469,32 @@
                 </div>
             </div>
             <div class="modal-footer"><button class="btn-secondary" id="avatar-crop-cancel">取消</button><button class="btn-primary" id="avatar-crop-confirm">使用这张头像</button></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="community-modal-overlay">
+        <div class="modal modal-sm community-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>加入履迹用户群</h2>
+                    <p>欢迎在群里提改进建议、反馈使用感受，也可以看看大家怎么一起把产品越磨越好。</p>
+                </div>
+                <button class="modal-close" id="community-modal-close">&times;</button>
+            </div>
+            <div class="modal-body community-modal-body">
+                <div class="community-modal-stage" aria-hidden="true">
+                    <span></span><span></span><span></span>
+                </div>
+                <div class="community-modal-qr-wrap">
+                    <span class="community-corner corner-tl" aria-hidden="true"></span>
+                    <span class="community-corner corner-tr" aria-hidden="true"></span>
+                    <span class="community-corner corner-bl" aria-hidden="true"></span>
+                    <span class="community-corner corner-br" aria-hidden="true"></span>
+                    <span class="community-scan-line" aria-hidden="true"></span>
+                    <img src="assets/wechat-group-qr.jpg" alt="履迹用户群二维码" class="community-modal-qr">
+                </div>
+                <div class="community-modal-caption">微信扫码加入用户群。需求、问题、想法，都可以直接放进群里。</div>
+            </div>
         </div>
     </div>
 
