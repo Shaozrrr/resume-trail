@@ -5,6 +5,7 @@ var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:
 var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
 var pendingOtpAuth={email:'',password:'',verifyType:'signup',syncPassword:false};
 var pendingRegisterIntent={active:false,email:'',password:''};
+var passwordFailureCounts={};
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -236,21 +237,36 @@ function hideMsg(){
     if(el)el.style.display='none';
 }
 
-function showRegisterCta(){
-    var el=document.getElementById('login-inline-actions');
-    if(el)el.style.display='block';
+function getPasswordFailureCount(email){
+    return passwordFailureCounts[email]||0;
 }
 
-function hideRegisterCta(){
-    var el=document.getElementById('login-inline-actions');
-    if(el)el.style.display='none';
+function incrementPasswordFailureCount(email){
+    passwordFailureCounts[email]=(passwordFailureCounts[email]||0)+1;
+    return passwordFailureCounts[email];
+}
+
+function clearPasswordFailureCount(email){
+    if(email&&passwordFailureCounts[email])delete passwordFailureCounts[email];
 }
 
 function clearPendingRegisterIntent(){
     pendingRegisterIntent.active=false;
     pendingRegisterIntent.email='';
     pendingRegisterIntent.password='';
-    hideRegisterCta();
+    closeRegisterChoiceModal();
+}
+
+function openRegisterChoiceModal(email,password){
+    pendingRegisterIntent.active=true;
+    pendingRegisterIntent.email=email;
+    pendingRegisterIntent.password=password;
+    document.getElementById('register-choice-overlay').classList.add('active');
+}
+
+function closeRegisterChoiceModal(){
+    var overlay=document.getElementById('register-choice-overlay');
+    if(overlay)overlay.classList.remove('active');
 }
 
 function getCleanLocationHref(){
@@ -565,8 +581,17 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_auth_started',{entry:'login_form'});
 
     try{
-        if(pendingRegisterIntent.active&&pendingRegisterIntent.email===email&&pendingRegisterIntent.password===pwd){
-            await continueSignupFlow(email,pwd);
+        var statusRes=await sb.getEmailStatus(email);
+        if(statusRes&&statusRes.error){
+            console.error('[RT auth] getEmailStatus failed',statusRes);
+            showMsg('暂时无法确认账号状态，请稍后重试。',true);
+            setSubmitIdleState();
+            return;
+        }
+
+        if(!statusRes.is_registered){
+            openRegisterChoiceModal(email,pwd);
+            showMsg('这个邮箱还没有注册，请确认是否继续注册。',false);
             setSubmitIdleState();
             return;
         }
@@ -574,6 +599,7 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         var loginRes=await sb.signIn(email,pwd);
         if(loginRes.access_token){
             clearPendingRegisterIntent();
+            clearPasswordFailureCount(email);
             onSuccess(loginRes,{flow:'password'});
             return;
         }
@@ -581,17 +607,15 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         var errMsg=getAuthErrorText(loginRes);
         if(isEmailNotConfirmedError(errMsg)){
             clearPendingRegisterIntent();
+            clearPasswordFailureCount(email);
             await resendSignupCode(email,pwd,'这个邮箱还没有完成验证，已重新发送验证码。',{mode:'resend_only',verifyType:'signup',syncPassword:false});
             setSubmitIdleState();
             return;
         }
 
         if(isInvalidLoginError(errMsg)){
-            pendingRegisterIntent.active=true;
-            pendingRegisterIntent.email=email;
-            pendingRegisterIntent.password=pwd;
-            showMsg('账号或密码不正确。若这是首次使用，请点击下方继续注册；若已有账号，请检查密码或点击忘记密码。',true);
-            showRegisterCta();
+            var failCount=incrementPasswordFailureCount(email);
+            showMsg(failCount>=2?'账号或密码不正确，请重试，或点击“忘记密码”重设。':'账号或密码不正确，请重试。',true);
             setSubmitIdleState();
             return;
         }
@@ -643,34 +667,6 @@ if(pwdToggle)pwdToggle.addEventListener('click',function(){
     if(input)input.addEventListener('input',function(){
         clearPendingRegisterIntent();
     });
-});
-
-var registerCta=document.getElementById('login-register-cta');
-if(registerCta)registerCta.addEventListener('click',async function(){
-    var email=document.getElementById('login-email').value.trim();
-    var pwd=document.getElementById('login-password').value;
-    if(!email||!email.includes('@')){
-        showMsg('请输入有效邮箱。',true);
-        return;
-    }
-    if(!pwd||pwd.length<6){
-        showMsg('密码至少 6 位。',true);
-        return;
-    }
-    pendingRegisterIntent.active=true;
-    pendingRegisterIntent.email=email;
-    pendingRegisterIntent.password=pwd;
-    registerCta.disabled=true;
-    registerCta.textContent='注册中...';
-    try{
-        await continueSignupFlow(email,pwd);
-    }catch(err){
-        console.error('[RT auth] continue register failed',err);
-        showMsg('网络连接异常，请稍后重试。',true);
-    }
-    registerCta.disabled=false;
-    registerCta.textContent='继续注册并获取验证码';
-    setSubmitIdleState();
 });
 
 var verifyBtn=document.getElementById('verify-submit');
@@ -770,6 +766,45 @@ var forgotModalClose=document.getElementById('forgot-modal-close');
 if(forgotModalClose)forgotModalClose.addEventListener('click',closeForgotModal);
 var forgotCancel=document.getElementById('forgot-cancel');
 if(forgotCancel)forgotCancel.addEventListener('click',closeForgotModal);
+
+var registerChoiceClose=document.getElementById('register-choice-close');
+if(registerChoiceClose)registerChoiceClose.addEventListener('click',function(){
+    clearPendingRegisterIntent();
+    hideMsg();
+});
+
+var registerChoiceCancel=document.getElementById('register-choice-cancel');
+if(registerChoiceCancel)registerChoiceCancel.addEventListener('click',function(){
+    clearPendingRegisterIntent();
+    hideMsg();
+});
+
+var registerChoiceConfirm=document.getElementById('register-choice-confirm');
+if(registerChoiceConfirm)registerChoiceConfirm.addEventListener('click',async function(){
+    var email=pendingRegisterIntent.email||document.getElementById('login-email').value.trim();
+    var pwd=pendingRegisterIntent.password||document.getElementById('login-password').value;
+    if(!email||!email.includes('@')){
+        clearPendingRegisterIntent();
+        showMsg('请输入有效邮箱。',true);
+        return;
+    }
+    if(!pwd||pwd.length<6){
+        clearPendingRegisterIntent();
+        showMsg('密码至少 6 位。',true);
+        return;
+    }
+    registerChoiceConfirm.disabled=true;
+    registerChoiceConfirm.textContent='注册中...';
+    try{
+        await continueSignupFlow(email,pwd);
+    }catch(err){
+        console.error('[RT auth] continue register failed',err);
+        showMsg('网络连接异常，请稍后重试。',true);
+    }
+    registerChoiceConfirm.disabled=false;
+    registerChoiceConfirm.textContent='继续注册';
+    setSubmitIdleState();
+});
 
 var forgotSendCodeBtn=document.getElementById('forgot-send-code');
 if(forgotSendCodeBtn)forgotSendCodeBtn.addEventListener('click',async function(){

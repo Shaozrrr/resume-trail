@@ -205,6 +205,34 @@ const sb={
     return this.unwrapAuthResponse('auth.sendEmailOtp',result);
   },
 
+  async getEmailStatus(email){
+    const result=await this.requestJson(SUPABASE_URL+'/rest/v1/rpc/rt_auth_email_status',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'apikey':SUPABASE_KEY,
+        'Authorization':'Bearer '+SUPABASE_KEY
+      },
+      body:JSON.stringify({input_email:email})
+    });
+    rtLog('auth.getEmailStatus',{
+      ok:result.ok,
+      status:result.status,
+      error:result.error||null
+    });
+    if(!result.ok){
+      return {
+        error:result.error||('HTTP '+result.status),
+        status:result.status
+      };
+    }
+    var row=Array.isArray(result.data)?result.data[0]:result.data;
+    return {
+      is_registered:!!(row&&row.is_registered),
+      is_confirmed:!!(row&&row.is_confirmed)
+    };
+  },
+
   async updatePassword(token,password){
     const result=await this.requestJson(SUPABASE_URL+'/auth/v1/user',{
       method:'PUT',

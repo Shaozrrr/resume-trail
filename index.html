@@ -65,9 +65,6 @@
                     <button class="btn-ghost login-secondary-btn" id="verify-back">返回修改邮箱或密码</button>
                 </div>
                 <div id="login-msg" style="margin-top:10px;font-size:12px;text-align:center;display:none;line-height:1.5"></div>
-                <div class="login-inline-actions" id="login-inline-actions" style="display:none">
-                    <button class="btn-ghost login-secondary-btn login-register-cta" id="login-register-cta">继续注册并获取验证码</button>
-                </div>
                 <p id="login-hint" class="login-hint-text">首次使用会发送邮箱验证码，验证完成后即可直接用密码登录</p>
                 <button class="community-entry-card" id="login-community-entry" type="button">
                     <span class="community-entry-light" aria-hidden="true"></span>
@@ -115,6 +112,22 @@
             <div class="modal-footer forgot-modal-footer">
                 <button class="btn-secondary" id="forgot-cancel">取消</button>
                 <button class="btn-primary" id="forgot-confirm">验证并登录</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="register-choice-overlay">
+        <div class="modal register-choice-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>该邮箱尚未注册</h2>
+                    <p>我们还没有找到这个邮箱对应的账号。确认后会发送验证码，完成验证后即可创建账号并直接用当前密码登录。</p>
+                </div>
+                <button class="modal-close" id="register-choice-close">&times;</button>
+            </div>
+            <div class="modal-footer register-choice-footer">
+                <button class="btn-secondary" id="register-choice-cancel">暂不注册</button>
+                <button class="btn-primary" id="register-choice-confirm">继续注册</button>
             </div>
         </div>
     </div>
