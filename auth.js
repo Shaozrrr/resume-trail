@@ -3,7 +3,7 @@ var rtSession=sb.getSession();
 var profileAvatarDraft='';
 var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
 var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
-var pendingOtpAuth={email:'',password:'',verifyType:'signup'};
+var pendingOtpAuth={email:'',password:'',verifyType:'signup',syncPassword:false};
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -248,6 +248,59 @@ function getAuthErrorText(result){
     )||'');
 }
 
+function getAuthErrorCode(result){
+    return String(result&&(
+        result.error_code||
+        result.code||
+        ''
+    )||'');
+}
+
+function extractRateLimitSeconds(message){
+    var match=String(message||'').match(/after\s+(\d+)\s+seconds?/i);
+    return match?parseInt(match[1],10):0;
+}
+
+function isEmailRateLimitError(result){
+    var code=getAuthErrorCode(result).toLowerCase();
+    var message=getAuthErrorText(result).toLowerCase();
+    return code.indexOf('rate_limit')>=0||
+        code.indexOf('too_many')>=0||
+        message.indexOf('rate limit')>=0||
+        message.indexOf('too many requests')>=0||
+        message.indexOf('for security purposes')>=0;
+}
+
+function isWeakPasswordError(result){
+    var code=getAuthErrorCode(result).toLowerCase();
+    var message=getAuthErrorText(result).toLowerCase();
+    return code.indexOf('weak_password')>=0||
+        message.indexOf('password should be')>=0||
+        message.indexOf('password is too weak')>=0;
+}
+
+function isNetworkLikeError(result){
+    var message=getAuthErrorText(result).toLowerCase();
+    return !result||
+        message.indexOf('failed to fetch')>=0||
+        message.indexOf('networkerror')>=0||
+        message.indexOf('network request failed')>=0;
+}
+
+function hasPendingVerificationUser(result){
+    if(!(result&&result.user&&!result.error))return false;
+    var identities=Array.isArray(result.user.identities)?result.user.identities:[];
+    return identities.length>0||
+        !!result.user.confirmation_sent_at||
+        !!(result.user.user_metadata&&result.user.user_metadata.email_verified===false);
+}
+
+function getRateLimitMessage(result,defaultText){
+    var seconds=extractRateLimitSeconds(getAuthErrorText(result));
+    if(seconds>0)return '验证码刚发送过，请先使用最新一封邮件中的验证码，或 '+seconds+' 秒后再试。';
+    return defaultText||'验证码刚发送过，请稍等片刻后再试。';
+}
+
 function isEmailNotConfirmedError(message){
     return message.toLowerCase().indexOf('email not confirmed')>=0;
 }
@@ -284,10 +337,12 @@ function showLoginStep(step){
     }
 }
 
-function openVerifyStep(email,password){
+function openVerifyStep(email,password,options){
+    options=options||{};
     pendingOtpAuth.email=email;
     pendingOtpAuth.password=password;
-    pendingOtpAuth.verifyType='signup';
+    pendingOtpAuth.verifyType=options.verifyType||'signup';
+    pendingOtpAuth.syncPassword=!!options.syncPassword;
     var emailDisplay=document.getElementById('verify-email-display');
     if(emailDisplay)emailDisplay.textContent=email;
     var codeInput=document.getElementById('verify-code');
@@ -305,23 +360,42 @@ function resetVerifyStep(){
     pendingOtpAuth.email='';
     pendingOtpAuth.password='';
     pendingOtpAuth.verifyType='signup';
+    pendingOtpAuth.syncPassword=false;
     var codeInput=document.getElementById('verify-code');
     if(codeInput)codeInput.value='';
     showLoginStep(1);
 }
 
-async function resendSignupCode(email,password,successText){
-    const resendRes=await sb.resendSignup(email);
-    const resendErr=getAuthErrorText(resendRes);
+async function resendSignupCode(email,password,successText,options){
+    options=options||{};
+    var verifyType=options.verifyType||'signup';
+    var syncPassword=!!options.syncPassword;
+    var resendRes=null;
+    if(options.mode==='resend_only'){
+        resendRes=await sb.resendSignup(email);
+        if(resendRes.error&&!isEmailRateLimitError(resendRes)){
+            resendRes=await sb.sendEmailOtp(email,true);
+        }
+    }else{
+        resendRes=await sb.sendEmailOtp(email,true);
+        if(resendRes.error&&!isEmailRateLimitError(resendRes)&&!isWeakPasswordError(resendRes)){
+            resendRes=await sb.resendSignup(email);
+        }
+    }
     if(resendRes.error){
-        if(isConfirmationSendError(resendErr)){
+        if(isEmailRateLimitError(resendRes)){
+            openVerifyStep(email,password,{verifyType:verifyType,syncPassword:syncPassword});
+            showMsg(getRateLimitMessage(resendRes),false);
+        }else if(isConfirmationSendError(getAuthErrorText(resendRes))){
             showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+        }else if(isWeakPasswordError(resendRes)){
+            showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
         }else{
-            showMsg(resendErr||'验证码发送失败，请稍后重试。',true);
+            showMsg(getAuthErrorText(resendRes)||'验证码发送失败，请稍后重试。',true);
         }
         return false;
     }
-    openVerifyStep(email,password);
+    openVerifyStep(email,password,{verifyType:verifyType,syncPassword:syncPassword});
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_resend'});
     showMsg(successText||'验证码已发送，请检查邮箱。',false);
     return true;
@@ -380,54 +454,133 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     submitBtn.disabled=true;
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_auth_started',{entry:'login_form'});
 
-    var loginRes=await sb.signIn(email,pwd);
-    if(loginRes.access_token){
-        onSuccess(loginRes,{flow:'password'});
-        return;
-    }
-
-    var errMsg=getAuthErrorText(loginRes);
-    if(isEmailNotConfirmedError(errMsg)){
-        await resendSignupCode(email,pwd,'这个邮箱还没有完成验证，已重新发送验证码。');
-        submitBtn.textContent='注册 / 登录';
-        submitBtn.disabled=false;
-        return;
-    }
-
-    if(isInvalidLoginError(errMsg)){
-        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_sign_up_started',{entry:'login_form'});
-        var signUpRes=await sb.signUp(email,pwd);
-        if(signUpRes.access_token){
-            onSuccess(signUpRes,{flow:'signup_direct',isNewUser:true});
+    try{
+        var loginRes=await sb.signIn(email,pwd);
+        if(loginRes.access_token){
+            onSuccess(loginRes,{flow:'password'});
             return;
         }
-        if(signUpRes.user&&!signUpRes.error){
-            openVerifyStep(email,pwd);
-            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup'});
-            showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
-            submitBtn.textContent='注册 / 登录';
-            submitBtn.disabled=false;
-            return;
-        }
-        var signUpErr=getAuthErrorText(signUpRes);
-        if(isConfirmationSendError(signUpErr)){
-            showMsg('注册邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+
+        var errMsg=getAuthErrorText(loginRes);
+        if(isEmailNotConfirmedError(errMsg)){
+            await resendSignupCode(email,pwd,'这个邮箱还没有完成验证，已重新发送验证码。',{mode:'resend_only',verifyType:'signup',syncPassword:false});
             setSubmitIdleState();
             return;
         }
-        if(isAlreadyRegisteredError(signUpErr)){
-            showMsg('邮箱或密码不正确，请重试。',true);
-            resetVerifyStep();
+
+        if(isInvalidLoginError(errMsg)){
+            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_sign_up_started',{entry:'login_form'});
+            var signUpRes=await sb.signUp(email,pwd);
+            if(signUpRes.access_token){
+                onSuccess(signUpRes,{flow:'signup_direct',isNewUser:true});
+                return;
+            }
+            if(hasPendingVerificationUser(signUpRes)){
+                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup'});
+                showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
+                setSubmitIdleState();
+                return;
+            }
+            if(signUpRes.user&&!signUpRes.error){
+                showMsg('这个邮箱已经注册，请检查密码；如果还没完成邮箱验证，请直接获取验证码继续。',true);
+                resetVerifyStep();
+                setSubmitIdleState();
+                return;
+            }
+            if(isEmailRateLimitError(signUpRes)){
+                openVerifyStep(email,pwd);
+                showMsg(getRateLimitMessage(signUpRes),false);
+                setSubmitIdleState();
+                return;
+            }
+            if(isConfirmationSendError(getAuthErrorText(signUpRes))){
+                showMsg('注册邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+                setSubmitIdleState();
+                return;
+            }
+            if(isWeakPasswordError(signUpRes)){
+                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+                setSubmitIdleState();
+                return;
+            }
+            if(isAlreadyRegisteredError(getAuthErrorText(signUpRes))){
+                showMsg('邮箱或密码不正确，请重试。',true);
+                resetVerifyStep();
+                setSubmitIdleState();
+                return;
+            }
+            if(isNetworkLikeError(signUpRes)){
+                showMsg('网络连接异常，请检查网络后重试。',true);
+                setSubmitIdleState();
+                return;
+            }
+            var otpFallback=await sb.sendEmailOtp(email,true);
+            if(!otpFallback.error){
+                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_fallback'});
+                showMsg('已向邮箱发送验证码，验证后即可进入；首次使用会保存当前密码。',false);
+                setSubmitIdleState();
+                return;
+            }
+            if(isEmailRateLimitError(otpFallback)){
+                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+                showMsg(getRateLimitMessage(otpFallback),false);
+                setSubmitIdleState();
+                return;
+            }
+            if(isConfirmationSendError(getAuthErrorText(otpFallback))){
+                showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+                setSubmitIdleState();
+                return;
+            }
+            if(isWeakPasswordError(otpFallback)){
+                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+                setSubmitIdleState();
+                return;
+            }
+            var resendFallback=await sb.resendSignup(email);
+            if(!resendFallback.error){
+                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_resend_fallback'});
+                showMsg('已重新发送验证码，请检查邮箱。',false);
+                setSubmitIdleState();
+                return;
+            }
+            if(isEmailRateLimitError(resendFallback)){
+                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+                showMsg(getRateLimitMessage(resendFallback),false);
+                setSubmitIdleState();
+                return;
+            }
+            if(isConfirmationSendError(getAuthErrorText(resendFallback))){
+                showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+                setSubmitIdleState();
+                return;
+            }
+            if(isWeakPasswordError(resendFallback)){
+                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+                setSubmitIdleState();
+                return;
+            }
+            showMsg(getAuthErrorText(resendFallback)||getAuthErrorText(otpFallback)||getAuthErrorText(signUpRes)||'验证码发送暂时受限，请稍后重试或使用忘记密码。',true);
             setSubmitIdleState();
             return;
         }
-        showMsg('暂时无法完成注册或登录，请稍后重试。',true);
+
+        if(isEmailRateLimitError(loginRes)){
+            showMsg(getRateLimitMessage(loginRes,'请求过于频繁，请稍后重试。'),true);
+            setSubmitIdleState();
+            return;
+        }
+
+        showMsg(errMsg||'邮箱或密码不正确，请重试。',true);
         setSubmitIdleState();
-        return;
+    }catch(err){
+        console.error('[RT auth] submit flow failed',err);
+        showMsg('网络连接异常，请稍后重试。',true);
+        setSubmitIdleState();
     }
-
-    showMsg('邮箱或密码不正确，请重试。',true);
-    setSubmitIdleState();
 });
 
 var guestBtn=document.getElementById('login-guest');
@@ -468,7 +621,18 @@ if(verifyBtn)verifyBtn.addEventListener('click',async function(){
     var verifyRes=await verifyEmailCode(email,code,pendingOtpAuth.verifyType||'signup');
     if(verifyRes&&verifyRes.access_token){
         if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'signup'});
-        onSuccess(verifyRes,{flow:'signup_otp',isNewUser:true});
+        if(pendingOtpAuth.syncPassword&&pendingOtpAuth.password){
+            var updateRes=await sb.updatePassword(verifyRes.access_token,pendingOtpAuth.password);
+            if(updateRes&&updateRes.error){
+                showMsg(getAuthErrorText(updateRes)||'密码保存失败，请重新获取验证码后再试。',true);
+                verifyBtn.textContent='验证并进入';
+                verifyBtn.disabled=false;
+                return;
+            }
+            onSuccess(Object.assign({},verifyRes,{user:updateRes&&updateRes.user?updateRes.user:(verifyRes.user||null)}),{flow:'signup_otp',isNewUser:true});
+            return;
+        }
+        onSuccess(verifyRes,{flow:'signup_otp',isNewUser:false});
         return;
     }
     showMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
@@ -485,7 +649,12 @@ if(resendBtn)resendBtn.addEventListener('click',async function(){
     }
     resendBtn.textContent='发送中...';
     resendBtn.disabled=true;
-    await resendSignupCode(email,pendingOtpAuth.password||document.getElementById('login-password').value,'验证码已重新发送，请检查邮箱。');
+    try{
+        await resendSignupCode(email,pendingOtpAuth.password||document.getElementById('login-password').value,'验证码已重新发送，请检查邮箱。',{mode:'signup',verifyType:pendingOtpAuth.verifyType||'signup',syncPassword:pendingOtpAuth.syncPassword});
+    }catch(err){
+        console.error('[RT auth] resend signup failed',err);
+        showMsg('网络连接异常，请稍后重试。',true);
+    }
     resendBtn.textContent='重新发送验证码';
     resendBtn.disabled=false;
 });
@@ -542,15 +711,24 @@ if(forgotSendCodeBtn)forgotSendCodeBtn.addEventListener('click',async function()
     }
     forgotSendCodeBtn.textContent='发送中...';
     forgotSendCodeBtn.disabled=true;
-    var otpRes=await sb.sendEmailOtp(email,false);
-    if(otpRes&&otpRes.error){
-        showForgotMsg(getAuthErrorText(otpRes)||'验证码发送失败，请稍后重试。',true);
-    }else{
-        if(typeof window.rtTrackEvent==='function'){
-            window.rtTrackEvent('rt_password_reset_started',{entry:'forgot_modal'});
-            window.rtTrackEvent('rt_otp_sent',{flow:'password_reset'});
+    try{
+        var otpRes=await sb.sendEmailOtp(email,false);
+        if(otpRes&&otpRes.error){
+            if(isEmailRateLimitError(otpRes)){
+                showForgotMsg(getRateLimitMessage(otpRes),false);
+            }else{
+                showForgotMsg(getAuthErrorText(otpRes)||'验证码发送失败，请稍后重试。',true);
+            }
+        }else{
+            if(typeof window.rtTrackEvent==='function'){
+                window.rtTrackEvent('rt_password_reset_started',{entry:'forgot_modal'});
+                window.rtTrackEvent('rt_otp_sent',{flow:'password_reset'});
+            }
+            showForgotMsg('验证码已发送，请查收邮箱。',false);
         }
-        showForgotMsg('验证码已发送，请查收邮箱。',false);
+    }catch(err){
+        console.error('[RT auth] forgot send code failed',err);
+        showForgotMsg('网络连接异常，请稍后重试。',true);
     }
     forgotSendCodeBtn.textContent='发送验证码';
     forgotSendCodeBtn.disabled=false;
@@ -580,19 +758,24 @@ if(forgotConfirmBtn)forgotConfirmBtn.addEventListener('click',async function(){
     }
     forgotConfirmBtn.textContent='验证中...';
     forgotConfirmBtn.disabled=true;
-    var verifyRes=await sb.verifyOTP(email,code,'email');
-    if(verifyRes&&verifyRes.access_token){
-        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'password_reset'});
-        var updateRes=await sb.updatePassword(verifyRes.access_token,newPassword);
-        if(updateRes&&!updateRes.error){
-            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_password_reset_completed',{entry:'forgot_modal'});
-            closeForgotModal();
-            onSuccess(Object.assign({},verifyRes,{user:updateRes.user||verifyRes.user||null}),{flow:'password_reset'});
-            return;
+    try{
+        var verifyRes=await sb.verifyOTP(email,code,'email');
+        if(verifyRes&&verifyRes.access_token){
+            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'password_reset'});
+            var updateRes=await sb.updatePassword(verifyRes.access_token,newPassword);
+            if(updateRes&&!updateRes.error){
+                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_password_reset_completed',{entry:'forgot_modal'});
+                closeForgotModal();
+                onSuccess(Object.assign({},verifyRes,{user:updateRes.user||verifyRes.user||null}),{flow:'password_reset'});
+                return;
+            }
+            showForgotMsg(getAuthErrorText(updateRes)||'新密码保存失败，请重新获取验证码后再试。',true);
+        }else{
+            showForgotMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
         }
-        showForgotMsg(getAuthErrorText(updateRes)||'新密码保存失败，请重新获取验证码后再试。',true);
-    }else{
-        showForgotMsg(getAuthErrorText(verifyRes)||'验证码错误或已过期，请重新获取。',true);
+    }catch(err){
+        console.error('[RT auth] forgot confirm failed',err);
+        showForgotMsg('网络连接异常，请稍后重试。',true);
     }
     forgotConfirmBtn.textContent='验证并登录';
     forgotConfirmBtn.disabled=false;

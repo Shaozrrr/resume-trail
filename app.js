@@ -77,6 +77,7 @@ const RT_GUEST_MODE_KEY='rt_guest_mode';
 const RT_GUEST_DATA_KEY='rt_guest_data';
 const RT_THEME_MODE_KEY='rt_theme_mode';
 const RT_THEME_DIRTY_KEY='rt_theme_dirty';
+const HIDDEN_VISA_VALUE='UNKNOWN';
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -1379,7 +1380,12 @@ function getProfileAvatar(){
 
 function syncKanbanSortDirection(){
     const btn=document.getElementById('kanban-sort-direction');
-    if(btn)btn.textContent=kanbanSortDirection==='desc'?'从大到小':'从小到大';
+    if(btn){
+        const isDesc=kanbanSortDirection==='desc';
+        btn.textContent=isDesc?'↓':'↑';
+        btn.setAttribute('aria-label',isDesc?'排序方向：从大到小':'排序方向：从小到大');
+        btn.setAttribute('title',isDesc?'排序方向：从大到小':'排序方向：从小到大');
+    }
 }
 
 function setTableSort(columnId){
@@ -1562,7 +1568,7 @@ async function setIntlMode(enabled){
     refresh();
     return true;
 }
-$('#toggle-intl-mode').addEventListener('change',async e=>{
+$('#toggle-intl-mode')?.addEventListener('change',async e=>{
     const ok=await setIntlMode(e.target.checked);
     if(ok===false){
         return;
@@ -1572,7 +1578,11 @@ document.getElementById('profile-toggle-intl-mode')?.addEventListener('change',a
     const ok=await setIntlMode(e.target.checked);
     if(ok===false)return;
 });
-function updIntl(){const s=store.settings.intlMode;$$('.intl-field').forEach(el=>el.style.display=s?'':'none');$('#filter-visa').style.display=s?'':'none';}
+function updIntl(){
+    $$('.intl-field').forEach(el=>el.style.display='none');
+    const visaFilter=$('#filter-visa');
+    if(visaFilter)visaFilter.style.display='none';
+}
 updIntl();
 // 类别下拉填充
 function fillCatSelect(selEl,val){
@@ -1599,8 +1609,8 @@ $('#add-category-inline').addEventListener('click',async ()=>{
     }
 });// ---- 看板 ----
 function renderKanban(q=''){
-    const b=$('#kanban-board'),fc=$('#filter-category').value,fv=$('#filter-visa').value,ks=$('#kanban-sort').value;
-    let apps=store.apps.filter(a=>{if(q&&!a.company_name.toLowerCase().includes(q)&&!a.position_title.toLowerCase().includes(q))return false;if(fc&&a.position_category!==fc)return false;if(fv&&a.visa_requirement!==fv)return false;return true;});
+    const b=$('#kanban-board'),fc=$('#filter-category').value,ks=$('#kanban-sort').value;
+    let apps=store.apps.filter(a=>{if(q&&!a.company_name.toLowerCase().includes(q)&&!a.position_title.toLowerCase().includes(q))return false;if(fc&&a.position_category!==fc)return false;return true;});
     apps=apps.slice().sort(function(a,b){
         const direction=kanbanSortDirection==='asc'?1:-1;
         if(ks==='preference')return((parseInt(a.preference_level)||0)-(parseInt(b.preference_level)||0))*direction;
@@ -1626,7 +1636,6 @@ function renderKanban(q=''){
 function mkCard(a){
     const c=document.createElement('div');c.className='kanban-card';c.draggable=true;
     const w=getWait(a),wc=w>30?'danger':w>14?'warn':'',r=a.resume_id?store.getResume(a.resume_id):null;
-    const sv=store.settings.intlMode&&a.visa_requirement&&a.visa_requirement!=='UNKNOWN',vi=VISA_MAP[a.visa_requirement]||{};
     let ddl='';if(a.next_deadline){const dl=daysBtw(new Date().toISOString().split('T')[0],a.next_deadline.split('T')[0]);ddl=`<div class="card-ddl ${dl<=3?'urgent':''}"><span>DDL</span><strong>${fmtD(a.next_deadline)}</strong>${a.next_action?`<em>${escapeHTML(a.next_action)}</em>`:''}</div>`;}
     const dateStr=a.applied_date?fmtD(a.applied_date):'';
     const chips=[
@@ -1635,7 +1644,7 @@ function mkCard(a){
         a.source_channel?`<span class="card-chip subtle">${escapeHTML(a.source_channel)}</span>`:''
     ].filter(Boolean).join('');
     const followup=getFollowupState(a);
-    c.innerHTML=`<div class="card-top"><div class="card-logo">${ini(a.company_name)}</div><div class="card-info"><div class="card-company">${escapeHTML(a.company_name)}</div><div class="card-position">${escapeHTML(a.position_title)}</div></div><div class="card-chevron">›</div></div><div class="card-chips">${chips}${followup?`<span class="card-chip followup">${escapeHTML(followup.label)}</span>`:''}</div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span class="card-date">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}${sv?`<span class="card-visa ${vi.cls}">${escapeHTML(vi.label)}</span>`:''}</div>${r?`<div class="card-resume">已关联简历 · ${escapeHTML(r.file_name)}</div>`:''}${ddl}`;
+    c.innerHTML=`<div class="card-top"><div class="card-logo">${ini(a.company_name)}</div><div class="card-info"><div class="card-company">${escapeHTML(a.company_name)}</div><div class="card-position">${escapeHTML(a.position_title)}</div></div><div class="card-chevron">›</div></div><div class="card-chips">${chips}${followup?`<span class="card-chip followup">${escapeHTML(followup.label)}</span>`:''}</div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span class="card-date">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}</div>${r?`<div class="card-resume">已关联简历 · ${escapeHTML(r.file_name)}</div>`:''}${ddl}`;
     c.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',a.id);c.classList.add('dragging');});
     c.addEventListener('dragend',()=>c.classList.remove('dragging'));
     c.addEventListener('click',()=>openDrawer(a.id));
@@ -1794,7 +1803,7 @@ $('#table-filter-value').addEventListener('input',()=>renderTable($('#global-sea
 $('#table-sort-column').addEventListener('change',e=>{tableSortColumn=e.target.value||'created_at';renderTable($('#global-search').value.toLowerCase().trim());});
 $('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable($('#global-search').value.toLowerCase().trim());});
 $('#filter-category').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
-$('#filter-visa').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
+$('#filter-visa')?.addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#kanban-sort').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
 $('#kanban-sort-direction').addEventListener('click',()=>{kanbanSortDirection=kanbanSortDirection==='asc'?'desc':'asc';syncKanbanSortDirection();renderKanban($('#global-search').value.toLowerCase().trim());});
 $('#table-add-row').addEventListener('click',()=>openAppModal());
@@ -1882,13 +1891,13 @@ function setFieldValue(id,value){
     const element=$(id);
     if(element)element.value=value??'';
 }
-function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-status-date').value=getStatusDateForApp(a)||(a?.applied_date||new Date().toISOString().split('T')[0]);$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';$('#form-visa').value=a?.visa_requirement||'UNKNOWN';$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';setFieldValue('#form-contact',a?.contact_name||'');setFieldValue('#form-next-followup',a?.next_followup_date||'');setFieldValue('#form-last-followup',a?.last_followup_date||'');setFieldValue('#form-followup-note',a?.followup_note||'');$('#form-jd-url').value=a?.jd_url||'';$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
+function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-status-date').value=getStatusDateForApp(a)||(a?.applied_date||new Date().toISOString().split('T')[0]);$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';setFieldValue('#form-visa',a?.visa_requirement||HIDDEN_VISA_VALUE);$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';setFieldValue('#form-contact',a?.contact_name||'');setFieldValue('#form-next-followup',a?.next_followup_date||'');setFieldValue('#form-last-followup',a?.last_followup_date||'');setFieldValue('#form-followup-note',a?.followup_note||'');$('#form-jd-url').value=a?.jd_url||'';$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
 // 渲染自定义字段
 const cfa=$('#custom-fields-area');cfa.innerHTML='';
 const customCols=store.tableCols.filter(c=>c.custom);
 if(customCols.length){customCols.forEach(col=>{const val=a?.customFields?.[col.id]||'';const group=createEl('div','form-group');group.appendChild(createEl('label','',col.label));const input=document.createElement('input');input.type='text';input.className='custom-field-input';input.dataset.colId=col.id;input.value=val;input.placeholder=`输入${col.label}...`;group.appendChild(input);cfa.appendChild(group);});}
 updIntl();$('#modal-overlay').classList.add('active');}
-async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const selectedStatus=$('#form-status').value||'APPLIED';const statusDate=$('#form-status-date').value||'';const appliedDate=$('#form-date').value;if(!appliedDate){toast('请填写投递日期','error');return;}if(selectedStatus!=='WATCHING'&&!statusDate){toast('请填写当前状态日期','error');return;}const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,current_status_date:statusDate||appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:$('#form-visa').value,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact')?.value.trim()||'',next_followup_date:$('#form-next-followup')?.value||'',last_followup_date:$('#form-last-followup')?.value||'',followup_note:$('#form-followup-note')?.value.trim()||'',jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value,status:selectedStatus};
+async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const selectedStatus=$('#form-status').value||'APPLIED';const statusDate=$('#form-status-date').value||'';const appliedDate=$('#form-date').value;if(!appliedDate){toast('请填写投递日期','error');return;}if(selectedStatus!=='WATCHING'&&!statusDate){toast('请填写当前状态日期','error');return;}const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,current_status_date:statusDate||appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:HIDDEN_VISA_VALUE,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact')?.value.trim()||'',next_followup_date:$('#form-next-followup')?.value||'',last_followup_date:$('#form-last-followup')?.value||'',followup_note:$('#form-followup-note')?.value.trim()||'',jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value,status:selectedStatus};
 // 收集自定义字段
 const cf={};$$('.custom-field-input').forEach(inp=>{cf[inp.dataset.colId]=inp.value.trim();});if(Object.keys(cf).length)d.customFields=cf;
 if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.customFields||{},cf);
@@ -1936,7 +1945,6 @@ function renderDInfo(a){
         {label:'JD',text:a.jd_url||'—',link:safeHttpUrl(a.jd_url),linkText:a.jd_url},
         {label:'备注',text:a.notes||'—'}
     ];
-    if(store.settings.intlMode)fields.splice(3,0,{label:'工签',text:(VISA_MAP[a.visa_requirement]||{}).label||'—'});
     const res=a.resume_id?store.getResume(a.resume_id):null;
     if(res)fields.splice(2,0,{label:'简历',text:`📎 ${res.file_name}`});
     fields.forEach(function(field){

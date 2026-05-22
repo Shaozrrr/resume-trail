@@ -154,6 +154,10 @@
         <main id="main-content">
             <header id="top-bar">
                 <div class="top-bar-left">
+                    <h1 id="view-title">投递看板</h1>
+                    <span id="view-subtitle" class="subtitle"></span>
+                </div>
+                <div class="top-bar-right">
                     <button class="topbar-community-entry" id="app-community-entry" type="button" title="加入用户群">
                         <span class="topbar-community-dot" aria-hidden="true"></span>
                         <span class="topbar-community-copy">
@@ -161,10 +165,6 @@
                             <small>用户群</small>
                         </span>
                     </button>
-                    <h1 id="view-title">投递看板</h1>
-                    <span id="view-subtitle" class="subtitle"></span>
-                </div>
-                <div class="top-bar-right">
                     <button id="theme-toggle-app" class="theme-toggle theme-toggle-app" type="button" aria-label="切换浅色模式">
                         <span class="theme-toggle-icon" aria-hidden="true">☀︎</span>
                         <span class="theme-toggle-text">浅色模式</span>
@@ -177,11 +177,9 @@
             <div id="view-pipeline" class="view active">
                 <div class="kanban-filters">
                     <select id="filter-category" class="filter-select"><option value="">全部类别</option></select>
-                    <select id="filter-visa" class="filter-select"><option value="">全部工签</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option><option value="UNKNOWN">❓ 未知</option></select>
                     <div style="flex:1"></div>
                     <select id="kanban-sort" class="filter-select"><option value="">默认排序</option><option value="preference">按偏好度</option><option value="waiting">按等待天数</option><option value="applied_days">按已投递天数</option></select>
-                    <button class="btn-ghost btn-sm" id="kanban-sort-direction" title="切换排序方向">从大到小</button>
-                    <label class="toggle-label"><input type="checkbox" id="toggle-intl-mode"><span class="toggle-slider"></span><span>留学生模式</span></label>
+                    <button class="btn-ghost btn-sm" id="kanban-sort-direction" title="切换排序方向" aria-label="排序方向：从大到小">↓</button>
                 </div>
                 <div class="kanban-board" id="kanban-board"></div>
             </div>
@@ -270,7 +268,7 @@
                 <div class="form-row"><div class="form-group"><label>当前状态</label><select id="form-status"><option value="WATCHING">观望中</option><option value="APPLIED" selected>已投递</option><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="OFFER">Offer</option><option value="REJECTED">流程终止</option></select></div><div class="form-group"><label>当前状态日期</label><input type="date" id="form-status-date"></div></div>
                 <div class="form-group"><label>投递日期</label><input type="date" id="form-date"></div>
                 <div class="form-row"><div class="form-group"><label>Base 地</label><input type="text" id="form-base" placeholder="如：上海 / London"></div><div class="form-group"><label>绑定简历</label><select id="form-resume"><option value="">不绑定</option></select></div></div>
-                <div class="form-row"><div class="form-group"><label>偏好度</label><select id="form-preference"><option value="1">⭐ 保底</option><option value="2">⭐⭐ 一般</option><option value="3" selected>⭐⭐⭐ 心仪</option><option value="4">⭐⭐⭐⭐ 梦想</option></select></div><div class="form-group intl-field" style="display:none"><label>工签要求</label><select id="form-visa"><option value="UNKNOWN">❓ 未知</option><option value="SPONSOR_YES">✅ Sponsor</option><option value="SELF_VISA">🟡 自带工签</option><option value="NO_SPONSOR">🔴 不提供</option></select></div></div>
+                <div class="form-row"><div class="form-group"><label>偏好度</label><select id="form-preference"><option value="1">⭐ 保底</option><option value="2">⭐⭐ 一般</option><option value="3" selected>⭐⭐⭐ 心仪</option><option value="4">⭐⭐⭐⭐ 梦想</option></select></div></div>
                 <div class="form-row"><div class="form-group"><label>投递渠道</label><input type="text" id="form-channel" list="channel-options" placeholder="如：官网"></div><div class="form-group"><label>渠道链接</label><input type="url" id="form-channel-link" placeholder="https://..."></div></div>
                 <datalist id="channel-options"><option value="官网"></option><option value="Boss直聘"></option><option value="内推"></option><option value="猎头"></option><option value="LinkedIn"></option><option value="牛客"></option><option value="其他"></option></datalist>
                 <div class="form-row"><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
@@ -395,14 +393,6 @@
                             <span class="account-inline-help">用于数据看板的节奏追踪</span>
                             <input type="number" id="settings-weekly-goal" value="10" min="1" max="100">
                         </label>
-                        <div class="account-inline-setting account-inline-toggle">
-                            <span class="account-inline-label">留学生模式</span>
-                            <span class="account-inline-help">显示工签相关字段与筛选</span>
-                            <input type="checkbox" id="profile-toggle-intl-mode">
-                            <label class="account-toggle-wrap" for="profile-toggle-intl-mode" aria-label="切换留学生模式">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
                     </div>
                 </section>
 
@@ -485,14 +475,10 @@
                 <div class="community-modal-stage" aria-hidden="true">
                     <span></span><span></span><span></span>
                 </div>
-                <div class="community-modal-qr-wrap">
-                    <span class="community-corner corner-tl" aria-hidden="true"></span>
-                    <span class="community-corner corner-tr" aria-hidden="true"></span>
-                    <span class="community-corner corner-bl" aria-hidden="true"></span>
-                    <span class="community-corner corner-br" aria-hidden="true"></span>
-                    <span class="community-scan-line" aria-hidden="true"></span>
-                    <img src="assets/wechat-group-qr.jpg" alt="履迹用户群二维码" class="community-modal-qr">
-                </div>
+            <div class="community-modal-qr-wrap">
+              <span class="community-scan-line" aria-hidden="true"></span>
+              <img src="assets/wechat-group-qr.jpg" alt="履迹用户群二维码" class="community-modal-qr">
+            </div>
                 <div class="community-modal-caption">微信扫码加入用户群。需求、问题、想法，都可以直接放进群里。</div>
             </div>
         </div>
