@@ -569,6 +569,9 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .login-aux-btn:hover{color:rgba(246,247,250,.94)!important;transform:none!important}
 .login-secondary-btn{width:100%;justify-content:center;padding:8px 10px!important;margin-top:8px;border:none!important;background:transparent!important;color:rgba(229,232,238,.74)!important;font-size:12px!important}
 .login-secondary-btn:hover{color:rgba(246,247,250,.94)!important;transform:none!important}
+.login-inline-actions{margin-top:10px}
+.login-register-cta{margin-top:0!important;padding:10px 12px!important;border:1px solid rgba(255,255,255,.12)!important;border-radius:14px!important;background:rgba(255,255,255,.035)!important;color:rgba(242,244,249,.9)!important}
+.login-register-cta:hover{background:rgba(255,255,255,.06)!important;border-color:rgba(255,255,255,.18)!important}
 .login-hint-text{font-size:12px;color:rgba(193,197,205,.5);text-align:center;margin-top:20px;line-height:1.68;letter-spacing:.02em}
 .community-entry-card{--mx:78%;--my:50%;--rx:0deg;--ry:0deg;position:relative;margin-top:16px;width:100%;display:block;padding:14px 16px;border:none;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.038),rgba(255,255,255,.016));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);cursor:pointer;text-align:left;overflow:hidden;transform:perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));transition:transform .36s cubic-bezier(.22,1,.36,1),border-color .24s var(--ease),background .24s var(--ease),box-shadow .24s var(--ease)}
 .community-entry-card::before{content:'';position:absolute;inset:-1px;border-radius:inherit;background:radial-gradient(circle at var(--mx) var(--my),rgba(255,255,255,.15),transparent 30%);opacity:.65;transition:opacity .24s var(--ease);pointer-events:none}
@@ -1144,6 +1147,15 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 :root[data-theme=light] .login-aux-btn,
 :root[data-theme=light] .login-secondary-btn,
 :root[data-theme=light] .login-hint-text{color:rgba(104,88,69,.82)!important}
+:root[data-theme=light] .login-register-cta{
+  color:rgba(78,58,36,.96)!important;
+  border-color:rgba(145,116,80,.16)!important;
+  background:rgba(255,250,244,.48)!important;
+}
+:root[data-theme=light] .login-register-cta:hover{
+  background:rgba(255,249,240,.66)!important;
+  border-color:rgba(145,116,80,.24)!important;
+}
 :root[data-theme=light] .forgot-modal{
   background:linear-gradient(180deg,rgba(255,248,239,.78),rgba(249,242,231,.58))!important;
   border-color:rgba(255,255,255,.76)!important;
