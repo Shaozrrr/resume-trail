@@ -4,6 +4,7 @@ var profileAvatarDraft='';
 var avatarCropState={src:'',naturalWidth:0,naturalHeight:0,scale:1,minScale:1,x:0,y:0,dragging:false,startX:0,startY:0,originX:0,originY:0};
 var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
 var pendingOtpAuth={email:'',password:'',verifyType:'signup',syncPassword:false};
+var pendingRegisterIntent={active:false,email:'',password:''};
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -235,6 +236,12 @@ function hideMsg(){
     if(el)el.style.display='none';
 }
 
+function clearPendingRegisterIntent(){
+    pendingRegisterIntent.active=false;
+    pendingRegisterIntent.email='';
+    pendingRegisterIntent.password='';
+}
+
 function getCleanLocationHref(){
     return location.href.split('#')[0];
 }
@@ -357,6 +364,7 @@ function setSubmitIdleState(){
 }
 
 function resetVerifyStep(){
+    clearPendingRegisterIntent();
     pendingOtpAuth.email='';
     pendingOtpAuth.password='';
     pendingOtpAuth.verifyType='signup';
@@ -413,6 +421,97 @@ async function verifyEmailCode(email,code,preferredType){
     return first;
 }
 
+async function continueSignupFlow(email,pwd){
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_sign_up_started',{entry:'login_form'});
+    var signUpRes=await sb.signUp(email,pwd);
+    if(signUpRes.access_token){
+        clearPendingRegisterIntent();
+        onSuccess(signUpRes,{flow:'signup_direct',isNewUser:true});
+        return true;
+    }
+    if(hasPendingVerificationUser(signUpRes)){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup'});
+        showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
+        return true;
+    }
+    if(signUpRes.user&&!signUpRes.error){
+        clearPendingRegisterIntent();
+        showMsg('这个邮箱已经注册，请检查密码；如果还没完成邮箱验证，请直接获取验证码继续。',true);
+        return true;
+    }
+    if(isEmailRateLimitError(signUpRes)){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd);
+        showMsg(getRateLimitMessage(signUpRes),false);
+        return true;
+    }
+    if(isConfirmationSendError(getAuthErrorText(signUpRes))){
+        showMsg('注册邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+        return true;
+    }
+    if(isWeakPasswordError(signUpRes)){
+        showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+        return true;
+    }
+    if(isAlreadyRegisteredError(getAuthErrorText(signUpRes))){
+        clearPendingRegisterIntent();
+        showMsg('邮箱或密码不正确，请重试。',true);
+        return true;
+    }
+    if(isNetworkLikeError(signUpRes)){
+        showMsg('网络连接异常，请检查网络后重试。',true);
+        return true;
+    }
+    var otpFallback=await sb.sendEmailOtp(email,true);
+    if(!otpFallback.error){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_fallback'});
+        showMsg('已向邮箱发送验证码，验证后即可进入；首次使用会保存当前密码。',false);
+        return true;
+    }
+    if(isEmailRateLimitError(otpFallback)){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+        showMsg(getRateLimitMessage(otpFallback),false);
+        return true;
+    }
+    if(isConfirmationSendError(getAuthErrorText(otpFallback))){
+        showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+        return true;
+    }
+    if(isWeakPasswordError(otpFallback)){
+        showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+        return true;
+    }
+    var resendFallback=await sb.resendSignup(email);
+    if(!resendFallback.error){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_resend_fallback'});
+        showMsg('已重新发送验证码，请检查邮箱。',false);
+        return true;
+    }
+    if(isEmailRateLimitError(resendFallback)){
+        clearPendingRegisterIntent();
+        openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
+        showMsg(getRateLimitMessage(resendFallback),false);
+        return true;
+    }
+    if(isConfirmationSendError(getAuthErrorText(resendFallback))){
+        showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
+        return true;
+    }
+    if(isWeakPasswordError(resendFallback)){
+        showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
+        return true;
+    }
+    showMsg(getAuthErrorText(resendFallback)||getAuthErrorText(otpFallback)||getAuthErrorText(signUpRes)||'验证码发送暂时受限，请稍后重试或使用忘记密码。',true);
+    return true;
+}
+
 function clearLocalBusinessData(){
     if(typeof store==='undefined')return;
     store.resetState();
@@ -455,8 +554,14 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_auth_started',{entry:'login_form'});
 
     try{
+        if(pendingRegisterIntent.active&&pendingRegisterIntent.email===email&&pendingRegisterIntent.password===pwd){
+            await continueSignupFlow(email,pwd);
+            setSubmitIdleState();
+            return;
+        }
         var loginRes=await sb.signIn(email,pwd);
         if(loginRes.access_token){
+            clearPendingRegisterIntent();
             onSuccess(loginRes,{flow:'password'});
             return;
         }
@@ -469,101 +574,10 @@ if(submitBtn)submitBtn.addEventListener('click',async function(){
         }
 
         if(isInvalidLoginError(errMsg)){
-            if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_sign_up_started',{entry:'login_form'});
-            var signUpRes=await sb.signUp(email,pwd);
-            if(signUpRes.access_token){
-                onSuccess(signUpRes,{flow:'signup_direct',isNewUser:true});
-                return;
-            }
-            if(hasPendingVerificationUser(signUpRes)){
-                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
-                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup'});
-                showMsg('首次使用验证码已发送到邮箱，完成验证后即可用当前密码直接登录。',false);
-                setSubmitIdleState();
-                return;
-            }
-            if(signUpRes.user&&!signUpRes.error){
-                showMsg('这个邮箱已经注册，请检查密码；如果还没完成邮箱验证，请直接获取验证码继续。',true);
-                resetVerifyStep();
-                setSubmitIdleState();
-                return;
-            }
-            if(isEmailRateLimitError(signUpRes)){
-                openVerifyStep(email,pwd);
-                showMsg(getRateLimitMessage(signUpRes),false);
-                setSubmitIdleState();
-                return;
-            }
-            if(isConfirmationSendError(getAuthErrorText(signUpRes))){
-                showMsg('注册邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
-                setSubmitIdleState();
-                return;
-            }
-            if(isWeakPasswordError(signUpRes)){
-                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
-                setSubmitIdleState();
-                return;
-            }
-            if(isAlreadyRegisteredError(getAuthErrorText(signUpRes))){
-                showMsg('邮箱或密码不正确，请重试。',true);
-                resetVerifyStep();
-                setSubmitIdleState();
-                return;
-            }
-            if(isNetworkLikeError(signUpRes)){
-                showMsg('网络连接异常，请检查网络后重试。',true);
-                setSubmitIdleState();
-                return;
-            }
-            var otpFallback=await sb.sendEmailOtp(email,true);
-            if(!otpFallback.error){
-                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
-                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_fallback'});
-                showMsg('已向邮箱发送验证码，验证后即可进入；首次使用会保存当前密码。',false);
-                setSubmitIdleState();
-                return;
-            }
-            if(isEmailRateLimitError(otpFallback)){
-                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
-                showMsg(getRateLimitMessage(otpFallback),false);
-                setSubmitIdleState();
-                return;
-            }
-            if(isConfirmationSendError(getAuthErrorText(otpFallback))){
-                showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
-                setSubmitIdleState();
-                return;
-            }
-            if(isWeakPasswordError(otpFallback)){
-                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
-                setSubmitIdleState();
-                return;
-            }
-            var resendFallback=await sb.resendSignup(email);
-            if(!resendFallback.error){
-                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
-                if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_sent',{flow:'signup_resend_fallback'});
-                showMsg('已重新发送验证码，请检查邮箱。',false);
-                setSubmitIdleState();
-                return;
-            }
-            if(isEmailRateLimitError(resendFallback)){
-                openVerifyStep(email,pwd,{verifyType:'signup',syncPassword:true});
-                showMsg(getRateLimitMessage(resendFallback),false);
-                setSubmitIdleState();
-                return;
-            }
-            if(isConfirmationSendError(getAuthErrorText(resendFallback))){
-                showMsg('验证码邮件发送失败，请先确认 Supabase 的 SMTP 已配置完成。',true);
-                setSubmitIdleState();
-                return;
-            }
-            if(isWeakPasswordError(resendFallback)){
-                showMsg('密码强度不足，请改成至少 6 位，并尽量包含字母和数字。',true);
-                setSubmitIdleState();
-                return;
-            }
-            showMsg(getAuthErrorText(resendFallback)||getAuthErrorText(otpFallback)||getAuthErrorText(signUpRes)||'验证码发送暂时受限，请稍后重试或使用忘记密码。',true);
+            pendingRegisterIntent.active=true;
+            pendingRegisterIntent.email=email;
+            pendingRegisterIntent.password=pwd;
+            showMsg('如果这是首次使用，请再次点击“注册 / 登录”获取验证码；如果已有账号，请检查密码或使用忘记密码。',true);
             setSubmitIdleState();
             return;
         }
@@ -602,6 +616,13 @@ if(pwdToggle)pwdToggle.addEventListener('click',function(){
     var nextType=input.type==='password'?'text':'password';
     input.type=nextType;
     pwdToggle.classList.toggle('is-active',nextType==='text');
+});
+
+['login-email','login-password'].forEach(function(id){
+    var input=document.getElementById(id);
+    if(input)input.addEventListener('input',function(){
+        clearPendingRegisterIntent();
+    });
 });
 
 var verifyBtn=document.getElementById('verify-submit');
