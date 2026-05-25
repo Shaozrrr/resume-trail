@@ -14,7 +14,14 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="styles.css">
+    <script>
+        window.RT_PREPARE_CONFIG=Object.assign({
+            apiBase:'http://127.0.0.1:8788',
+            provider:'DeepSeek',
+            model:'deepseek-v4-pro'
+        },window.RT_PREPARE_CONFIG||{});
+    </script>
+  <link rel="stylesheet" href="styles.css?v=20260525-stripe-setup-01">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -158,6 +165,7 @@
                 <button class="nav-item active" data-view="pipeline" title="投递看板"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
                 <button class="nav-item" data-view="table" title="表格视图"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M9 3v18"/></svg><span>表格</span></button>
                 <button class="nav-item" data-view="resumes" title="简历文件舱"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg><span>简历</span></button>
+                <button class="nav-item" data-view="prepare" title="面试准备"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3 4 7.5V16.5L12 21 20 16.5V7.5L12 3Z"/><path d="M8.5 12 10.8 14.3 15.8 9.3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>准备</span></button>
                 <button class="nav-item" data-view="reflections" title="复盘记录"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8"/></svg><span>复盘</span></button>
                 <button class="nav-item" data-view="calendar" title="日历"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>日历</span></button>
                 <button class="nav-item" data-view="analytics" title="数据大屏"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><span>数据</span></button>
@@ -244,6 +252,9 @@
                 </div>
                 <div class="resumes-grid" id="resumes-grid"></div>
             </div>
+            <div id="view-prepare" class="view">
+                <div id="prepare-root" class="prepare-root"></div>
+            </div>
             <div id="view-reflections" class="view">
                 <div class="reflections-header"><button id="new-reflection-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建复盘</button></div>
                 <div class="reflections-list" id="reflections-list"></div>
@@ -288,6 +299,7 @@
                 <div class="form-row"><div class="form-group"><label>投递渠道</label><input type="text" id="form-channel" list="channel-options" placeholder="如：官网"></div><div class="form-group"><label>渠道链接</label><input type="url" id="form-channel-link" placeholder="https://..."></div></div>
                 <datalist id="channel-options"><option value="官网"></option><option value="Boss直聘"></option><option value="内推"></option><option value="猎头"></option><option value="LinkedIn"></option><option value="牛客"></option><option value="其他"></option></datalist>
                 <div class="form-row"><div class="form-group"><label>薪资预期</label><input type="text" id="form-salary" placeholder="如：15K/月"></div><div class="form-group"><label>JD 链接</label><input type="url" id="form-jd-url" placeholder="https://..."></div></div>
+                <div class="form-group"><label>JD 文本</label><textarea id="form-jd-text" rows="5" placeholder="粘贴岗位 JD 原文，后续面试准备将优先使用这里的内容。"></textarea></div>
                 <div class="form-group"><label>下一步行动</label><input type="text" id="form-next-action" placeholder="如：准备行为面试题"></div>
                 <div class="form-group"><label>下一步 DDL</label><input type="datetime-local" id="form-deadline"></div>
                 <div class="form-group"><label>JD 截图 <span style="font-weight:normal;color:var(--text-muted)">Ctrl+V 粘贴</span></label><div class="jd-paste-zone" id="jd-paste-zone" tabindex="0"><span class="jd-paste-hint" id="jd-paste-hint">点击后粘贴截图或拖拽图片</span></div></div>
@@ -378,6 +390,20 @@
                         <div id="profile-nickname-display" class="account-hero-name">用户</div>
                         <div id="profile-login-method" class="account-hero-email"></div>
                         <div id="profile-auth-chip" class="account-auth-chip">邮箱密码登录</div>
+                        <div id="profile-membership-chip" class="account-auth-chip account-auth-chip-membership">试用中</div>
+                    </div>
+                </section>
+
+                <section class="account-section">
+                    <div class="account-entitlement-banner" id="profile-entitlement-banner">
+                        <div class="account-entitlement-copy">
+                            <strong id="profile-entitlement-title">准备权益载入中…</strong>
+                            <p id="profile-entitlement-desc">正在同步你的履迹账号权益与准备次数。</p>
+                        </div>
+                        <div class="account-entitlement-actions">
+                            <button class="btn-secondary" id="profile-register-upgrade" type="button">先注册账号</button>
+                            <button class="btn-primary" id="profile-upgrade-btn" type="button">开通会员</button>
+                        </div>
                     </div>
                 </section>
 
@@ -394,6 +420,17 @@
                         <div class="account-readonly-field">
                             <span class="account-readonly-label">登录邮箱</span>
                             <strong id="profile-email-display">-</strong>
+                        </div>
+                        <div class="account-readonly-field">
+                            <span class="account-readonly-label">履迹账号 ID</span>
+                            <div class="account-inline-id">
+                                <strong id="profile-account-id-display">-</strong>
+                                <button type="button" class="account-copy-btn" id="profile-account-id-copy">复制</button>
+                            </div>
+                        </div>
+                        <div class="account-readonly-field">
+                            <span class="account-readonly-label">准备权益</span>
+                            <strong id="profile-membership-detail">试用权益载入中…</strong>
                         </div>
                     </div>
                 </section>
@@ -514,6 +551,27 @@
     </div>
 
     <div id="toast-container"></div>
+    <div class="modal-overlay" id="prepare-upgrade-overlay">
+        <div class="modal modal-sm prepare-upgrade-modal">
+            <div class="modal-header">
+                <div>
+                    <h2 id="prepare-upgrade-title">体验次数已用完</h2>
+                    <p id="prepare-upgrade-desc">每个履迹账号默认可以完整体验 1 次准备，继续使用可开通 30 天会员或直接买断。</p>
+                </div>
+                <button class="modal-close" id="prepare-upgrade-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="prepare-upgrade-meta" id="prepare-upgrade-meta"></div>
+                <div class="prepare-upgrade-guest-hint" id="prepare-upgrade-guest-hint"></div>
+                <div class="prepare-upgrade-payment-note" id="prepare-upgrade-payment-note"></div>
+                <div class="prepare-upgrade-plans" id="prepare-upgrade-plans"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="prepare-upgrade-dismiss">稍后再说</button>
+                <button class="btn-primary" id="prepare-upgrade-register">先注册再开通</button>
+            </div>
+        </div>
+    </div>
     <script>
         window.RT_ANALYTICS_CONFIG=Object.assign({
             provider:'posthog',
@@ -525,13 +583,20 @@
             capturePageleave:true,
             debug:false
         },window.RT_ANALYTICS_CONFIG||{});
+        window.RT_PREPARE_CONFIG=Object.assign({
+            apiBase:'http://127.0.0.1:8788',
+            provider:'DeepSeek',
+            model:'deepseek-v4-pro'
+        },window.RT_PREPARE_CONFIG||{});
     </script>
+    <script src=".prepare-runtime.local.js"></script>
+    <script src=".billing-runtime.local.js?v=20260525-stripe-setup-01"></script>
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
-    <script src="app.js"></script>
+  <script src="app.js?v=20260525-stripe-setup-01"></script>
     <script src="supabase.js"></script>
     <script src="features.js"></script>
     <script src="goal.js"></script>
-    <script src="auth.js"></script>
+    <script src="auth.js?v=20260525-stripe-setup-01"></script>
 </body>
 </html>

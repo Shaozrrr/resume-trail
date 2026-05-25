@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>履迹 · 运营后台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="admin-console.css?v=20260525-admin-console-05">
+</head>
+<body>
+    <div class="admin-shell">
+        <header class="admin-header">
+            <div>
+                <div class="admin-kicker">Admin only</div>
+                <h1>履迹运营后台</h1>
+                <p>只给你自己看的独立后台。这里统一看用户进入、登录注册、创建、准备消耗、会员状态与授权。</p>
+            </div>
+            <div class="admin-header-actions">
+                <div class="admin-sync-pill" id="admin-sync-pill">实时同步已开启</div>
+                <a class="admin-link-btn" href="./index.html">返回主产品</a>
+                <button type="button" class="admin-ghost-btn" id="admin-refresh-btn">立即同步</button>
+            </div>
+        </header>
+
+        <section class="admin-status-card" id="admin-status-card">
+            <h2 id="admin-status-title">正在验证管理员权限…</h2>
+            <p id="admin-status-desc">如果你还没在主产品登录，请先登录管理员账号，再回到这个独立后台页。</p>
+        </section>
+
+        <main class="admin-main" id="admin-main" hidden>
+            <section class="admin-control-bar">
+                <div class="admin-control-grid">
+                    <label class="admin-field admin-field-grow">
+                        <span>搜索用户</span>
+                        <input id="admin-search-input" type="search" placeholder="搜邮箱、昵称、访客 ID、账号 ID">
+                    </label>
+                    <label class="admin-field">
+                        <span>账号类型</span>
+                        <select id="admin-auth-filter">
+                            <option value="all">全部</option>
+                            <option value="registered">注册账号</option>
+                            <option value="guest">体验账号</option>
+                        </select>
+                    </label>
+                    <label class="admin-field">
+                        <span>会员状态</span>
+                        <select id="admin-membership-filter">
+                            <option value="all">全部</option>
+                            <option value="trial">试用</option>
+                            <option value="monthly">月会员</option>
+                            <option value="lifetime">买断</option>
+                            <option value="admin">管理员</option>
+                        </select>
+                    </label>
+                    <label class="admin-field">
+                        <span>状态</span>
+                        <select id="admin-status-filter">
+                            <option value="all">全部</option>
+                            <option value="active">活跃</option>
+                            <option value="pending">待激活</option>
+                            <option value="paused">暂停</option>
+                        </select>
+                    </label>
+                    <label class="admin-field">
+                        <span>时间范围</span>
+                        <select id="admin-range-filter">
+                            <option value="7">最近 7 天</option>
+                            <option value="30" selected>最近 30 天</option>
+                            <option value="90">最近 90 天</option>
+                        </select>
+                    </label>
+                    <label class="admin-live-toggle">
+                        <input id="admin-live-toggle" type="checkbox" checked>
+                        <span>自动实时同步</span>
+                    </label>
+                </div>
+                <div class="admin-bulk-bar">
+                    <div class="admin-bulk-meta" id="admin-bulk-meta">已选 0 个账号</div>
+                    <div class="admin-bulk-actions">
+                        <button type="button" class="admin-action-btn" data-bulk-action="trial">批量 +1 次体验</button>
+                        <button type="button" class="admin-action-btn" data-bulk-action="monthly">批量开月卡</button>
+                        <button type="button" class="admin-action-btn" data-bulk-action="lifetime">批量买断</button>
+                        <button type="button" class="admin-action-btn" data-bulk-action="reset">设回试用</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="admin-hero">
+                <div class="admin-metric-grid" id="admin-metric-grid"></div>
+                <div class="admin-trend-board" id="admin-trend-board"></div>
+            </section>
+
+            <section class="admin-grid">
+                <section class="admin-card admin-card-wide">
+                    <div class="admin-card-head">
+                        <div>
+                            <h2>账号列表</h2>
+                            <p>每个用户都带独立账号 ID，支持搜索、筛选、批量授权和单独操作。</p>
+                        </div>
+                        <div class="admin-card-meta" id="admin-account-meta">--</div>
+                    </div>
+                    <div class="admin-table-toolbar">
+                        <label class="admin-select-all">
+                            <input id="admin-select-all" type="checkbox">
+                            <span>全选当前筛选结果</span>
+                        </label>
+                        <div class="admin-last-sync" id="admin-last-sync">最近同步：--</div>
+                    </div>
+                    <div class="admin-account-list" id="admin-account-list"></div>
+                </section>
+
+                <section class="admin-card">
+                    <div class="admin-card-head">
+                        <div>
+                            <h2>最近事件</h2>
+                            <p>按当前时间范围看真实后台事件流。</p>
+                        </div>
+                    </div>
+                    <div class="admin-event-feed" id="admin-event-feed"></div>
+                </section>
+            </section>
+        </main>
+    </div>
+
+    <div class="admin-toast-stack" id="admin-toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="ops-dashboard-data.js"></script>
+    <script src="supabase.js"></script>
+    <script src="admin-console.js?v=20260525-admin-console-05"></script>
+</body>
+</html>

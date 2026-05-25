@@ -1,0 +1,5 @@
+.DS_Store
+.prepare-ai.local.json
+.prepare-runtime.local.js
+.billing-runtime.local.js
+supabase/functions/.env

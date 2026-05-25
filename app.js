@@ -75,6 +75,9 @@ const COLORS=['#60a5fa','#a78bfa','#4ade80','#fb923c','#f87171','#fbbf24','#34d3
 const DEFAULT_COLS=[{id:'company_name',label:'公司',show:true,system:true},{id:'position_title',label:'岗位',show:true,system:true},{id:'position_category',label:'类别',show:true,system:true},{id:'base_location',label:'Base地',show:true,system:true},{id:'status',label:'状态',show:true,system:true},{id:'applied_date',label:'投递日期',show:true,system:true},{id:'waiting',label:'等待',show:true,system:true},{id:'preference_level',label:'偏好',show:true,system:true},{id:'source_channel',label:'渠道',show:true,system:true},{id:'jd',label:'JD',show:true,system:true},{id:'actions',label:'操作',show:true,system:true}];
 const RT_GUEST_MODE_KEY='rt_guest_mode';
 const RT_GUEST_DATA_KEY='rt_guest_data';
+const RT_GUEST_IDENTITY_KEY='rt_guest_identity_id';
+const RT_ACCOUNT_CACHE_KEY='rt_account_cache';
+const RT_PENDING_GUEST_MIGRATION_KEY='rt_pending_guest_migration';
 const RT_THEME_MODE_KEY='rt_theme_mode';
 const RT_THEME_DIRTY_KEY='rt_theme_dirty';
 const HIDDEN_VISA_VALUE='UNKNOWN';
@@ -107,6 +110,80 @@ function createEl(tag,className,text){
     if(typeof text!=='undefined')el.textContent=text;
     return el;
 }
+
+function createLocalId(prefix){
+    if(window.crypto&&typeof window.crypto.randomUUID==='function')return `${prefix}_${window.crypto.randomUUID()}`;
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`;
+}
+
+function getGuestIdentityId(){
+    try{
+        const current=localStorage.getItem(RT_GUEST_IDENTITY_KEY);
+        if(current)return current;
+        const next=createLocalId('guest');
+        localStorage.setItem(RT_GUEST_IDENTITY_KEY,next);
+        return next;
+    }catch(err){
+        return createLocalId('guest');
+    }
+}
+
+function readCachedAccount(){
+    try{
+        const raw=localStorage.getItem(RT_ACCOUNT_CACHE_KEY);
+        return raw?JSON.parse(raw):null;
+    }catch(err){
+        return null;
+    }
+}
+
+function writeCachedAccount(account){
+    try{
+        if(!account){
+            localStorage.removeItem(RT_ACCOUNT_CACHE_KEY);
+            return;
+        }
+        localStorage.setItem(RT_ACCOUNT_CACHE_KEY,JSON.stringify(account));
+    }catch(err){}
+}
+
+function markGuestMigrationPending(meta){
+    try{
+        const payload=Object.assign({
+            guest_id:getGuestIdentityId(),
+            created_at:new Date().toISOString()
+        },meta||{});
+        localStorage.setItem(RT_PENDING_GUEST_MIGRATION_KEY,JSON.stringify(payload));
+        return payload;
+    }catch(err){
+        return null;
+    }
+}
+
+function readGuestMigrationPending(){
+    try{
+        const raw=localStorage.getItem(RT_PENDING_GUEST_MIGRATION_KEY);
+        return raw?JSON.parse(raw):null;
+    }catch(err){
+        return null;
+    }
+}
+
+function clearGuestMigrationPending(){
+    try{
+        localStorage.removeItem(RT_PENDING_GUEST_MIGRATION_KEY);
+    }catch(err){}
+}
+
+window.rtGetGuestIdentityId=getGuestIdentityId;
+window.rtReadCachedAccount=readCachedAccount;
+window.rtWriteCachedAccount=writeCachedAccount;
+window.rtMarkGuestMigrationPending=markGuestMigrationPending;
+window.rtReadGuestMigrationPending=readGuestMigrationPending;
+window.rtClearGuestMigrationPending=clearGuestMigrationPending;
+window.rtGetAccountMembershipLabel=getAccountMembershipLabel;
+window.rtGetAccountEntitlementText=getAccountEntitlementText;
+window.rtOpenPrepareUpgradeModal=openPrepareUpgradeModal;
 
 function getAnalyticsAuthMode(){
     return !!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled())?'guest':'email';
@@ -241,8 +318,14 @@ window.rtApplyThemeMode=applyThemeMode;
 window.rtSyncThemeToggleVisibility=syncThemeToggleVisibility;
 
 window.rtTrackEvent=function(name,props){
-    if(!window.rtAnalytics||typeof window.rtAnalytics.capture!=='function')return false;
-    return window.rtAnalytics.capture(name,getAnalyticsBaseProps(props));
+    const payload=getAnalyticsBaseProps(props);
+    const tracked=!!(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'&&window.rtAnalytics.capture(name,payload));
+    if(window.rtAccountService&&typeof window.rtAccountService.logEvent==='function'){
+        window.rtAccountService.logEvent(name,payload).catch(function(err){
+            console.warn('[RT account] logEvent failed',name,err);
+        });
+    }
+    return tracked;
 };
 
 window.rtIdentifyUser=function(user,props){
@@ -366,6 +449,7 @@ window.rtGuestStore={
         const payload={
             apps:cloneData(store.apps),
             resumes:cloneData(store.resumes),
+            prepare_sessions:cloneData(store.prepareSessions),
             refs:cloneData(store.refs),
             logs:cloneData(store.logs),
             settings:cloneData(store.settings),
@@ -396,6 +480,7 @@ class Store{
     resetState(){
         this.apps=[];
         this.resumes=[];
+        this.prepareSessions=[];
         this.refs=[];
         this.logs=[];
         this.settings=getDefaultSettings();
@@ -407,6 +492,7 @@ class Store{
         return {
             apps:cloneData(this.apps),
             resumes:cloneData(this.resumes),
+            prepareSessions:cloneData(this.prepareSessions),
             refs:cloneData(this.refs),
             logs:cloneData(this.logs),
             settings:cloneData(this.settings),
@@ -418,6 +504,7 @@ class Store{
     restore(snapshot){
         this.apps=snapshot.apps;
         this.resumes=snapshot.resumes;
+        this.prepareSessions=snapshot.prepareSessions||[];
         this.refs=snapshot.refs;
         this.logs=snapshot.logs;
         this.settings=Object.assign(getDefaultSettings(),snapshot.settings||{});
@@ -626,8 +713,49 @@ class Store{
     }
     getApp(id){return this.apps.find(a=>a.id===id);}
     getResume(id){return this.resumes.find(r=>r.id===id);}
+    getPrepareSession(id){return this.prepareSessions.find(s=>s.id===id);}
     getAppRefs(aid){return this.refs.filter(r=>r.app_id===aid);}
     getAppLogs(aid){return this.logs.filter(l=>l.app_id===aid).sort((a,b)=>new Date(b.at)-new Date(a.at));}
+    async addPrepareSession(session){
+        return this.commit('prepare.add',draft=>{
+            const now=new Date().toISOString();
+            const next=Object.assign({
+                id:crypto.randomUUID(),
+                source_type:'manual',
+                application_id:null,
+                company_name:'',
+                role_name:'',
+                role_category:'',
+                jd_text:'',
+                jd_url:'',
+                resume_id:null,
+                resume_name:'',
+                resume_text:'',
+                resume_file_meta:null,
+                status:'draft',
+                outputs:null,
+                generated_at:null,
+                created_at:now,
+                updated_at:now
+            },cloneData(session||{}));
+            draft.prepareSessions.unshift(next);
+            return next;
+        });
+    }
+    async updatePrepareSession(id,patch){
+        return this.commit('prepare.update',draft=>{
+            const idx=draft.prepareSessions.findIndex(s=>s.id===id);
+            if(idx<0)return null;
+            draft.prepareSessions[idx]=Object.assign({},draft.prepareSessions[idx],cloneData(patch||{}),{updated_at:new Date().toISOString()});
+            return draft.prepareSessions[idx];
+        });
+    }
+    async delPrepareSession(id){
+        return this.commit('prepare.delete',draft=>{
+            draft.prepareSessions=draft.prepareSessions.filter(s=>s.id!==id);
+            return true;
+        });
+    }
     async addCat(c){
         c=(c||'').trim();
         if(!c)return'';
@@ -700,6 +828,7 @@ class Store{
             if(starter){
                 this.apps=(starter.apps||[]).map(normalizeAppRecord);
                 this.resumes=cloneData(starter.resumes||[]);
+                this.prepareSessions=cloneData(starter.prepare_sessions||[]);
                 this.refs=cloneData(starter.refs||[]);
                 this.logs=cloneData(starter.logs||[]);
                 this.settings=Object.assign(getDefaultSettings(),starter.settings||{});
@@ -1317,6 +1446,464 @@ let tableQuickEdit=false;
 let tableSortColumn='created_at';
 let tableSortDirection='desc';
 let kanbanSortDirection='desc';
+const prepareState={
+    mode:'application',
+    screen:'compose',
+    selectedSessionId:null,
+    selectedApplicationId:'',
+    activeTab:'research',
+    companyOverviewMode:'simple',
+    selectedQuestionId:null,
+    selectedFramework:'STAR',
+    showResumePreview:false,
+    manualResumeFile:null,
+    appSupplementFile:null,
+    manualResumeParse:{status:'idle',text:'',message:''},
+    appSupplementParse:{status:'idle',text:'',message:''},
+    freeQuestionText:'',
+    appSupplement:{
+        jdText:'',
+        jdUrl:'',
+        resumeId:'',
+        resumeText:''
+    },
+    manualDraft:{
+        companyName:'',
+        roleName:'',
+        jdText:'',
+        resumeId:'',
+        resumeText:''
+    },
+    sessionLoading:false,
+    sessionError:'',
+    answerLoading:false,
+    answerError:'',
+    loadingKind:'',
+    loadingStartedAt:0,
+    loadingFrame:0
+};
+const PREP_MIN_JD_LENGTH=60;
+const PREPARE_RUNTIME_CONFIG_KEY='rt_prepare_runtime_config';
+const PREPARE_WEB_LOOKUP_CACHE_KEY='rt_prepare_web_lookup_cache';
+const PREPARE_DIRECT_TOOL_ROUNDS=3;
+const PREPARE_DIRECT_TOOL_MAX_CALLS=3;
+const PREPARE_MEMBERSHIP_PLANS=[
+    {key:'monthly',label:'9.9 / 30天',price:'¥9.9 / 30天',summary:'适合持续刷题和阶段性冲刺准备',membershipTier:'monthly'},
+    {key:'lifetime',label:'49.9 买断',price:'¥49.9 买断',summary:'一次开通，长期使用',membershipTier:'lifetime'}
+];
+const DEFAULT_BILLING_CONFIG={
+    provider:'Stripe Checkout',
+    mode:'supabase_edge',
+    functionName:'stripe-create-checkout',
+    note:'支持微信支付与支付宝。支付成功后会自动开通对应会员权益。',
+    plans:{
+        monthly:{
+            label:'9.9 / 30天',
+            methods:[
+                {key:'wechat',label:'微信支付'},
+                {key:'alipay',label:'支付宝'}
+            ]
+        },
+        lifetime:{
+            label:'49.9 买断',
+            methods:[
+                {key:'wechat',label:'微信支付'},
+                {key:'alipay',label:'支付宝'}
+            ]
+        }
+    }
+};
+const PREP_FRAMEWORKS=[
+    {key:'STAR',label:'STAR',description:'适合讲经历。把背景、任务、行动、结果讲完整。',useCase:'最适合项目案例、行为题、经历追问。'},
+    {key:'PREP',label:'PREP',description:'适合讲观点。先亮结论，再给理由和例子。',useCase:'适合“你怎么看”“为什么这么判断”这类题。'},
+    {key:'PAR',label:'PAR',description:'适合讲成果。围绕问题、行动、结果展开。',useCase:'适合强调推进效果、个人贡献和业务结果。'},
+    {key:'SCQA',label:'SCQA',description:'适合结构化分析。用背景、冲突、问题、答案展开。',useCase:'适合 case、业务拆解、复杂场景判断。'},
+    {key:'FREE',label:'自由回答',description:'适合你自由追问。直接输入问题，生成一版可开讲的回答骨架。',useCase:'适合临场追问、补充题、反问准备。'}
+];
+const PREPARE_KNOWN_TERM_BRIEFS=[
+    {
+        id:'openclaw',
+        aliases:['openclaw','open claw'],
+        display:'OpenClaw',
+        meaning:'公开资料里，OpenClaw 是一类开源 AI Agent / 数字员工平台，强调在本地或自有环境运行，连接模型、工具和操作系统去执行任务，而不只是对话。',
+        prep_direction:'如果 JD 提到它，面试官通常在看你是否理解 Agent 的任务规划、工具调用、自动化工作流、权限控制和安全边界，而不是只会聊大模型概念。',
+        interview_focus:[
+            '准备解释 Agent 和普通对话式大模型的区别',
+            '准备你是否做过自动化流程、工具编排、工作流设计或权限边界管理',
+            '如果没有实操，也要能说明企业为什么偏好本地/私有部署 Agent'
+        ],
+        sources:[
+            'OpenClaw Docs：What is OpenClaw',
+            '证券时报：从聊天到干活，AI圈新宠“龙虾”走红'
+        ]
+    },
+    {
+        id:'lobster',
+        aliases:['龙虾','小龙虾'],
+        display:'龙虾（OpenClaw）',
+        meaning:'“龙虾”是中文语境里对 OpenClaw 的常见昵称，来源于项目图标和 “Claw” 的视觉联想；很多报道会直接把“龙虾”当作 OpenClaw 的大众叫法。',
+        prep_direction:'如果 JD 用“龙虾”而不是 OpenClaw，回答时要主动把它翻译回 AI Agent / 自动化执行平台，避免把它当成单独的新名词。',
+        interview_focus:[
+            '先把“龙虾”翻译成 OpenClaw / AI Agent 体系',
+            '围绕部署、使用门槛、执行能力与安全风险来讲',
+            '不要把它理解成单纯聊天机器人或内容生成工具'
+        ],
+        sources:[
+            '证券时报：所谓“龙虾”就是安装和运行 OpenClaw',
+            '齐鲁壹点：OpenClaw 的中文昵称——龙虾'
+        ]
+    },
+    {
+        id:'raise_lobster',
+        aliases:['养虾','养龙虾'],
+        display:'养虾 / 养龙虾',
+        meaning:'“养虾”在中文社区通常不是养殖，而是指部署、配置、持续运行、调优和维护 OpenClaw 这类 Agent 系统的过程。',
+        prep_direction:'如果 JD 或面试官提到“养虾”，重点不是玩梗，而是在看你是否理解 Agent 的安装、配置、模型接入、记忆/上下文、稳定性和成本控制。',
+        interview_focus:[
+            '准备说明从安装到可用需要哪些关键步骤',
+            '准备讲模型配置、工具配置、权限和稳定性问题',
+            '准备讲为什么企业场景会关心成本、维护和风控'
+        ],
+        sources:[
+            '行业百科：OpenClaw 为什么叫养虾',
+            '证券时报：养龙虾就是安装和运行 OpenClaw'
+        ]
+    },
+    {
+        id:'shrimp_expert',
+        aliases:['养虾达人','养虾人','云上养虾人'],
+        display:'养虾达人',
+        meaning:'“养虾达人/养虾人”通常指对 OpenClaw 这类 Agent 的部署、调优、工作流设计更熟的实践者或重度用户，不是水产语境。',
+        prep_direction:'如果岗位提到这类人群，通常是在指 Agent 生态里的 advanced users / builders，回答要贴近技术落地、工具使用深度和场景复用能力。',
+        interview_focus:[
+            '把它理解成 AI Agent 生态的重度用户或建设者',
+            '准备你是否做过工作流复用、模板化或能力沉淀',
+            '如果没有直接经历，就讲你如何快速从用户视角切进到产品视角'
+        ],
+        sources:[
+            'OpenClaw 社区/媒体语境中的“养虾人”',
+            '齐鲁壹点、央视网关于“养虾热”的报道'
+        ]
+    },
+    {
+        id:'agent_skill',
+        aliases:['skill','skills'],
+        display:'Skill',
+        requiresAny:['openclaw','龙虾','agent','智能体'],
+        meaning:'在 Agent 生态里，skill 通常指可复用能力包，往往封装了提示词、工具调用、工作流或连接器，不是泛泛的“个人技能”二字。',
+        prep_direction:'如果 JD 把 skill 放在 Agent 语境里，回答要往“能力封装、复用、调用门槛和生态扩展”上靠，而不是只说候选人的软硬技能。',
+        interview_focus:[
+            '区分 Agent skill 与个人 skill set',
+            '准备解释为什么企业会把能力做成可复用模块',
+            '准备讲标准化、复用率、接入成本和生态扩展'
+        ],
+        sources:[
+            'OpenClaw Docs：Skills / Plugins / Tools 相关目录'
+        ]
+    },
+    {
+        id:'meituan_lobster_install',
+        aliases:['龙虾安装'],
+        display:'龙虾安装',
+        requiresAny:['美团'],
+        meaning:'公开报道里，“龙虾安装”指围绕 OpenClaw 部署的安装/代部署服务入口，反映的是 Agent 从极客工具走向服务商品化的趋势。',
+        prep_direction:'如果美团相关 JD 提到它，更值得讲的是平台如何把复杂的 Agent 部署流程服务化、标准化、可交易化。',
+        interview_focus:[
+            '从“技术能力”转译到“服务商品化”和“履约体验”',
+            '思考用户是谁：个人极客、商家、企业还是平台服务商',
+            '思考平台怎么降低接入门槛并控制售后与风险'
+        ],
+        sources:[
+            '证券时报：美团“龙虾安装”相关报道'
+        ]
+    }
+];
+
+function isGuestExperienceMode(){
+    return !!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled());
+}
+
+function getPrepareBillingConfig(){
+    const runtime=window.RT_BILLING_CONFIG||{};
+    return {
+        provider:runtime.provider||DEFAULT_BILLING_CONFIG.provider,
+        mode:runtime.mode||DEFAULT_BILLING_CONFIG.mode,
+        functionName:runtime.functionName||DEFAULT_BILLING_CONFIG.functionName,
+        note:runtime.note||DEFAULT_BILLING_CONFIG.note,
+        plans:{
+            monthly:{
+                label:runtime?.plans?.monthly?.label||DEFAULT_BILLING_CONFIG.plans.monthly.label,
+                methods:Array.isArray(runtime?.plans?.monthly?.methods)&&runtime.plans.monthly.methods.length
+                    ? runtime.plans.monthly.methods
+                    : DEFAULT_BILLING_CONFIG.plans.monthly.methods
+            },
+            lifetime:{
+                label:runtime?.plans?.lifetime?.label||DEFAULT_BILLING_CONFIG.plans.lifetime.label,
+                methods:Array.isArray(runtime?.plans?.lifetime?.methods)&&runtime.plans.lifetime.methods.length
+                    ? runtime.plans.lifetime.methods
+                    : DEFAULT_BILLING_CONFIG.plans.lifetime.methods
+            }
+        }
+    };
+}
+
+function getAccountMembershipKey(account){
+    if(!account)return'trial';
+    if(account.is_admin)return'admin';
+    if(account.is_lifetime||account.membership_tier==='lifetime')return'lifetime';
+    if(account.membership_tier==='monthly')return'monthly';
+    return'trial';
+}
+
+function getMembershipRemainingDays(account){
+    if(!account||!account.membership_expires_at)return null;
+    const expiresAt=new Date(account.membership_expires_at).getTime();
+    if(Number.isNaN(expiresAt))return null;
+    return Math.max(0,Math.ceil((expiresAt-Date.now())/86400000));
+}
+
+function getAccountMembershipLabel(account){
+    const membership=getAccountMembershipKey(account);
+    if(membership==='admin')return'管理员';
+    if(membership==='lifetime')return'永久会员';
+    if(membership==='monthly')return'月会员';
+    return'试用中';
+}
+
+function getAccountEntitlementText(account){
+    if(!account)return'当前账号信息还没同步完成。';
+    const membership=getAccountMembershipKey(account);
+    if(membership==='admin')return'管理员账号默认拥有完整功能与无限次准备权限。';
+    if(membership==='lifetime')return'当前已开通永久会员，可持续使用准备功能。';
+    if(membership==='monthly'){
+        const remainingDays=getMembershipRemainingDays(account);
+        if(remainingDays===null)return'当前已开通月会员，可继续不限次使用准备功能。';
+        return remainingDays>0
+            ? `当前已开通月会员，还剩 ${remainingDays} 天，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`
+            : `月会员已到期，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`;
+    }
+    return `当前是试用账号，还可完整体验 ${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||1} 次准备。`;
+}
+
+function renderPrepareAccessBanner(account,options){
+    const opts=Object.assign({showRegister:false},options||{});
+    const membershipLabel=getAccountMembershipLabel(account);
+    const detailText=getAccountEntitlementText(account);
+    const isGuest=isGuestExperienceMode();
+    return `
+        <div class="prepare-access-banner">
+            <div class="prepare-access-banner-copy">
+                <strong>准备权益：${escapeHTML(membershipLabel)}</strong>
+                <p>${escapeHTML(detailText)} 试用账号默认只能完整体验 1 次准备，继续使用可开通 ¥9.9 / 30天 或 ¥49.9 买断。</p>
+            </div>
+            <div class="prepare-access-banner-actions">
+                <span class="prepare-access-badge">${escapeHTML(membershipLabel)}</span>
+                ${opts.showRegister&&isGuest?'<button type="button" class="btn-secondary btn-sm" id="prepare-banner-register">先注册账号</button>':''}
+                <button type="button" class="btn-primary btn-sm" id="prepare-banner-upgrade">开通会员</button>
+            </div>
+        </div>
+    `;
+}
+
+async function openMembershipCheckout(planKey,methodKey){
+    const config=getPrepareBillingConfig();
+    const methods=config?.plans?.[planKey]?.methods||[];
+    const method=methods.find(item=>item&&item.key===methodKey)||null;
+    const href=safeHttpUrl(method&&method.href||'');
+    if(typeof window.rtTrackEvent==='function'){
+        window.rtTrackEvent('rt_membership_checkout_clicked',{
+            plan:planKey,
+            method:methodKey,
+            guest_mode:isGuestExperienceMode(),
+            provider:config.provider||'Hosted Checkout'
+        });
+    }
+    if(isGuestExperienceMode()&&typeof window.rtStartUpgradeRegistration==='function'){
+        closePrepareUpgradeModal();
+        window.rtStartUpgradeRegistration();
+        return;
+    }
+    if((config.mode||'')==='supabase_edge'&&window.rtAccountService&&typeof window.rtAccountService.startMembershipCheckout==='function'){
+        try{
+            await window.rtAccountService.startMembershipCheckout(planKey,{
+                methodKey:methodKey,
+                functionName:config.functionName||'stripe-create-checkout'
+            });
+            closePrepareUpgradeModal();
+            return;
+        }catch(error){
+            toast(error instanceof Error?error.message:String(error),'error');
+            return;
+        }
+    }
+    if(!href){
+        toast('支付还没配置完成。请先在 Stripe 和 Supabase 后台补齐结账与 Webhook 配置。','error');
+        return;
+    }
+    window.open(href,'_blank','noopener');
+    closePrepareUpgradeModal();
+}
+
+function closePrepareUpgradeModal(){
+    $('#prepare-upgrade-overlay')?.classList.remove('active');
+}
+
+function openPrepareUpgradeModal(accessPayload){
+    const overlay=$('#prepare-upgrade-overlay');
+    if(!overlay)return;
+    const account=accessPayload&&accessPayload.account||window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
+    const remaining=account&&typeof account.remaining_prepare_quota==='number'?account.remaining_prepare_quota:0;
+    const hasPaid=!!(account&&account.has_paid_access);
+    const title=$('#prepare-upgrade-title');
+    const desc=$('#prepare-upgrade-desc');
+    const meta=$('#prepare-upgrade-meta');
+    const cards=$('#prepare-upgrade-plans');
+    const guestHint=$('#prepare-upgrade-guest-hint');
+    const paymentNote=$('#prepare-upgrade-payment-note');
+    const registerBtn=$('#prepare-upgrade-register');
+    const billingConfig=getPrepareBillingConfig();
+    if(title)title.textContent=hasPaid?'当前账号已具备正式权限':'体验次数已用完';
+    if(desc)desc.textContent=hasPaid?'当前账号已拥有持续使用权限，你可以继续生成更多准备会话。':'每个履迹账号默认可以完整体验 1 次准备。继续使用可开通 30 天会员，或直接买断。';
+    if(meta)meta.textContent=remaining>0?`当前还剩 ${remaining} 次体验机会。`:'当前体验额度已耗尽。';
+    if(guestHint){
+        guestHint.style.display=isGuestExperienceMode()?'':'none';
+        guestHint.textContent='你现在是体验模式。先注册，刚才的体验数据会自动迁移到新账号，再继续开通会员。';
+    }
+    if(paymentNote){
+        paymentNote.style.display='block';
+        paymentNote.textContent=`支付方式：${billingConfig.provider} · ${billingConfig.note}`;
+    }
+    if(registerBtn)registerBtn.style.display=isGuestExperienceMode()?'inline-flex':'none';
+    if(cards){
+        cards.innerHTML=PREPARE_MEMBERSHIP_PLANS.map(function(plan){
+            const configPlan=billingConfig?.plans?.[plan.membershipTier]||{};
+            const methods=configPlan.methods||[];
+            return `<div class="prepare-upgrade-plan">
+                <span class="prepare-upgrade-plan-kicker">${escapeHTML(configPlan.label||plan.label)}</span>
+                <strong>${escapeHTML(plan.price)}</strong>
+                <span>${escapeHTML(plan.summary)}</span>
+                <div class="prepare-upgrade-plan-methods">
+                    ${methods.map(function(method){
+                        const href=safeHttpUrl(method&&method.href||'');
+                        const edgeMode=(billingConfig.mode||'')==='supabase_edge';
+                        return `<button type="button" class="prepare-upgrade-method-btn${href||edgeMode?'':' is-disabled'}" data-upgrade-plan="${plan.membershipTier}" data-upgrade-method="${escapeHTML(method.key||'')}">${escapeHTML(method.label||'支付')}</button>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }).join('');
+        $$('[data-upgrade-plan]').forEach(function(button){
+            button.addEventListener('click',function(){
+                const plan=this.dataset.upgradePlan||'monthly';
+                const method=this.dataset.upgradeMethod||'wechat';
+                openMembershipCheckout(plan,method);
+            });
+        });
+    }
+    overlay.classList.add('active');
+}
+
+async function ensurePrepareExperienceAccess(sessionKey){
+    if(!window.rtAccountService||typeof window.rtAccountService.consumePrepareAccess!=='function'){
+        return {allowed:true,account:window.rtReadCachedAccount&&window.rtReadCachedAccount()||null};
+    }
+    try{
+        const access=await window.rtAccountService.consumePrepareAccess(sessionKey);
+        if(access&&access.allowed===false)openPrepareUpgradeModal(access);
+        return access||{allowed:true};
+    }catch(error){
+        toast(error instanceof Error?error.message:String(error),'error');
+        return {allowed:false,error:error instanceof Error?error.message:String(error)};
+    }
+}
+$('#prepare-upgrade-close')?.addEventListener('click',closePrepareUpgradeModal);
+$('#prepare-upgrade-dismiss')?.addEventListener('click',closePrepareUpgradeModal);
+$('#prepare-upgrade-overlay')?.addEventListener('click',function(event){
+    if(event.target===event.currentTarget)closePrepareUpgradeModal();
+});
+$('#prepare-upgrade-register')?.addEventListener('click',function(){
+    closePrepareUpgradeModal();
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_prepare_upgrade_register_clicked',{entry:'prepare_paywall'});
+    if(typeof window.rtStartUpgradeRegistration==='function')window.rtStartUpgradeRegistration();
+});
+
+async function handleBillingReturnState(){
+    let url;
+    try{
+        url=new URL(window.location.href);
+    }catch(error){
+        return;
+    }
+    const status=url.searchParams.get('billing');
+    if(!status)return;
+    const plan=url.searchParams.get('plan')||'monthly';
+    if(status==='success'){
+        toast(plan==='lifetime'?'支付成功，永久会员已开通。':'支付成功，30 天会员已开通。','success');
+        if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
+            window.rtAccountService.ensureAccount({input_source_channel:'billing_return'}).catch(function(err){
+                console.warn('[RT billing] refresh account after payment failed',err);
+            });
+        }
+    }else if(status==='cancel'){
+        toast('你已取消支付，稍后仍可继续开通。','info');
+    }else if(status==='error'){
+        toast('支付结果还没同步完成，请稍后刷新个人中心查看。','error');
+    }
+    url.searchParams.delete('billing');
+    url.searchParams.delete('plan');
+    window.history.replaceState({},document.title,url.toString());
+}
+const PREPARE_ANALYSIS_PLAYBOOKS=[
+    {
+        id:'general_role',
+        name:'通用岗位拆解',
+        triggers:[],
+        checklist:[
+            '先判断岗位服务的核心业务目标，而不是只复述 JD',
+            '拆清楚目标用户、使用场景、关键流程和成功指标',
+            '把岗位要求映射成能力项、证据项和高风险追问项'
+        ]
+    },
+    {
+        id:'resume_mapping',
+        name:'简历证据映射',
+        triggers:[],
+        checklist:[
+            '每个结论都要有简历证据支撑，优先使用动作、结果和数字',
+            '如果简历没有直接证据，要明确写缺口和补挖方向',
+            '回答骨架必须区分真实经历、可迁移能力和待补素材'
+        ]
+    },
+    {
+        id:'agent_ai',
+        name:'AI Agent / 企业AI产品',
+        triggers:['openclaw','龙虾','养虾','养龙虾','智能体','agent','automation','workflow','skill','skills','数字员工'],
+        checklist:[
+            '判断产品是在做对话、执行、编排还是平台生态',
+            '拆清楚任务规划、工具调用、上下文/记忆、权限边界和人工接管机制',
+            '评估企业价值时优先看效率提升、流程自动化、复用能力、安全风险和落地门槛'
+        ]
+    },
+    {
+        id:'enterprise_b2b',
+        name:'企业服务 / B2B',
+        triggers:['企业服务','财务数字化','saas','b2b','风控','报销','对账','erp','crm'],
+        checklist:[
+            '区分购买者、管理员、真实使用者三类角色',
+            '分析接入成本、部署方式、权限体系、合规和售后交付',
+            '优先回答标准化、ROI、复购和规模化复制'
+        ]
+    },
+    {
+        id:'growth_ecommerce',
+        name:'增长 / 电商产品',
+        triggers:['增长','电商','gmv','转化','留存','商家','供给','营销','活动'],
+        checklist:[
+            '先拆流量、转化、留存、供给和履约等增长杠杆',
+            '明确核心指标和次级指标，不要只说抽象增长',
+            '同时看用户价值、商家价值和平台效率'
+        ]
+    }
+];
 const tableSelectedRows=new Set();
 const PROGRESS_STATUSES=['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','OFFER'];
 const INTERVIEW_STATUSES=['ROUND_1','ROUND_2','ROUND_3','ROUND_4'];
@@ -1537,13 +2124,2988 @@ function initSidebarBrand(){
         queueRender();
     },true);
 }
+function getPrepareSessionsSorted(){
+    return store.prepareSessions.slice().sort(function(a,b){
+        return new Date(b.updated_at||b.created_at||0).getTime()-new Date(a.updated_at||a.created_at||0).getTime();
+    });
+}
+function getPrepareSelectedSession(){
+    const sessions=getPrepareSessionsSorted();
+    if(!sessions.length){
+        prepareState.selectedSessionId=null;
+        return null;
+    }
+    const current=prepareState.selectedSessionId?store.getPrepareSession(prepareState.selectedSessionId):null;
+    if(current)return current;
+    prepareState.selectedSessionId=sessions[0].id;
+    return sessions[0];
+}
+function getPrepareLinkedApp(session){
+    return session&&session.application_id?store.getApp(session.application_id):null;
+}
+function getPrepareLinkedResume(session){
+    if(!session)return null;
+    if(session.resume_id)return store.getResume(session.resume_id);
+    return null;
+}
+function getStoredPrepareRuntimeConfig(){
+    try{
+        const raw=localStorage.getItem(PREPARE_RUNTIME_CONFIG_KEY);
+        return raw?JSON.parse(raw):{};
+    }catch(error){
+        return{};
+    }
+}
+function savePrepareRuntimeConfig(patch){
+    const next=Object.assign({},getStoredPrepareRuntimeConfig(),patch||{});
+    try{
+        localStorage.setItem(PREPARE_RUNTIME_CONFIG_KEY,JSON.stringify(next));
+    }catch(error){}
+    return next;
+}
+function getPrepareConfig(){
+    const defaults={
+        mode:'server',
+        apiBase:'http://127.0.0.1:8788',
+        directBaseUrl:'https://api.deepseek.com',
+        provider:'DeepSeek',
+        model:'deepseek-v4-pro',
+        apiKey:''
+    };
+    const runtime=window.RT_PREPARE_CONFIG||{};
+    const stored=getStoredPrepareRuntimeConfig();
+    return Object.assign({},defaults,runtime,stored);
+}
+function getPrepareApiBase(){
+    return String(getPrepareConfig().apiBase||'http://127.0.0.1:8788').replace(/\/+$/,'');
+}
+function getPrepareDirectBase(){
+    return String(getPrepareConfig().directBaseUrl||'https://api.deepseek.com').replace(/\/+$/,'');
+}
+function normalizePrepareText(value){
+    return String(value||'').trim();
+}
+function hasPrepareUsableJd(value){
+    return normalizePrepareText(value).length>=PREP_MIN_JD_LENGTH;
+}
+function getPrepareFrameworkMeta(key){
+    return PREP_FRAMEWORKS.find(item=>item.key===key)||PREP_FRAMEWORKS[0];
+}
+function inferPrepareQuestionFrameworks(question){
+    const type=normalizePrepareText(question?.question_type||'').toLowerCase();
+    const text=normalizePrepareText(question?.question||'');
+    let recommended=[];
+    let defaultFramework='PREP';
+    let reason='这道题更适合先亮判断，再按结构展开。';
+    if(type==='resume_deep_dive'||type==='behavioral'||/讲.*经历|哪一段经历|举例|项目|具体负责|最后结果/.test(text)){
+        recommended=['STAR','PAR','PREP'];
+        defaultFramework='STAR';
+        reason='这道题核心在经历与结果，优先用 STAR 或 PAR 把背景、动作和结果讲扎实。';
+    }else if(type==='case'||/怎么拆|如何判断|你会怎么做|指标|下滑|策略|优先级|为什么/.test(text)){
+        recommended=['SCQA','PREP','PAR'];
+        defaultFramework='SCQA';
+        reason='这道题更看结构化判断，SCQA 或 PREP 会比 STAR 更自然。';
+    }else if(type==='role_understanding'||type==='company_fit'||/为什么是|怎么理解|怎么看|为什么想来/.test(text)){
+        recommended=['PREP','SCQA'];
+        defaultFramework='PREP';
+        reason='这类题先讲观点和判断更重要，不适合硬套 STAR。';
+    }else{
+        recommended=['PREP','SCQA','PAR'];
+        defaultFramework='PREP';
+        reason='这类题更适合先给观点，再补逻辑和例子。';
+    }
+    return{
+        recommended_frameworks:recommended,
+        default_framework:defaultFramework,
+        framework_reason:reason
+    };
+}
+function normalizePrepareQuestionRecord(question){
+    const base=Object.assign({},question||{});
+    const inferred=inferPrepareQuestionFrameworks(base);
+    const allowed=(Array.isArray(base.recommended_frameworks)?base.recommended_frameworks:[])
+        .map(function(item){return normalizePrepareText(item).toUpperCase();})
+        .filter(function(item){return ['STAR','PREP','PAR','SCQA'].includes(item);});
+    base.recommended_frameworks=allowed.length?allowed:inferred.recommended_frameworks;
+    base.default_framework=['STAR','PREP','PAR','SCQA'].includes(normalizePrepareText(base.default_framework).toUpperCase())?normalizePrepareText(base.default_framework).toUpperCase():inferred.default_framework;
+    if(!base.recommended_frameworks.includes(base.default_framework))base.default_framework=base.recommended_frameworks[0]||inferred.default_framework;
+    base.framework_reason=normalizePrepareText(base.framework_reason||inferred.framework_reason);
+    return base;
+}
+function getPrepareQuestionFrameworks(question){
+    return normalizePrepareQuestionRecord(question).recommended_frameworks||['PREP','SCQA'];
+}
+function getPrepareQuestionDefaultFramework(question){
+    return normalizePrepareQuestionRecord(question).default_framework||getPrepareQuestionFrameworks(question)[0]||'PREP';
+}
+function frameworkMetaFromSelection(selectedFramework,availableFrameworks){
+    const current=normalizePrepareText(selectedFramework).toUpperCase();
+    const allowed=(availableFrameworks||[]).filter(Boolean);
+    if(current&&allowed.includes(current))return current;
+    return allowed[0]||'PREP';
+}
+function getPrepareFreeQuestionKey(text){
+    return `free::${normalizePrepareText(text)}`;
+}
+function getPrepareModelOptions(){
+    return[
+        {key:'deepseek-v4-pro',label:'V4 Pro',desc:'更稳，更适合正式准备与回答骨架。'},
+        {key:'deepseek-v4-flash',label:'V4 Flash',desc:'更快，适合快速试跑和改写。'}
+    ];
+}
+let prepareLoadingTicker=null;
+function startPrepareLoading(kind){
+    prepareState.loadingKind=kind||'session';
+    prepareState.loadingStartedAt=Date.now();
+    prepareState.loadingFrame=0;
+    syncPrepareLoadingTicker();
+}
+function stopPrepareLoading(){
+    prepareState.loadingKind='';
+    prepareState.loadingStartedAt=0;
+    prepareState.loadingFrame=0;
+    syncPrepareLoadingTicker();
+}
+function syncPrepareLoadingTicker(){
+    const shouldRun=(prepareState.sessionLoading||prepareState.answerLoading)&&curView==='prepare';
+    if(shouldRun&&!prepareLoadingTicker){
+        prepareLoadingTicker=window.setInterval(function(){
+            prepareState.loadingFrame+=1;
+            if(curView==='prepare')renderPrepare();
+        },900);
+    }else if(!shouldRun&&prepareLoadingTicker){
+        window.clearInterval(prepareLoadingTicker);
+        prepareLoadingTicker=null;
+    }
+}
+function getPrepareLoadingDescriptor(kind){
+    const elapsed=Math.max(0,Date.now()-(prepareState.loadingStartedAt||Date.now()));
+    const phaseCursor=Math.floor(elapsed/1900);
+    const streamCursor=Math.floor(elapsed/1400);
+    const descriptors={
+        session:{
+            badge:'Preparing',
+            title:'正在编织这场面试的准备工作台',
+            subtitle:'我们会先读 JD 和简历，再拆业务、抓重点、生成问题与回答骨架。',
+            phases:[
+                {title:'读取岗位与简历',detail:'校验 JD、抓取简历证据、建立岗位上下文。'},
+                {title:'联网核实业务名词',detail:'补足专有名词、平台名、业务语境与公开背景。'},
+                {title:'映射经历与风险',detail:'筛出最该讲的经历、缺口和高风险追问点。'},
+                {title:'编排完整工作台',detail:'落出背调、重点、问题和回答骨架。'}
+            ],
+            stream:[
+                '正在拆解岗位目标、核心场景与业务链路…',
+                '正在把简历里的动作、结果和指标映射到岗位要求…',
+                '正在联网确认专有名词、平台能力与真实业务语境…',
+                '正在生成更像面试现场的追问与回答结构…'
+            ]
+        },
+        answer:{
+            badge:'Shaping',
+            title:'正在打磨一版可直接开讲的回答骨架',
+            subtitle:'这次会优先回扣简历证据、岗位目标和面试官真正想验证的点。',
+            phases:[
+                {title:'定位题目意图',detail:'先判断这是经历题、判断题、还是 case 题。'},
+                {title:'提取简历证据',detail:'优先使用真实经历、结果数字与可迁移能力。'},
+                {title:'补足公开背景',detail:'遇到陌生术语时先查，再决定回答角度。'},
+                {title:'组织表达结构',detail:'按模板输出主线、要点和表达提醒。'}
+            ],
+            stream:[
+                '正在把问题翻译成面试官真正要验证的能力…',
+                '正在从简历里挑最能撑住这题的证据与数字…',
+                '正在把公开背景和岗位语境压进回答主线…',
+                '正在压缩成更自然、更能开口的表达节奏…'
+            ]
+        }
+    };
+    const config=descriptors[kind]||descriptors.session;
+    return{
+        badge:config.badge,
+        title:config.title,
+        subtitle:config.subtitle,
+        phases:config.phases.map(function(phase,index){
+            return Object.assign({},phase,{
+                state:index<phaseCursor?'done':index===phaseCursor?'active':'idle'
+            });
+        }),
+        streamText:config.stream[streamCursor%config.stream.length],
+        skeletonCount:kind==='answer'?3:4
+    };
+}
+function renderPrepareLoadingScene(kind){
+    const descriptor=getPrepareLoadingDescriptor(kind);
+    return `
+        <div class="prepare-stream-shell">
+            <div class="prepare-stream-orb prepare-stream-orb-a"></div>
+            <div class="prepare-stream-orb prepare-stream-orb-b"></div>
+            <div class="prepare-stream-head">
+                <span class="prepare-stream-badge">${escapeHTML(descriptor.badge)}</span>
+                <h3>${escapeHTML(descriptor.title)}</h3>
+                <p>${escapeHTML(descriptor.subtitle)}</p>
+            </div>
+            <div class="prepare-stream-live">
+                <span class="prepare-stream-live-dot"></span>
+                <strong>实时生成中</strong>
+                <em>${escapeHTML(descriptor.streamText)}</em>
+            </div>
+            <div class="prepare-stream-phases">
+                ${descriptor.phases.map(function(phase,index){
+                    return `
+                        <div class="prepare-stream-phase is-${phase.state}">
+                            <span>${index+1}</span>
+                            <div>
+                                <strong>${escapeHTML(phase.title)}</strong>
+                                <p>${escapeHTML(phase.detail)}</p>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+            <div class="prepare-stream-skeleton">
+                ${Array.from({length:descriptor.skeletonCount}).map(function(_,index){
+                    return `<div class="prepare-stream-card"><i class="prepare-stream-line w-${index%4}"></i><i class="prepare-stream-line w-${(index+1)%4}"></i><i class="prepare-stream-line w-${(index+2)%4}"></i></div>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+function normalizeResumeExtractedText(value){
+    return String(value||'')
+        .replace(/\r\n?/g,'\n')
+        .replace(/\u0000/g,'')
+        .replace(/\bHYPERLINK\s+"[^"]*"/gi,'')
+        .replace(/\bTOC\s+\\o\s+"[^"]*"/gi,'')
+        .replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g,'$1$2')
+        .replace(/([\u4e00-\u9fff])\s+([，。；：！？、])/g,'$1$2')
+        .replace(/([（(])\s+([\u4e00-\u9fffA-Za-z0-9])/g,'$1$2')
+        .replace(/([\u4e00-\u9fffA-Za-z0-9])\s+([）)])/g,'$1$2')
+        .replace(/[ \t]+\n/g,'\n')
+        .replace(/\n{3,}/g,'\n\n')
+        .trim();
+}
+function scorePrepareExtractedTextQuality(value){
+    const text=normalizeResumeExtractedText(value);
+    if(!text)return 0;
+    const visible=text.replace(/\s+/g,'');
+    const total=visible.length||1;
+    const meaningful=(visible.match(/[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff]/g)||[]).length;
+    const suspicious=(visible.match(/[\uFFFD\uE000-\uF8FF]/g)||[]).length;
+    const lines=text.split('\n').filter(Boolean);
+    const denseLines=lines.filter(function(line){
+        return /[A-Za-z0-9\u4e00-\u9fff]{4,}/.test(line);
+    }).length;
+    const meaningfulRatio=meaningful/total;
+    const suspiciousPenalty=suspicious/total;
+    const lineBonus=Math.min(.2,denseLines/Math.max(1,lines.length||1)*.2);
+    return meaningfulRatio-suspiciousPenalty+lineBonus;
+}
+function normalizePrepareLookupText(value){
+    return String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+function prepareTextIncludesAlias(haystack,alias){
+    const source=normalizePrepareLookupText(haystack);
+    const target=normalizePrepareLookupText(alias);
+    if(!source||!target)return false;
+    return source.includes(target);
+}
+function getPrepareKnownTermBriefs(input){
+    const combinedText=[
+        input?.company_name,
+        input?.role_name,
+        input?.role_category,
+        input?.jd_text,
+        input?.resume_text
+    ].filter(Boolean).join('\n');
+    return PREPARE_KNOWN_TERM_BRIEFS.filter(function(brief){
+        const hasAlias=(brief.aliases||[]).some(function(alias){
+            return prepareTextIncludesAlias(combinedText,alias);
+        });
+        if(!hasAlias)return false;
+        const required=(brief.requiresAny||[]);
+        if(!required.length)return true;
+        return required.some(function(alias){
+            return prepareTextIncludesAlias(combinedText,alias);
+        });
+    }).map(function(brief){
+        return{
+            term:brief.display,
+            aliases:brief.aliases||[],
+            meaning:brief.meaning,
+            prep_direction:brief.prep_direction,
+            interview_focus:brief.interview_focus||[],
+            sources:brief.sources||[]
+        };
+    });
+}
+function getPrepareAnalysisPlaybooks(input){
+    const combinedText=[
+        input?.company_name,
+        input?.role_name,
+        input?.role_category,
+        input?.jd_text,
+        input?.resume_text
+    ].filter(Boolean).join('\n');
+    return PREPARE_ANALYSIS_PLAYBOOKS.filter(function(playbook){
+        const triggers=playbook.triggers||[];
+        if(!triggers.length)return true;
+        return triggers.some(function(trigger){
+            return prepareTextIncludesAlias(combinedText,trigger);
+        });
+    }).map(function(playbook){
+        return{
+            name:playbook.name,
+            checklist:playbook.checklist||[]
+        };
+    });
+}
+function decodePrepareHtml(value){
+    const raw=String(value||'');
+    if(!raw)return'';
+    const el=document.createElement('textarea');
+    el.innerHTML=raw.replace(/<br\s*\/?>/gi,'\n');
+    return normalizePrepareText(el.value||el.textContent||'');
+}
+function normalizePrepareLookupQuery(value){
+    return String(value||'').replace(/\s+/g,' ').trim();
+}
+function getPrepareLookupCache(){
+    try{
+        const raw=localStorage.getItem(PREPARE_WEB_LOOKUP_CACHE_KEY);
+        return raw?JSON.parse(raw):{};
+    }catch(error){
+        return{};
+    }
+}
+function readPrepareLookupCache(query){
+    const key=normalizePrepareLookupQuery(query).toLowerCase();
+    if(!key)return null;
+    const cache=getPrepareLookupCache();
+    return cache[key]||null;
+}
+function writePrepareLookupCache(query,payload){
+    const key=normalizePrepareLookupQuery(query).toLowerCase();
+    if(!key||!payload)return;
+    const cache=getPrepareLookupCache();
+    cache[key]=Object.assign({cached_at:new Date().toISOString()},payload);
+    const entries=Object.entries(cache).sort(function(a,b){
+        return new Date(b[1]?.cached_at||0).getTime()-new Date(a[1]?.cached_at||0).getTime();
+    }).slice(0,24);
+    const next={};
+    entries.forEach(function(entry){
+        next[entry[0]]=entry[1];
+    });
+    try{
+        localStorage.setItem(PREPARE_WEB_LOOKUP_CACHE_KEY,JSON.stringify(next));
+    }catch(error){}
+}
+async function fetchPrepareLookupJson(url,label){
+    let response;
+    try{
+        response=await fetch(url,{headers:{Accept:'application/json'}});
+    }catch(error){
+        throw new Error(`${label} 请求失败`);
+    }
+    const data=await response.json().catch(function(){return{};});
+    if(!response.ok){
+        throw new Error(`${label} 请求失败（${response.status}）`);
+    }
+    return data||{};
+}
+function flattenPrepareDuckTopics(topics,bucket){
+    (topics||[]).forEach(function(topic){
+        if(Array.isArray(topic?.Topics)&&topic.Topics.length){
+            flattenPrepareDuckTopics(topic.Topics,bucket);
+            return;
+        }
+        const text=normalizePrepareText(topic?.Text||topic?.Result||'');
+        const url=normalizePrepareText(topic?.FirstURL||'');
+        if(text||url){
+            bucket.push({
+                title:text.split(' - ')[0]||text,
+                snippet:text,
+                url,
+                source:'DuckDuckGo'
+            });
+        }
+    });
+}
+async function fetchPrepareDuckDuckGoResults(query){
+    const data=await fetchPrepareLookupJson(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&no_redirect=1&skip_disambig=1`,'DuckDuckGo');
+    const results=[];
+    const abstractText=normalizePrepareText(data?.AbstractText||'');
+    if(abstractText){
+        results.push({
+            title:normalizePrepareText(data?.Heading||query),
+            snippet:abstractText,
+            url:normalizePrepareText(data?.AbstractURL||''),
+            source:normalizePrepareText(data?.AbstractSource||'DuckDuckGo')
+        });
+    }
+    flattenPrepareDuckTopics(data?.RelatedTopics||[],results);
+    return results.slice(0,4);
+}
+async function fetchPrepareWikipediaResults(query,language){
+    const searchData=await fetchPrepareLookupJson(`https://${language}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`,`Wikipedia(${language})`);
+    const hits=(searchData?.query?.search||[]).slice(0,3);
+    const results=[];
+    for(const hit of hits){
+        const title=normalizePrepareText(hit?.title||'');
+        if(!title)continue;
+        let summaryText='';
+        let pageUrl=`https://${language}.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+        try{
+            const summaryData=await fetchPrepareLookupJson(`https://${language}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,`Wikipedia 摘要(${language})`);
+            summaryText=normalizePrepareText(summaryData?.extract||'');
+            pageUrl=normalizePrepareText(summaryData?.content_urls?.desktop?.page||pageUrl);
+        }catch(error){}
+        const snippet=decodePrepareHtml(hit?.snippet||'');
+        results.push({
+            title,
+            snippet:summaryText||snippet,
+            url:pageUrl,
+            source:`Wikipedia (${language})`
+        });
+    }
+    return results.filter(function(item){
+        return item.title&&item.snippet;
+    });
+}
+function dedupePrepareLookupResults(items){
+    const seen=new Set();
+    return(items||[]).filter(function(item){
+        const key=normalizePrepareLookupText(`${item?.title||''} ${item?.url||''}`);
+        if(!key||seen.has(key))return false;
+        seen.add(key);
+        return true;
+    });
+}
+async function runPrepareWebLookup(args){
+    const query=normalizePrepareLookupQuery(args?.query||args);
+    const intent=normalizePrepareText(args?.intent||'确认术语或业务背景');
+    const language=normalizePrepareText(args?.language||'zh').toLowerCase()==='en'?'en':'zh';
+    if(!query){
+        return JSON.stringify({query:'',intent,language,results:[],note:'没有提供可检索的 query。'});
+    }
+    const cached=readPrepareLookupCache(query);
+    if(cached){
+        return JSON.stringify(Object.assign({},cached,{cache_hit:true}));
+    }
+    const languages=language==='zh'?['zh','en']:['en','zh'];
+    const resultSets=await Promise.allSettled([
+        fetchPrepareDuckDuckGoResults(query),
+        fetchPrepareWikipediaResults(query,languages[0]),
+        fetchPrepareWikipediaResults(query,languages[1])
+    ]);
+    const merged=dedupePrepareLookupResults(resultSets.flatMap(function(result){
+        return result.status==='fulfilled'?(result.value||[]):[];
+    })).slice(0,6);
+    const errors=resultSets.filter(function(result){
+        return result.status==='rejected';
+    }).map(function(result){
+        return result.reason instanceof Error?result.reason.message:String(result.reason);
+    }).slice(0,2);
+    const payload={
+        query,
+        intent,
+        language,
+        results:merged.map(function(item){
+            return{
+                title:item.title,
+                snippet:item.snippet,
+                source:item.source,
+                url:item.url
+            };
+        }),
+        note:merged.length?'这些是公开资料检索结果，请优先基于结果理解术语、公司、产品与业务语境，再结合 JD 与简历作答。':'公开检索暂时没有找到高质量结果，请降低结论置信度，并在输出里明确哪些地方仍需面试确认。',
+        limitations:errors.length?errors:[]
+    };
+    writePrepareLookupCache(query,payload);
+    return JSON.stringify(payload);
+}
+function getPrepareDirectTools(){
+    return[
+        {
+            type:'function',
+            function:{
+                name:'web_lookup',
+                description:'Search public web and encyclopedia sources for unfamiliar proper nouns, company names, products, platforms, slang, business terms, competitors, and recent business context. Always call this before guessing.',
+                parameters:{
+                    type:'object',
+                    properties:{
+                        query:{type:'string',description:'The exact term, company, product, or short search phrase that needs external grounding.'},
+                        intent:{type:'string',description:'What you want to confirm, for example: term meaning, company business, product context, recent focus, competitor, or market position.'},
+                        language:{type:'string',description:'Preferred result language. Use zh for Chinese context and en for English context.'}
+                    },
+                    required:['query','intent','language'],
+                    additionalProperties:false
+                }
+            }
+        }
+    ];
+}
+async function executePrepareToolCall(toolCall){
+    const name=toolCall?.function?.name||'';
+    const argsText=toolCall?.function?.arguments||'{}';
+    let args={};
+    try{
+        args=JSON.parse(argsText||'{}');
+    }catch(error){
+        args={query:'',intent:'',language:'zh'};
+    }
+    if(name==='web_lookup'){
+        return runPrepareWebLookup(args);
+    }
+    return JSON.stringify({error:`未知工具：${name}`});
+}
+function extractPrepareLookupQueries(input){
+    const queries=[];
+    const seen=new Set();
+    function pushQuery(value){
+        const text=normalizePrepareLookupQuery(value);
+        const key=text.toLowerCase();
+        if(!text||seen.has(key))return;
+        seen.add(key);
+        queries.push(text);
+    }
+    pushQuery(input?.company_name);
+    if(input?.company_name&&input?.role_name)pushQuery(`${input.company_name} ${input.role_name}`);
+    (getPrepareKnownTermBriefs(input)||[]).forEach(function(brief){
+        pushQuery(brief.term);
+    });
+    const jdText=String(input?.jd_text||'');
+    const englishTerms=[...new Set((jdText.match(/\b[A-Za-z][A-Za-z0-9_-]{3,}\b/g)||[]))]
+        .filter(function(term){
+            return !/^(with|from|that|this|have|will|must|need|good|team|work|data|user|role|goal|product|growth|market|business|model|deepseek)$/i.test(term);
+        })
+        .slice(0,4);
+    englishTerms.forEach(pushQuery);
+    const chineseTerms=[...new Set((jdText.match(/[\u4e00-\u9fa5A-Za-z]{2,12}(?:平台|系统|产品|项目|助手|达人|智能体|工作流|引擎|中台|机器人)/g)||[]))].slice(0,4);
+    chineseTerms.forEach(pushQuery);
+    return queries.slice(0,6);
+}
+function summarizePrepareLookupPayload(payload){
+    const results=(payload?.results||[]).slice(0,3).map(function(item){
+        return{
+            title:item.title,
+            snippet:item.snippet,
+            source:item.source,
+            url:item.url
+        };
+    });
+    return{
+        query:payload?.query||'',
+        intent:payload?.intent||'',
+        results,
+        note:payload?.note||''
+    };
+}
+async function buildPrepareExternalResearchDigest(input,kind){
+    const queries=extractPrepareLookupQueries(input);
+    const digest=[];
+    for(const query of queries){
+        try{
+            const raw=await runPrepareWebLookup({
+                query,
+                intent:kind==='answer'?'补足回答里的术语、平台与业务背景':'补足岗位、公司、平台、术语与业务背景',
+                language:'zh'
+            });
+            const parsed=JSON.parse(raw||'{}');
+            if(parsed?.results?.length){
+                digest.push(summarizePrepareLookupPayload(parsed));
+            }
+        }catch(error){}
+    }
+    return digest.slice(0,4);
+}
+function buildPrepareLookupAugmentedMessages(messages,lookupDigest){
+    if(!lookupDigest?.length)return cloneData(messages||[]);
+    const next=cloneData(messages||[]);
+    next.splice(1,0,{
+        role:'system',
+        content:`下面是已经联网检索并整理好的公开背景，请优先使用这些资料理解公司、业务、平台名、产品名和行业黑话，再结合 JD 与简历生成结果。external_web_research=${JSON.stringify(lookupDigest,null,2)}`
+    });
+    return next;
+}
+function findPrepareKnownTermBrief(keyword,briefs){
+    const text=normalizePrepareText(keyword);
+    if(!text)return null;
+    return(briefs||[]).find(function(brief){
+        return prepareTextIncludesAlias(text,brief.term)||brief.aliases.some(function(alias){
+            return prepareTextIncludesAlias(text,alias)||prepareTextIncludesAlias(alias,text);
+        });
+    })||null;
+}
+function getPrepareFileExtension(name){
+    const match=String(name||'').toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match?match[1]:'';
+}
+function decodePrepareHtmlEntities(value){
+    const textarea=document.createElement('textarea');
+    textarea.innerHTML=String(value||'');
+    return textarea.value;
+}
+const PREPARE_PDFJS_CDN_SOURCES=[
+    {
+        script:'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+        cMapUrl:'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        standardFontDataUrl:'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+    },
+    {
+        script:'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+        cMapUrl:'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+        standardFontDataUrl:'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
+    },
+    {
+        script:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+        cMapUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        standardFontDataUrl:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/'
+    }
+];
+let preparePdfjsLoadPromise=null;
+function bytesToPrepareLatin1(bytes){
+    return new TextDecoder('latin1').decode(bytes);
+}
+function loadPrepareRemoteScript(url){
+    return new Promise(function(resolve,reject){
+        const existing=[...document.querySelectorAll('script[data-rt-prepare-pdfjs]')].find(function(node){
+            return node.src===url;
+        });
+        if(existing){
+            if(existing.dataset.failed==='true'){
+                existing.remove();
+            }else{
+            if(existing.dataset.loaded==='true'){
+                resolve();
+                return;
+            }
+            existing.addEventListener('load',function(){resolve();},{once:true});
+            existing.addEventListener('error',function(){reject(new Error(`加载失败：${url}`));},{once:true});
+            return;
+            }
+        }
+        const script=document.createElement('script');
+        let settled=false;
+        const timeout=window.setTimeout(function(){
+            if(settled)return;
+            settled=true;
+            reject(new Error(`加载超时：${url}`));
+        },8000);
+        script.async=true;
+        script.src=url;
+        script.dataset.rtPreparePdfjs='true';
+        script.onload=function(){
+            if(settled)return;
+            settled=true;
+            window.clearTimeout(timeout);
+            script.dataset.loaded='true';
+            resolve();
+        };
+        script.onerror=function(){
+            if(settled)return;
+            settled=true;
+            window.clearTimeout(timeout);
+            script.dataset.failed='true';
+            reject(new Error(`加载失败：${url}`));
+        };
+        document.head.appendChild(script);
+    });
+}
+async function ensurePreparePdfjsLoaded(){
+    if(globalThis.pdfjsLib?.getDocument){
+        return{
+            pdfjs:globalThis.pdfjsLib,
+            assets:globalThis.__RT_PREPARE_PDFJS_ASSETS||PREPARE_PDFJS_CDN_SOURCES[0]
+        };
+    }
+    if(preparePdfjsLoadPromise)return preparePdfjsLoadPromise;
+    preparePdfjsLoadPromise=(async function(){
+        let lastError=null;
+        for(const source of PREPARE_PDFJS_CDN_SOURCES){
+            try{
+                await loadPrepareRemoteScript(source.script);
+                if(globalThis.pdfjsLib?.getDocument){
+                    globalThis.__RT_PREPARE_PDFJS_ASSETS=source;
+                    return{
+                        pdfjs:globalThis.pdfjsLib,
+                        assets:source
+                    };
+                }
+            }catch(error){
+                lastError=error;
+            }
+        }
+        throw lastError||new Error('PDF 解析器加载失败');
+    })().catch(function(error){
+        preparePdfjsLoadPromise=null;
+        throw error;
+    });
+    return preparePdfjsLoadPromise;
+}
+async function inflatePrepareBytes(bytes,format){
+    if(typeof DecompressionStream==='undefined'){
+        throw new Error('当前浏览器不支持压缩流解码');
+    }
+    const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+    const buffer=await new Response(stream).arrayBuffer();
+    return new Uint8Array(buffer);
+}
+async function inflatePreparePdfStream(bytes){
+    const attempts=['deflate-raw','deflate'];
+    let lastError=null;
+    for(const format of attempts){
+        try{
+            return await inflatePrepareBytes(bytes,format);
+        }catch(error){
+            lastError=error;
+        }
+    }
+    throw lastError||new Error('PDF 压缩流解码失败');
+}
+function decodePreparePdfLiteralString(value){
+    let result='';
+    for(let index=0;index<value.length;index+=1){
+        const char=value[index];
+        if(char!=='\\'){
+            result+=char;
+            continue;
+        }
+        index+=1;
+        const next=value[index]||'';
+        if(!next)break;
+        if(next==='n')result+='\n';
+        else if(next==='r')result+='\r';
+        else if(next==='t')result+='\t';
+        else if(next==='b')result+='\b';
+        else if(next==='f')result+='\f';
+        else if(next==='('||next===')'||next==='\\')result+=next;
+        else if(/[0-7]/.test(next)){
+            let octal=next;
+            for(let step=0;step<2;step+=1){
+                const peek=value[index+1];
+                if(peek&&/[0-7]/.test(peek)){
+                    octal+=peek;
+                    index+=1;
+                }else break;
+            }
+            result+=String.fromCharCode(parseInt(octal,8));
+        }else if(next==='\n'||next==='\r'){
+            if(next==='\r'&&value[index+1]==='\n')index+=1;
+        }else{
+            result+=next;
+        }
+    }
+    return result;
+}
+function decodePreparePdfHexString(value){
+    const clean=value.replace(/\s+/g,'');
+    if(!clean)return'';
+    const normalized=clean.length%2===0?clean:`${clean}0`;
+    const bytes=new Uint8Array(normalized.length/2);
+    for(let index=0;index<normalized.length;index+=2){
+        bytes[index/2]=parseInt(normalized.slice(index,index+2),16)||0;
+    }
+    if(bytes.length>=2&&bytes[0]===0xFE&&bytes[1]===0xFF){
+        let text='';
+        for(let index=2;index+1<bytes.length;index+=2){
+            text+=String.fromCharCode((bytes[index]<<8)|bytes[index+1]);
+        }
+        return text;
+    }
+    return new TextDecoder('latin1').decode(bytes);
+}
+function extractPreparePdfTextOperators(section){
+    const fragments=[];
+    const literalRegex=/\((?:\\.|[^\\()])*\)\s*Tj/g;
+    const hexRegex=/<[0-9A-Fa-f\s]+>\s*Tj/g;
+    const arrayRegex=/\[(?:\\.|[^\]])*?\]\s*TJ/g;
+    const pushLiteral=function(match){
+        const text=decodePreparePdfLiteralString(match.slice(1,match.lastIndexOf(')')));
+        if(text)fragments.push(text);
+    };
+    const pushHex=function(match){
+        const start=match.indexOf('<');
+        const end=match.indexOf('>',start+1);
+        if(start<0||end<0)return;
+        const text=decodePreparePdfHexString(match.slice(start+1,end));
+        if(text)fragments.push(text);
+    };
+    const pushArray=function(match){
+        const inner=match.slice(1,match.lastIndexOf(']'));
+        const parts=[];
+        inner.replace(/\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]+>/g,function(token){
+            if(token.startsWith('('))parts.push(decodePreparePdfLiteralString(token.slice(1,-1)));
+            else if(token.startsWith('<'))parts.push(decodePreparePdfHexString(token.slice(1,-1)));
+            return token;
+        });
+        const text=parts.join(' ').trim();
+        if(text)fragments.push(text);
+    };
+    section.replace(literalRegex,function(match){
+        pushLiteral(match);
+        return match;
+    });
+    section.replace(hexRegex,function(match){
+        pushHex(match);
+        return match;
+    });
+    section.replace(arrayRegex,function(match){
+        pushArray(match);
+        return match;
+    });
+    return fragments;
+}
+function extractPreparePdfTextFromContent(content){
+    const sections=[];
+    content.replace(/BT[\s\S]*?ET/g,function(block){
+        sections.push(block);
+        return block;
+    });
+    const textParts=sections.flatMap(extractPreparePdfTextOperators).map(normalizeResumeExtractedText).filter(Boolean);
+    return normalizeResumeExtractedText(textParts.join('\n'));
+}
+async function extractResumeTextFromPdfBytesFallback(bytes){
+    const raw=bytesToPrepareLatin1(bytes);
+    const texts=[];
+    const streamRegex=/stream\r?\n([\s\S]*?)\r?\nendstream/g;
+    let match;
+    while((match=streamRegex.exec(raw))){
+        const streamStart=match.index+match[0].indexOf(match[1]);
+        const streamEnd=streamStart+match[1].length;
+        const prefix=raw.slice(Math.max(0,match.index-240),match.index);
+        let decoded='';
+        try{
+            if(/\/FlateDecode/.test(prefix)){
+                decoded=bytesToPrepareLatin1(await inflatePreparePdfStream(bytes.slice(streamStart,streamEnd)));
+            }else{
+                decoded=match[1];
+            }
+        }catch(error){
+            continue;
+        }
+        const extracted=extractPreparePdfTextFromContent(decoded);
+        if(extracted)texts.push(extracted);
+    }
+    const merged=normalizeResumeExtractedText(texts.join('\n\n'));
+    if(merged)return merged;
+    const plainMatches=(raw.match(/\((?:\\.|[^\\()]){3,}\)/g)||[])
+        .map(function(token){return decodePreparePdfLiteralString(token.slice(1,-1));})
+        .map(normalizeResumeExtractedText)
+        .filter(function(token){
+            return token&&/[\u4e00-\u9fa5A-Za-z]{2,}/.test(token);
+        });
+    return normalizeResumeExtractedText(plainMatches.join('\n'));
+}
+async function extractResumeTextFromPdfBytes(bytes){
+    let bestText='';
+    let pdfjsAssets=null;
+    try{
+        const pdfjsState=await ensurePreparePdfjsLoaded();
+        const pdfjs=pdfjsState?.pdfjs;
+        pdfjsAssets=pdfjsState?.assets||null;
+        if(!pdfjs)throw new Error('pdfjs unavailable');
+        const loadingTask=pdfjs.getDocument({
+            data:bytes,
+            disableWorker:true,
+            useWorkerFetch:false,
+            isEvalSupported:false,
+            cMapUrl:pdfjsAssets?.cMapUrl,
+            cMapPacked:true,
+            standardFontDataUrl:pdfjsAssets?.standardFontDataUrl,
+            disableFontFace:true
+        });
+        const pdf=await loadingTask.promise;
+        const pages=[];
+        for(let pageNumber=1;pageNumber<=pdf.numPages;pageNumber+=1){
+            const page=await pdf.getPage(pageNumber);
+            const textContent=await page.getTextContent();
+            const flatTokens=(textContent.items||[]).map(function(item){
+                return normalizePrepareText(item?.str||'');
+            }).filter(Boolean);
+            const lines=[];
+            let currentLine='';
+            let lastY=null;
+            (textContent.items||[]).forEach(function(item){
+                const text=normalizePrepareText(item?.str||'');
+                const y=Array.isArray(item?.transform)?Math.round(item.transform[5]):null;
+                if(lastY!==null&&y!==null&&Math.abs(y-lastY)>4&&currentLine){
+                    lines.push(currentLine.trim());
+                    currentLine='';
+                }
+                if(text)currentLine+=(currentLine?' ':'')+text;
+                if(item?.hasEOL&&currentLine){
+                    lines.push(currentLine.trim());
+                    currentLine='';
+                }
+                if(y!==null)lastY=y;
+            });
+            if(currentLine)lines.push(currentLine.trim());
+            const structuredText=normalizeResumeExtractedText(lines.filter(Boolean).join('\n'));
+            const flatText=normalizeResumeExtractedText(flatTokens.join(' '));
+            const pageText=structuredText.length>=Math.max(80,Math.round(flatText.length*0.45))?structuredText:flatText;
+            pages.push(pageText);
+        }
+        bestText=normalizeResumeExtractedText(pages.join('\n\n'));
+    }catch(error){}
+    const fallbackText=await extractResumeTextFromPdfBytesFallback(bytes).catch(function(){return'';});
+    const bestScore=scorePrepareExtractedTextQuality(bestText);
+    const fallbackScore=scorePrepareExtractedTextQuality(fallbackText);
+    if(fallbackScore>bestScore)bestText=fallbackText;
+    if(!bestText||scorePrepareExtractedTextQuality(bestText)<0.28){
+        throw new Error('这份 PDF 没有读出可用正文。请优先上传可复制文本的 PDF；如果是扫描版或导出异常，建议重新导出后再传。');
+    }
+    return bestText;
+}
+function readPrepareUint16LE(view,offset){
+    return view.getUint16(offset,true);
+}
+function readPrepareUint32LE(view,offset){
+    return view.getUint32(offset,true);
+}
+function findPrepareZipEocd(bytes){
+    const minOffset=Math.max(0,bytes.length-65557);
+    for(let offset=bytes.length-22;offset>=minOffset;offset-=1){
+        if(bytes[offset]===0x50&&bytes[offset+1]===0x4b&&bytes[offset+2]===0x05&&bytes[offset+3]===0x06){
+            return offset;
+        }
+    }
+    return-1;
+}
+function listPrepareZipEntries(bytes){
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    const eocdOffset=findPrepareZipEocd(bytes);
+    if(eocdOffset<0)throw new Error('DOCX 文件结构无效');
+    const totalEntries=readPrepareUint16LE(view,eocdOffset+10);
+    let cursor=readPrepareUint32LE(view,eocdOffset+16);
+    const decoder=new TextDecoder('utf-8');
+    const entries=[];
+    for(let index=0;index<totalEntries&&cursor+46<=bytes.length;index+=1){
+        if(readPrepareUint32LE(view,cursor)!==0x02014b50)break;
+        const compression=readPrepareUint16LE(view,cursor+10);
+        const compressedSize=readPrepareUint32LE(view,cursor+20);
+        const fileNameLength=readPrepareUint16LE(view,cursor+28);
+        const extraLength=readPrepareUint16LE(view,cursor+30);
+        const commentLength=readPrepareUint16LE(view,cursor+32);
+        const localHeaderOffset=readPrepareUint32LE(view,cursor+42);
+        const fileNameStart=cursor+46;
+        const fileNameEnd=fileNameStart+fileNameLength;
+        const name=decoder.decode(bytes.slice(fileNameStart,fileNameEnd));
+        entries.push({name,compression,compressedSize,localHeaderOffset});
+        cursor=fileNameEnd+extraLength+commentLength;
+    }
+    return entries;
+}
+async function inflatePrepareRawBytes(bytes){
+    return inflatePrepareBytes(bytes,'deflate-raw');
+}
+async function extractPrepareZipEntry(bytes,entry){
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    if(readPrepareUint32LE(view,entry.localHeaderOffset)!==0x04034b50){
+        throw new Error('DOCX 本地文件头无效');
+    }
+    const fileNameLength=readPrepareUint16LE(view,entry.localHeaderOffset+26);
+    const extraLength=readPrepareUint16LE(view,entry.localHeaderOffset+28);
+    const dataStart=entry.localHeaderOffset+30+fileNameLength+extraLength;
+    const dataEnd=dataStart+entry.compressedSize;
+    const payload=bytes.slice(dataStart,dataEnd);
+    if(entry.compression===0)return payload;
+    if(entry.compression===8)return inflatePrepareRawBytes(payload);
+    throw new Error('DOCX 使用了当前不支持的压缩方式');
+}
+function convertPrepareDocxXmlToText(xml){
+    const plain=String(xml||'')
+        .replace(/<w:tab[^>]*\/>/gi,'\t')
+        .replace(/<w:br[^>]*\/>/gi,'\n')
+        .replace(/<\/w:p>/gi,'\n')
+        .replace(/<\/w:tr>/gi,'\n')
+        .replace(/<[^>]+>/g,'')
+        .replace(/&nbsp;/g,' ');
+    return normalizeResumeExtractedText(decodePrepareHtmlEntities(plain));
+}
+async function extractResumeTextFromDocxBytes(bytes){
+    const entries=listPrepareZipEntries(bytes).filter(function(entry){
+        return/^word\/(document|header\d+|footer\d+)\.xml$/i.test(entry.name);
+    });
+    if(!entries.length)throw new Error('DOCX 里没有找到正文内容');
+    const decoder=new TextDecoder('utf-8');
+    const parts=[];
+    for(const entry of entries){
+        const payload=await extractPrepareZipEntry(bytes,entry);
+        const text=convertPrepareDocxXmlToText(decoder.decode(payload));
+        if(text)parts.push(text);
+    }
+    return normalizeResumeExtractedText(parts.join('\n\n'));
+}
+async function extractResumeTextFromBytes(bytes,fileName,fileType){
+    const extension=getPrepareFileExtension(fileName);
+    if(extension==='pdf'||String(fileType||'').toLowerCase().includes('pdf')){
+        return extractResumeTextFromPdfBytes(bytes);
+    }
+    if(extension==='docx'||String(fileType||'').toLowerCase().includes('wordprocessingml')){
+        return extractResumeTextFromDocxBytes(bytes);
+    }
+    if(['txt','md'].includes(extension)||String(fileType||'').startsWith('text/')){
+        return normalizeResumeExtractedText(new TextDecoder('utf-8').decode(bytes));
+    }
+    if(extension==='doc'){
+        throw new Error('暂不支持直接读取 .doc，请改用 PDF、DOCX、TXT 或 Markdown');
+    }
+    throw new Error('暂不支持这份简历格式，请改用 PDF、DOCX、TXT 或 Markdown');
+}
+async function extractResumeTextFromFile(file){
+    if(!file)return'';
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    return extractResumeTextFromBytes(bytes,file.name,file.type||'');
+}
+function dataUrlToPrepareBytes(dataUrl){
+    const raw=String(dataUrl||'');
+    const base64Index=raw.indexOf('base64,');
+    if(base64Index<0)throw new Error('简历文件内容无效');
+    const binary=atob(raw.slice(base64Index+7));
+    const bytes=new Uint8Array(binary.length);
+    for(let index=0;index<binary.length;index+=1){
+        bytes[index]=binary.charCodeAt(index);
+    }
+    return bytes;
+}
+async function extractResumeTextFromStoredResume(resume){
+    if(!resume?.data_url)return'';
+    const bytes=dataUrlToPrepareBytes(resume.data_url);
+    return extractResumeTextFromBytes(bytes,resume.orig||resume.file_name||'',resume.file_type||'');
+}
+function mergePrepareResumeTexts(primaryText,secondaryText){
+    const primary=normalizeResumeExtractedText(primaryText);
+    const secondary=normalizeResumeExtractedText(secondaryText);
+    if(!primary)return secondary;
+    if(!secondary)return primary;
+    if(primary.includes(secondary))return primary;
+    return `${primary}\n\n用户补充重点：\n${secondary}`;
+}
+function getPrepareResumeMetaText(file,parseState,emptyText){
+    if(!file)return emptyText;
+    const sizeText=file.size?` · ${(file.size/1024).toFixed(0)}KB`:'';
+    if(parseState?.status==='ready')return`${file.name}${sizeText} · 已读取正文 ${parseState.text.length} 字`;
+    if(parseState?.status==='reading')return`${file.name}${sizeText} · 正在读取正文…`;
+    if(parseState?.status==='error')return`${file.name}${sizeText} · 读取失败：${parseState.message}`;
+    return`${file.name}${sizeText} · 生成前会先读取正文`;
+}
+function getPrepareResumeParseState(kind){
+    return kind==='application'?prepareState.appSupplementParse:prepareState.manualResumeParse;
+}
+function setPrepareResumeParseState(kind,nextState){
+    const value=Object.assign({status:'idle',text:'',message:''},nextState||{});
+    if(kind==='application')prepareState.appSupplementParse=value;
+    else prepareState.manualResumeParse=value;
+}
+function refreshPrepareResumeMetaLabel(kind){
+    const meta=kind==='application'?$('#prepare-app-file-meta'):$('#prepare-manual-file-meta');
+    const file=kind==='application'?prepareState.appSupplementFile:prepareState.manualResumeFile;
+    const emptyText=kind==='application'
+        ?'上传后会先读取正文，读不到不会开始分析。'
+        :'上传后会先读取正文，读不到不会开始分析。';
+    if(meta)meta.textContent=getPrepareResumeMetaText(file,getPrepareResumeParseState(kind),emptyText);
+}
+async function warmPrepareResumeFileParse(kind,file){
+    if(!file){
+        setPrepareResumeParseState(kind,{status:'idle',text:'',message:''});
+        refreshPrepareResumeMetaLabel(kind);
+        return;
+    }
+    setPrepareResumeParseState(kind,{status:'reading',text:'',message:''});
+    refreshPrepareResumeMetaLabel(kind);
+    try{
+        const text=await extractResumeTextFromFile(file);
+        const currentFile=kind==='application'?prepareState.appSupplementFile:prepareState.manualResumeFile;
+        if(currentFile!==file)return;
+        setPrepareResumeParseState(kind,{status:'ready',text,message:''});
+    }catch(error){
+        const currentFile=kind==='application'?prepareState.appSupplementFile:prepareState.manualResumeFile;
+        if(currentFile!==file)return;
+        setPrepareResumeParseState(kind,{
+            status:'error',
+            text:'',
+            message:error instanceof Error?error.message:String(error)
+        });
+    }
+    refreshPrepareResumeMetaLabel(kind);
+    if(curView==='prepare')renderPrepare();
+}
+async function resolvePrepareLinkedResumeContext(linkedResume){
+    if(!linkedResume)return{text:'',source:'',verified:false,resumeName:'',fileMeta:null};
+    const extracted=normalizeResumeExtractedText(linkedResume.extracted_text||'');
+    if(extracted){
+        return{
+            text:extracted,
+            source:'linked_resume_file',
+            verified:true,
+            resumeName:linkedResume.file_name||'',
+            fileMeta:linkedResume.size?{name:linkedResume.file_name||'',size:linkedResume.size,type:linkedResume.file_type||'application/octet-stream'}:null
+        };
+    }
+    if(linkedResume.data_url){
+        try{
+            const text=await extractResumeTextFromStoredResume(linkedResume);
+            if(!text)throw new Error('没有读出有效正文');
+            await store.updateResume(linkedResume.id,{
+                extracted_text:text,
+                extracted_at:new Date().toISOString(),
+                extraction_status:'ready',
+                extraction_error:''
+            });
+            return{
+                text,
+                source:'linked_resume_file',
+                verified:true,
+                resumeName:linkedResume.file_name||'',
+                fileMeta:linkedResume.size?{name:linkedResume.file_name||'',size:linkedResume.size,type:linkedResume.file_type||'application/octet-stream'}:null
+            };
+        }catch(error){
+            throw new Error(`已绑定简历「${linkedResume.file_name||'当前简历'}」，但没能读出正文。请把它重新上传为 PDF、DOCX、TXT 或 Markdown 后再试。`);
+        }
+    }
+    const notes=normalizeResumeExtractedText(linkedResume.notes||'');
+    return{
+        text:notes,
+        source:notes?'linked_resume_notes':'',
+        verified:false,
+        resumeName:linkedResume.file_name||'',
+        fileMeta:linkedResume.size?{name:linkedResume.file_name||'',size:linkedResume.size,type:linkedResume.file_type||'application/octet-stream'}:null
+    };
+}
+async function resolvePrepareResumeContext(options){
+    const resumeFile=options?.resumeFile||null;
+    const linkedResume=options?.linkedResume||null;
+    const resumeSummary=normalizeResumeExtractedText(options?.resumeSummary||'');
+    const resumeNameFallback=normalizePrepareText(options?.resumeNameFallback||'');
+    if(resumeFile){
+        let fileText='';
+        try{
+            fileText=await extractResumeTextFromFile(resumeFile);
+        }catch(error){
+            const message=error instanceof Error?error.message:String(error);
+            throw new Error(`已选简历文件「${resumeFile.name}」，但没能读出正文。${message}`);
+        }
+        if(!fileText){
+            throw new Error(`已选简历文件「${resumeFile.name}」，但没有读出有效正文。请换一份更清晰的 PDF、DOCX、TXT 或 Markdown。`);
+        }
+        return{
+            resume_name:resumeFile.name,
+            resume_text:mergePrepareResumeTexts(fileText,resumeSummary),
+            resume_file_meta:{name:resumeFile.name,size:resumeFile.size,type:resumeFile.type||'application/octet-stream'},
+            resume_source:'uploaded_file',
+            resume_verified:true
+        };
+    }
+    if(linkedResume){
+        const linkedContext=await resolvePrepareLinkedResumeContext(linkedResume);
+        const mergedText=mergePrepareResumeTexts(linkedContext.text,resumeSummary);
+        if(mergedText){
+            return{
+                resume_name:linkedContext.resumeName||resumeNameFallback,
+                resume_text:mergedText,
+                resume_file_meta:linkedContext.fileMeta,
+                resume_source:linkedContext.verified?'linked_resume_file':(resumeSummary&&linkedContext.text?'linked_resume_notes_plus_summary':linkedContext.source||'manual_summary'),
+                resume_verified:!!linkedContext.verified
+            };
+        }
+    }
+    if(resumeSummary){
+        return{
+            resume_name:resumeNameFallback,
+            resume_text:resumeSummary,
+            resume_file_meta:null,
+            resume_source:'manual_summary',
+            resume_verified:false
+        };
+    }
+    return{
+        resume_name:resumeNameFallback,
+        resume_text:'',
+        resume_file_meta:null,
+        resume_source:'',
+        resume_verified:false
+    };
+}
+function getPrepareResumeStatus(session){
+    const linkedResume=getPrepareLinkedResume(session);
+    const hasLinkedExtracted=Boolean(normalizeResumeExtractedText(linkedResume?.extracted_text||''));
+    const resumeText=normalizeResumeExtractedText(session?.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'');
+    const verified=Boolean(session?.resume_verified||hasLinkedExtracted||session?.resume_source==='uploaded_file'||session?.resume_source==='linked_resume_file');
+    if(verified&&resumeText)return{label:`简历正文已读取 · ${resumeText.length} 字`,verified:true};
+    if(resumeText)return{label:`当前基于简历摘要 · ${resumeText.length} 字`,verified:false};
+    return{label:'未读取到简历正文',verified:false};
+}
+function getPrepareResumePreviewData(options){
+    const parseText=normalizeResumeExtractedText(options?.parseText||'');
+    const linkedText=normalizeResumeExtractedText(options?.linkedText||'');
+    const summaryText=normalizeResumeExtractedText(options?.summaryText||'');
+    const primaryText=parseText||linkedText;
+    const previewText=mergePrepareResumeTexts(primaryText,summaryText);
+    const verified=Boolean(primaryText);
+    let sourceLabel='';
+    if(parseText)sourceLabel='上传文件正文';
+    else if(linkedText)sourceLabel='已绑定简历正文';
+    else if(summaryText)sourceLabel='简历摘要';
+    const statusLabel=verified?`正文已读取 · ${primaryText.length} 字`:summaryText?`当前仅摘要 · ${summaryText.length} 字`:'未读取到可用简历内容';
+    return{
+        text:previewText,
+        primaryText,
+        summaryText,
+        verified,
+        sourceLabel,
+        statusLabel
+    };
+}
+function renderPrepareResumePreviewCard(preview,options){
+    if(!preview?.text)return'';
+    const title=options?.title||'简历上下文';
+    const hint=options?.hint||'生成时会优先使用这里的正文与补充摘要。';
+    const bodyText=preview.text.length>4000?`${preview.text.slice(0,4000)}\n\n……已截断显示，生成时仍会使用完整正文。`:preview.text;
+    return `
+        <div class="prepare-resume-preview-card prepare-field-full">
+            <div class="prepare-resume-preview-head">
+                <div>
+                    <div class="prepare-section-kicker">${escapeHTML(title)}</div>
+                    <strong>${escapeHTML(preview.sourceLabel||'简历内容')}</strong>
+                </div>
+                <div class="prepare-resume-preview-meta">
+                    <span>${escapeHTML(preview.statusLabel)}</span>
+                    <span>${preview.verified?'已校验正文':'待补更完整正文'}</span>
+                </div>
+            </div>
+            <p>${escapeHTML(hint)}</p>
+            <div class="prepare-resume-preview-body"><pre>${escapeHTML(bodyText)}</pre></div>
+        </div>
+    `;
+}
+function renderPrepareResumePreviewOverlay(preview){
+    if(!prepareState.showResumePreview||!preview?.text)return'';
+    return `
+        <div class="prepare-resume-overlay" id="prepare-resume-overlay">
+            <div class="prepare-resume-sheet">
+                <div class="prepare-resume-sheet-head">
+                    <div>
+                        <div class="prepare-section-kicker">Resume Context</div>
+                        <h3>本次分析实际使用的简历内容</h3>
+                        <p>${escapeHTML(preview.sourceLabel||'简历正文')} · ${escapeHTML(preview.statusLabel||'')}</p>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-close-resume-preview">收起</button>
+                </div>
+                <div class="prepare-resume-sheet-body">
+                    <pre>${escapeHTML(preview.text)}</pre>
+                </div>
+            </div>
+        </div>
+    `;
+}
+function isPrepareLikelyInternalTerm(keyword){
+    const text=normalizePrepareText(keyword);
+    if(!text)return false;
+    if(/openclaw|龙虾/i.test(text))return true;
+    if(/^[A-Za-z][A-Za-z0-9_-]{4,}$/.test(text)&&!/\b(ai|agent|sql|prd|okr|kpi|api|crm|erp)\b/i.test(text))return true;
+    return false;
+}
+function sanitizePrepareKeywordTranslationItem(item){
+    const keyword=normalizePrepareText(item?.jd_keyword||'关键词');
+    if(isPrepareLikelyInternalTerm(keyword)){
+        return{
+            jd_keyword:keyword,
+            meaning:'当前公开资料里还没有足够稳定的信息完成准确定义，需要在面试里把它追问成明确的业务对象、产品形态或平台能力。',
+            prep_direction:'回答时先讲你能对应上的相似能力或业务场景，再主动确认它服务谁、解决什么问题、怎么衡量价值。'
+        };
+    }
+    return{
+        jd_keyword:keyword,
+        meaning:normalizePrepareText(item?.meaning||'需要结合 JD 原文继续确认。'),
+        prep_direction:normalizePrepareText(item?.prep_direction||'面试前把这个词放回真实业务场景里理解。')
+    };
+}
+function sanitizePrepareOutputs(output,session){
+    const next=cloneData(output||{});
+    const knownBriefs=getPrepareKnownTermBriefs(session||{});
+    const keywordTranslation=(next?.research?.keyword_translation||[]).map(function(item){
+        const brief=findPrepareKnownTermBrief(item?.jd_keyword,knownBriefs);
+        if(brief){
+            return{
+                jd_keyword:brief.term,
+                meaning:brief.meaning,
+                prep_direction:brief.prep_direction
+            };
+        }
+        return sanitizePrepareKeywordTranslationItem(item);
+    });
+    knownBriefs.forEach(function(brief){
+        const exists=keywordTranslation.some(function(item){
+            return findPrepareKnownTermBrief(item.jd_keyword,[brief]);
+        });
+        if(!exists){
+            keywordTranslation.unshift({
+                jd_keyword:brief.term,
+                meaning:brief.meaning,
+                prep_direction:brief.prep_direction
+            });
+        }
+    });
+    next.research=Object.assign({},next.research||{},{keyword_translation:keywordTranslation});
+    const questionGroups=(next?.questions?.question_groups||[]).map(function(group){
+        return Object.assign({},group,{
+            questions:(group?.questions||[]).map(function(question){
+                return normalizePrepareQuestionRecord(question);
+            })
+        });
+    });
+    next.questions=Object.assign({},next.questions||{},{question_groups:questionGroups});
+    next.meta=Object.assign({},next.meta||{});
+    if(next.meta.summary){
+        next.meta.summary=String(next.meta.summary).replace(/空白简历/g,'简历信息不足');
+    }
+    return next;
+}
+function syncPrepareApplicationDraft(appId){
+    prepareState.selectedApplicationId=appId||'';
+    const app=appId?store.getApp(appId):null;
+    prepareState.appSupplement={
+        jdText:app?.jd_text||'',
+        jdUrl:app?.jd_url||'',
+        resumeId:app?.resume_id||'',
+        resumeText:''
+    };
+    prepareState.appSupplementFile=null;
+    prepareState.appSupplementParse={status:'idle',text:'',message:''};
+}
+function getPrepareApplicationDraft(app){
+    if(!app)return null;
+    const supplement=prepareState.appSupplement||{};
+    const resumeId=app.resume_id||supplement.resumeId||'';
+    const linkedResume=resumeId?store.getResume(resumeId):null;
+    const resumeText=normalizePrepareText(supplement.resumeText||linkedResume?.extracted_text||linkedResume?.notes||'');
+    const resumeFileMeta=prepareState.appSupplementFile?{
+        name:prepareState.appSupplementFile.name,
+        size:prepareState.appSupplementFile.size,
+        type:prepareState.appSupplementFile.type||'application/octet-stream'
+    }:null;
+    const jdText=normalizePrepareText(app.jd_text||supplement.jdText);
+    const jdUrl=normalizePrepareText(supplement.jdUrl||app.jd_url);
+    const hasResumeContext=Boolean(linkedResume||resumeText||resumeFileMeta);
+    return{
+        jdText,
+        jdUrl,
+        resumeId:linkedResume?.id||'',
+        linkedResume,
+        resumeText,
+        resumeFileMeta,
+        requiresJd:!hasPrepareUsableJd(jdText),
+        requiresResume:!hasResumeContext
+    };
+}
+function getPrepareSessionPayload(session){
+    const linkedResume=getPrepareLinkedResume(session);
+    return{
+        company_name:session.company_name||'',
+        role_name:session.role_name||'',
+        role_category:session.role_category||'',
+        jd_text:session.jd_text||'',
+        jd_url:session.jd_url||'',
+        resume_name:linkedResume?.file_name||session.resume_name||'',
+        resume_text:session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'',
+        resume_file_meta:session.resume_file_meta||null,
+        resume_source:session.resume_source||'',
+        resume_verified:!!session.resume_verified
+    };
+}
+function getPrepareResumeSnapshot(session){
+    const linkedResume=getPrepareLinkedResume(session);
+    const rawText=normalizePrepareText(session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'');
+    const tags=(linkedResume?.tags||[]).map(item=>normalizePrepareText(item)).filter(Boolean);
+    const fragments=rawText.split(/[\n。；;]+/).map(item=>normalizePrepareText(item)).filter(Boolean);
+    const metricEvidence=fragments.filter(item=>/\d/.test(item)).slice(0,6);
+    const actionEvidence=fragments.filter(item=>/(负责|主导|推动|搭建|分析|优化|增长|策略|产品|运营|项目|协调|落地|上线|复盘)/.test(item)).slice(0,6);
+    const evidenceLines=[...new Set([...tags,...metricEvidence,...actionEvidence,...fragments.slice(0,8)])].slice(0,8);
+    const gaps=[];
+    if(!rawText)gaps.push('当前没有可用的简历摘要或项目描述，无法确认可直接举证的经历。');
+    if(evidenceLines.length<3)gaps.push('当前简历线索偏少，建议补充项目背景、你的动作、结果数字和个人贡献。');
+    return{
+        resume_name:linkedResume?.file_name||session.resume_name||'未命名简历',
+        raw_text:rawText,
+        tags,
+        evidence_lines:evidenceLines,
+        metric_evidence:metricEvidence,
+        gaps
+    };
+}
+function getPrepareSessionStatusLabel(session){
+    switch(session?.status){
+        case'generated':return'已生成';
+        case'error':return'生成失败';
+        case'pending':return'准备中';
+        default:return'草稿';
+    }
+}
+function safeParsePrepareJson(text){
+    const raw=String(text||'').trim();
+    if(!raw)throw new Error('AI 返回为空');
+    const fenced=raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate=(fenced?fenced[1]:raw).trim();
+    try{
+        return JSON.parse(candidate);
+    }catch(error){
+        const start=candidate.indexOf('{');
+        const end=candidate.lastIndexOf('}');
+        if(start>=0&&end>start){
+            return JSON.parse(candidate.slice(start,end+1));
+        }
+        throw error;
+    }
+}
+function getPrepareMessageText(message){
+    if(typeof message?.content==='string')return message.content;
+    if(Array.isArray(message?.content)){
+        return message.content.map(function(part){
+            if(typeof part==='string')return part;
+            if(part?.type==='text'&&typeof part.text==='string')return part.text;
+            if(typeof part?.content==='string')return part.content;
+            return'';
+        }).join('\n').trim();
+    }
+    if(typeof message?.text==='string')return message.text;
+    if(typeof message?.reasoning_content==='string'&&message.reasoning_content.includes('{'))return message.reasoning_content;
+    return'';
+}
+function buildPrepareSessionMessagesClient(input){
+    const resumeSnapshot=getPrepareResumeSnapshot(input);
+    const knownTermBriefs=getPrepareKnownTermBriefs(input);
+    const analysisPlaybooks=getPrepareAnalysisPlaybooks(input);
+    const payload={
+        company_name:normalizePrepareText(input.company_name||'目标公司'),
+        role_name:normalizePrepareText(input.role_name||'目标岗位'),
+        role_category:normalizePrepareText(input.role_category),
+        jd_text:normalizePrepareText(input.jd_text),
+        jd_url:normalizePrepareText(input.jd_url),
+        resume_name:normalizePrepareText(input.resume_name),
+        resume_text:normalizePrepareText(input.resume_text),
+        resume_file_meta:input.resume_file_meta||null,
+        resume_snapshot:resumeSnapshot,
+        external_term_briefs:knownTermBriefs,
+        analysis_playbooks:analysisPlaybooks
+    };
+    return[
+        {
+            role:'system',
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）所有问题和建议都必须尽量回扣 JD；7）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；8）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；9）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；10）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+        },
+        {
+            role:'user',
+            content:`请基于以下准备会话信息生成面试准备工作台 JSON：\n${JSON.stringify(payload,null,2)}`
+        }
+    ];
+}
+function buildPrepareAnswerMessagesClient(input){
+    const resumeSnapshot=getPrepareResumeSnapshot(input);
+    const knownTermBriefs=getPrepareKnownTermBriefs(input);
+    const analysisPlaybooks=getPrepareAnalysisPlaybooks(input);
+    const payload={
+        company_name:normalizePrepareText(input.company_name||'目标公司'),
+        role_name:normalizePrepareText(input.role_name||'目标岗位'),
+        role_category:normalizePrepareText(input.role_category),
+        jd_text:normalizePrepareText(input.jd_text),
+        resume_name:normalizePrepareText(input.resume_name),
+        resume_text:normalizePrepareText(input.resume_text),
+        resume_snapshot:resumeSnapshot,
+        prep_focus:input.prep_focus||[],
+        prep_keywords:input.prep_keywords||[],
+        external_term_briefs:knownTermBriefs,
+        analysis_playbooks:analysisPlaybooks,
+        question:normalizePrepareText(input.question),
+        question_type:normalizePrepareText(input.question_type),
+        source:normalizePrepareText(input.source),
+        recommended_frameworks:input.recommended_frameworks||[],
+        default_framework:normalizePrepareText(input.default_framework),
+        framework_type:normalizePrepareText(input.framework_type||'STAR')
+    };
+    return[
+        {
+            role:'system',
+            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，不是完整标准答案。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务与行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）copyable_outline 可以使用占位符，比如 [结果数字]、[项目背景]，不能假装用户已经做过。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
+        },
+        {
+            role:'user',
+            content:`请基于以下信息生成回答骨架 JSON：\n${JSON.stringify(payload,null,2)}`
+        }
+    ];
+}
+async function requestPrepareDirectAI(messages,input,kind){
+    const config=getPrepareConfig();
+    const apiKey=normalizePrepareText(config.apiKey);
+    if(!apiKey)throw new Error('浏览器直连模式需要先填写 DeepSeek API Key。');
+    const lookupDigest=await buildPrepareExternalResearchDigest(input||{},kind||'session');
+    const conversation=buildPrepareLookupAugmentedMessages(messages,lookupDigest);
+    const attemptConfigs=[
+        {jsonMode:true,maxTokens:kind==='answer'?2400:5200},
+        {jsonMode:false,maxTokens:kind==='answer'?2600:5600}
+    ];
+    for(const attempt of attemptConfigs){
+        let response;
+        try{
+            response=await fetch(`${getPrepareDirectBase()}/chat/completions`,{
+                method:'POST',
+                headers:{
+                    'Content-Type':'application/json',
+                    'Authorization':`Bearer ${apiKey}`
+                },
+                body:JSON.stringify({
+                    model:config.model||'deepseek-v4-pro',
+                    temperature:0.2,
+                    stream:false,
+                    max_tokens:attempt.maxTokens,
+                    response_format:attempt.jsonMode?{type:'json_object'}:{type:'text'},
+                    thinking:{type:'disabled'},
+                    messages:conversation
+                })
+            });
+        }catch(error){
+            throw new Error('浏览器直连请求失败。请确认网络正常，并检查 DeepSeek 是否允许当前浏览器直接访问。');
+        }
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok){
+            throw new Error(data?.error?.message||data?.error||`DeepSeek 请求失败（${response.status}）`);
+        }
+        const message=data?.choices?.[0]?.message||{};
+        const content=getPrepareMessageText(message)||String(data?.choices?.[0]?.text||'').trim();
+        if(!content)continue;
+        try{
+            const output=safeParsePrepareJson(content);
+            return Object.assign({},output,{
+                meta:Object.assign({},output?.meta||{},{
+                    provider:'DeepSeek',
+                    model:config.model||'deepseek-v4-pro',
+                    source:'direct'
+                })
+            });
+        }catch(error){
+            continue;
+        }
+    }
+    throw new Error((config.model||'deepseek-v4-pro')==='deepseek-v4-flash'?'DeepSeek 这次没有稳定返回结构化结果。请切到 V4 Pro 再试一次。':'DeepSeek 这次没有稳定返回结构化结果。我已经自动重试过安全路径，你可以再点一次重新生成。');
+}
+async function requestPrepareSessionAI(session){
+    if(getPrepareConfig().mode==='direct'){
+        const payload=getPrepareSessionPayload(session);
+        return requestPrepareDirectAI(buildPrepareSessionMessagesClient(payload),payload,'session');
+    }
+    const response=await fetch(`${getPrepareApiBase()}/api/prepare/session`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(getPrepareSessionPayload(session))
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||!data?.ok||!data?.output)throw new Error(data?.error||'AI 准备工作台生成失败');
+    return data.output;
+}
+async function requestPrepareAnswerAI(session,question,framework){
+    const payload=Object.assign({},getPrepareSessionPayload(session),{
+        question_id:question.id,
+        question:question.question,
+        question_type:question.question_type||'',
+        source:question.source||'',
+        recommended_frameworks:question.recommended_frameworks||[],
+        default_framework:question.default_framework||'',
+        framework_type:framework||'STAR',
+        prep_focus:session.outputs?.focus?.best_experiences||[],
+        prep_keywords:session.outputs?.research?.keyword_translation||[]
+    });
+    if(getPrepareConfig().mode==='direct'){
+        return requestPrepareDirectAI(buildPrepareAnswerMessagesClient(payload),payload,'answer');
+    }
+    const response=await fetch(`${getPrepareApiBase()}/api/prepare/answer`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||!data?.ok||!data?.output)throw new Error(data?.error||'AI 回答骨架生成失败');
+    return data.output;
+}
+function getPrepareSummaryText(session){
+    const linkedResume=getPrepareLinkedResume(session);
+    const fragments=[
+        session.company_name,
+        session.role_name,
+        session.role_category,
+        session.jd_text,
+        session.resume_text,
+        linkedResume?.file_name,
+        linkedResume?.notes,
+        (linkedResume?.tags||[]).join(' ')
+    ];
+    return fragments.filter(Boolean).join(' ').toLowerCase();
+}
+function getPrepareLens(session){
+    const text=getPrepareSummaryText(session);
+    const lensDefs=[
+        {key:'product',label:'产品 / 增长',summary:'更看重业务判断、用户理解、拆解问题与推动落地。',keywords:['产品','product','增长','growth','用户','留存','转化','策略']},
+        {key:'operations',label:'运营 / 项目推进',summary:'更看重执行节奏、跨团队协作、活动或流程推进。',keywords:['运营','operation','活动','内容','社群','流程','推进','项目']},
+        {key:'data',label:'数据 / 分析',summary:'更看重指标理解、分析框架、业务洞察和表达结论。',keywords:['数据','analysis','analytics','sql','指标','建模','分析','dashboard']},
+        {key:'strategy',label:'商业分析 / 策略',summary:'更看重结构化思考、case 拆解和商业判断。',keywords:['商业','strategy','咨询','分析师','市场','行业','规划','case']},
+        {key:'pm',label:'项目 / 协调',summary:'更看重多方沟通、项目节奏和复杂事项收束能力。',keywords:['项目','program','跨部门','stakeholder','协同','交付','上线']}
+    ];
+    const scored=lensDefs.map(function(def){
+        const score=def.keywords.reduce((total,keyword)=>total+(text.includes(keyword)?1:0),0);
+        return{def,score};
+    }).sort((a,b)=>b.score-a.score);
+    return scored[0].score>0?scored[0].def:lensDefs[0];
+}
+function buildPrepareKeywordTranslation(session,lens){
+    const jd=session.jd_text||'';
+    const knownBriefs=getPrepareKnownTermBriefs(session);
+    if(knownBriefs.length){
+        return knownBriefs.slice(0,4).map(function(brief){
+            return{
+                jd_keyword:brief.term,
+                meaning:brief.meaning,
+                prep_direction:brief.prep_direction
+            };
+        });
+    }
+    const dictionary=[
+        {key:'跨部门',meaning:'说明岗位需要在信息不完整的情况下推动多人协同。',direction:'准备一个你对齐目标、推进节奏、处理分歧的案例。'},
+        {key:'数据',meaning:'说明面试官会关注你如何看指标、找问题、给判断。',direction:'准备一个从指标到结论再到动作的完整例子。'},
+        {key:'增长',meaning:'说明岗位会关注转化、留存、用户价值或规模化。',direction:'准备一个你如何定义目标、拆增长杠杆、衡量结果的案例。'},
+        {key:'策略',meaning:'说明岗位会考你如何做判断、取舍与优先级。',direction:'准备一个你如何比较选项并解释取舍的故事。'},
+        {key:'owner',meaning:'说明岗位强调独立负责和结果交付。',direction:'准备一个你主导推进并拿到清晰结果的项目。'},
+        {key:'communication',meaning:'说明岗位会看表达、协作和影响力。',direction:'准备一个你和不同角色对齐目标并拿到支持的经历。'},
+        {key:'sql',meaning:'说明岗位需要较强的数据动手与验证能力。',direction:'准备一个你自己下钻数据、找到问题并推动动作的例子。'},
+        {key:'用户',meaning:'说明岗位会看你是否真的理解用户需求与场景。',direction:'准备一个你如何理解用户并改变方案的案例。'}
+    ];
+    const hits=dictionary.filter(item=>jd.toLowerCase().includes(item.key.toLowerCase())).slice(0,4);
+    if(hits.length)return hits.map(item=>({jd_keyword:item.key,meaning:item.meaning,prep_direction:item.direction}));
+    return[
+        {jd_keyword:lens.label,meaning:`这份岗位更偏向 ${lens.label} 视角，面试官会先确认你是否理解业务与角色价值。`,prep_direction:'准备一段 60 秒岗位理解，回答这个岗位为什么存在、解决什么问题。'},
+        {jd_keyword:'结果表达',meaning:'JD 没有写明的部分，往往会通过追问结果来判断真实水平。',prep_direction:'把你最相关的一段经历补齐目标、动作、结果和复盘。'},
+        {jd_keyword:'协作与判断',meaning:'大多数岗位最终都会回到推进和判断能力。',prep_direction:'准备一个你处理分歧、推进复杂事项的故事。'}
+    ];
+}
+function getPrepareResumeSignals(session){
+    const linkedResume=getPrepareLinkedResume(session);
+    const tags=linkedResume?.tags||[];
+    const fileName=linkedResume?.file_name||session.resume_name||'当前简历';
+    const notes=session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'';
+    const noteParts=String(notes||'').split(/[\n。；;]+/).map(part=>part.trim()).filter(Boolean).slice(0,3);
+    const tagParts=tags.slice(0,3);
+    const entries=[...tagParts,...noteParts];
+    const hasConcreteEntries=entries.length>0;
+    if(!entries.length)entries.push('当前简历缺少直接证据');
+    return{fileName,entries,hasConcreteEntries};
+}
+function buildPrepareOutputsFallback(session){
+    const lens=getPrepareLens(session);
+    const translation=buildPrepareKeywordTranslation(session,lens);
+    const resumeSignals=getPrepareResumeSignals(session);
+    const companyName=session.company_name||'目标公司';
+    const roleName=session.role_name||'目标岗位';
+    const category=session.role_category||lens.label;
+    const experiences=resumeSignals.entries.map(function(entry,index){
+        const isGap=entry==='当前简历缺少直接证据';
+        return{
+            resume_section:isGap?'当前简历缺少直接证据':(index===0?resumeSignals.fileName:`经历线索 ${index+1}`),
+            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容能直接支撑 ${roleName} 对 ${index===0?'核心判断':'补充能力'} 的要求。`,
+            highlight_points:[
+                isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`把这段经历中的业务背景、目标和你真正负责的部分讲清楚`,
+                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个': '补充一组能够体现结果的数字或变化',
+                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`把它和 ${roleName} 需要解决的问题直接连起来`
+            ],
+            possible_followups:[
+                isGap?'这段经历里你最能证明自己扛事的动作是什么？':'如果资源更少，你会怎么做取舍？',
+                isGap?'最终结果有没有任何可验证的数字或反馈？':'面试官追问结果真实性时，你会拿什么细节证明？'
+            ],
+            raw:entry
+        };
+    });
+    const companyOverview={
+        one_liner:`围绕 ${companyName} 的这次准备，建议先从 ${lens.label} 视角理解业务，再把你的经历映射到 ${roleName} 的结果目标上。`,
+        business_lines:[
+            `先确认 ${companyName} 的核心收入或核心产品来自哪里，再判断这个岗位更靠近哪条业务线。`,
+            `如果 JD 更强调 ${category}，优先准备与业务增长、效率提升或协同推进相关的案例。`
+        ],
+        products_services:[
+            '梳理 1 到 2 个你最可能在面试里被提到的产品或服务，并准备自己的观察。',
+            '如果这是平台型业务，准备用户、供给、转化三者之间的关系理解。'
+        ],
+        business_model:`优先用“用户是谁、价值在哪里、结果如何衡量”来理解这家公司，不要只背品牌介绍。`,
+        market_position:`面试时不需要百科式地复述行业排名，但要能说清楚它和同类公司相比更像哪一类竞争者。`,
+        recent_focus:[
+            `把 JD 里的关键词翻译成业务动作，例如 ${translation[0].jd_keyword} 对应的真实工作场景是什么。`,
+            '如果岗位强调协作或 owner，准备一个你真正扛事并推动落地的故事。'
+        ]
+    };
+    const roleAnalysis={
+        role_type:lens.label,
+        target_capabilities:[
+            '业务理解',
+            '结构化表达',
+            '结果导向',
+            lens.key==='data'?'数据分析':'协作推进',
+            lens.key==='product'?'问题拆解':'角色适配'
+        ],
+        business_context:`这个岗位更像是站在 ${lens.label} 的位置，帮助业务做出判断并推动动作，而不是只完成单点执行。`,
+        interviewer_focus:[
+            `你是否理解 ${roleName} 真正服务的业务目标`,
+            '你讲的经历是否和岗位要求有直接映射',
+            '你能不能把行动、结果和个人贡献说清楚'
+        ]
+    };
+    const prepPriorities=[
+        {title:'先把岗位讲明白',reason:`这类 ${roleName} 面试通常先判断你是否真的理解岗位价值。`,what_to_prepare:['准备一段 60 秒岗位理解','说明岗位服务的业务目标','讲清最关键的 2 到 3 个能力']},
+        {title:'把最强经历提前选好',reason:'真正拉开差距的不是经历数量，而是你最先讲出的那段是否准确命中岗位。',what_to_prepare:['挑 2 到 3 段最相关经历','每段都补上目标、动作、结果','避免只说过程不说结果']},
+        {title:'提前准备追问',reason:'面试深挖往往发生在你讲完案例之后。',what_to_prepare:['准备为什么这么做','准备有没有别的方案','准备结果如何衡量']}
+    ];
+    if(lens.key==='data'){
+        prepPriorities.unshift({title:'指标与分析框架',reason:'数据/分析岗最怕只会报数字，不会解释业务意义。',what_to_prepare:['准备一个完整的指标分析案例','说明你如何判断问题优先级','说明数据如何转成动作建议']});
+    }
+    if(lens.key==='operations'||lens.key==='pm'){
+        prepPriorities.unshift({title:'推进与协同案例',reason:'这类岗位会被重点判断执行节奏和跨团队推进能力。',what_to_prepare:['准备一个多方协作案例','讲清你如何推进卡点','说明最终怎么收尾和交付']});
+    }
+    const riskWarnings=[
+        {title:'不要只讲公司印象',description:'如果只停留在品牌层面，面试官很难判断你是否理解这份岗位。',avoidance_tip:'把公司认知翻译成“这个岗位为什么存在、要解决什么问题”。'},
+        {title:'不要只讲过程',description:'很多候选人在项目经历里说了很多动作，却没有清楚交代结果。',avoidance_tip:'每段经历至少准备一组结果数字，或明确的变化描述。'},
+        {title:'避免角色模糊',description:'如果讲不清你自己到底负责什么，面试官会质疑真实贡献。',avoidance_tip:'始终把“我负责什么、我做了什么、我改变了什么”拆开说。'}
+    ];
+    const baseQuestions=[
+        {
+            group_name:'公司与岗位理解',
+            questions:[
+                {id:'company-fit',question:`为什么是 ${companyName}，而不是同类公司的其他岗位？`,question_type:'company_fit',source:'company',importance:'high'},
+                {id:'role-understanding',question:`你怎么理解 ${roleName} 这份岗位的核心价值？`,question_type:'role_understanding',source:'role',importance:'high'},
+                {id:'capability-proof',question:`如果只用一段经历证明你适合 ${roleName}，你会选哪一段？为什么？`,question_type:'company_fit',source:'resume',importance:'high'}
+            ]
+        },
+        {
+            group_name:'简历深挖',
+            questions:experiences.slice(0,3).map(function(exp,index){
+                return{id:`resume-deep-${index}`,question:`请把“${exp.raw}”这段经历讲深一点：你具体负责什么、怎么判断方向、最后结果如何？`,question_type:'resume_deep_dive',source:'resume',importance:index===0?'high':'medium'};
+            })
+        },
+        {
+            group_name:'场景 / case / 业务题',
+            questions:[
+                {id:'scenario-1',question:`如果你入职后第一个月需要快速判断 ${roleName} 最该先抓的事情，你会怎么拆？`,question_type:'case',source:'jd',importance:'high'},
+                {id:'scenario-2',question:lens.key==='data'?'如果某个核心指标突然下滑，你会如何验证原因并给出动作建议？':'如果业务目标没有达成，你会如何判断是策略问题、执行问题还是资源问题？',question_type:'case',source:'jd',importance:'high'},
+                {id:'scenario-3',question:'如果你需要协调多个角色一起推进，但大家优先级不一致，你会怎么推动？',question_type:'behavioral',source:'role',importance:'medium'}
+            ]
+        }
+    ];
+    baseQuestions.forEach(function(group){
+        group.questions=(group.questions||[]).map(normalizePrepareQuestionRecord);
+    });
+    return{
+        research:{company_overview:companyOverview,role_analysis:roleAnalysis,keyword_translation:translation},
+        focus:{prep_priorities:prepPriorities,best_experiences:experiences,risk_warnings:riskWarnings},
+        questions:{question_groups:baseQuestions},
+        meta:{lens:lens.label,summary:`围绕 ${companyName} · ${roleName} 生成了一套 ${lens.label} 视角的准备框架。`}
+    };
+}
+function getPrepareAllQuestions(session){
+    return session?.outputs?.questions?.question_groups?.flatMap(group=>group.questions||[])||[];
+}
+function getPrepareSelectedQuestion(session){
+    const questions=getPrepareAllQuestions(session);
+    if(!questions.length){
+        prepareState.selectedQuestionId=null;
+        return null;
+    }
+    const matched=questions.find(question=>question.id===prepareState.selectedQuestionId);
+    if(matched)return matched;
+    prepareState.selectedQuestionId=questions[0].id;
+    return questions[0];
+}
+function buildPrepareAnswerFrameworkFallback(session,question,framework){
+    const ctx=buildPrepareOutputsFallback(session);
+    const firstExperience=ctx.focus.best_experiences[0];
+    const jdKeyword=ctx.research.keyword_translation[0];
+    const matchedBrief=findPrepareKnownTermBrief(question?.question||'',getPrepareKnownTermBriefs(session));
+    const resumeEvidence=[firstExperience?.raw||firstExperience?.resume_section].filter(Boolean);
+    const gapNote=firstExperience?.resume_section==='当前简历缺少直接证据'?'这题当前缺少能直接支撑的简历证据，建议先补挖一段更贴近岗位目标的经历，再把结果和个人贡献讲具体。':'';
+    const commonTips=[
+        `回答时记得把内容拉回 ${session.role_name||'目标岗位'} 的目标，而不是停在泛化经历描述。`,
+        '尽量加入可验证的数字、结果变化或判断依据。',
+        '如果面试官继续追问，优先补你的个人贡献与取舍。'
+    ];
+    if(matchedBrief){
+        commonTips.unshift(`如果提到「${matchedBrief.term}」，先用一句话把它翻译成真实业务概念，再回到你对 Agent / 工作流 / 产品落地的理解。`);
+    }
+    const map={
+        STAR:{
+            structure:[
+                {section:'Situation',guidance:'先用 2 到 3 句话交代背景：业务场景、目标和当时的限制。',suggested_points:[`可以用「${firstExperience?.raw||'你最相关的一段经历'}」作为主案例。`,'交代当时为什么这个问题重要。']},
+                {section:'Task',guidance:'明确你当时真正负责的任务，而不是团队共同目标。',suggested_points:['把你的角色说清楚','说明你需要解决的核心问题']},
+                {section:'Action',guidance:'重点讲你的判断、动作和推进方式。',suggested_points:[`结合 JD 关键词「${jdKeyword?.jd_keyword||'结果表达'}」说明你为什么这么做。`,'讲一到两个关键动作，不要流水账。']},
+                {section:'Result',guidance:'最后一定要回到结果和复盘。',suggested_points:['补充数字或明确变化','说明这段经历为什么适合当前岗位']},
+            ],
+            delivery_tips:commonTips,
+            copyable_outline:`Situation：先交代背景和目标。\nTask：说明你要负责解决什么问题。\nAction：重点讲你的判断、动作和推进。\nResult：用结果和复盘收尾，并拉回当前岗位。`
+        },
+        PREP:{
+            structure:[
+                {section:'Point',guidance:'先给结论，不要绕。',suggested_points:[`直接回答你为什么适合 ${session.role_name||'这个岗位'}`,'一句话亮明观点']},
+                {section:'Reason',guidance:'解释你为什么得出这个结论。',suggested_points:['从岗位要求和你的经历匹配度讲','点出 2 个最关键的能力']},
+                {section:'Example',guidance:'举最能证明结论的一段经历。',suggested_points:[`优先使用「${firstExperience?.raw||'最相关经历'}」`,'例子里必须有动作和结果']},
+                {section:'Point',guidance:'最后收回结论。',suggested_points:['把经历和岗位需要的能力再次连接起来']}
+            ],
+            delivery_tips:commonTips,
+            copyable_outline:`Point：先给结论。\nReason：解释为什么。\nExample：用一段经历证明。\nPoint：最后再收回到岗位匹配。`
+        },
+        PAR:{
+            structure:[
+                {section:'Problem',guidance:'先定义问题，说明你为什么要介入。',suggested_points:['问题是什么','为什么重要']},
+                {section:'Action',guidance:'讲你如何推进、如何判断、如何协调。',suggested_points:['你的关键动作','你的取舍','你解决的卡点']},
+                {section:'Result',guidance:'讲结果和影响。',suggested_points:['结果数字','后续影响','为什么说明你适合这个岗位']}
+            ],
+            delivery_tips:commonTips,
+            copyable_outline:`Problem：问题是什么。\nAction：你做了什么。\nResult：结果如何，以及它为什么有价值。`
+        },
+        SCQA:{
+            structure:[
+                {section:'Situation',guidance:'先说背景和业务环境。',suggested_points:['业务在什么阶段','为什么这个问题重要']},
+                {section:'Complication',guidance:'讲清冲突或复杂性。',suggested_points:['为什么这件事难','有哪些限制']},
+                {section:'Question',guidance:'把真正的问题亮出来。',suggested_points:['核心要判断什么','核心要解决什么']},
+                {section:'Answer',guidance:'给你的拆解和答案。',suggested_points:[`结合 ${session.role_name||'岗位'} 视角给出清晰结构`,'用两到三层逻辑回答']}
+            ],
+            delivery_tips:commonTips,
+            copyable_outline:`Situation：背景。\nComplication：冲突或复杂性。\nQuestion：真正的问题是什么。\nAnswer：你的结构化回答。`
+        },
+        FREE:{
+            structure:[
+                {section:'开场',guidance:'先回答问题，不要铺垫太久。',suggested_points:['先给结论','明确你最想让面试官记住什么']},
+                {section:'主体',guidance:'用一段最相关经历或判断展开。',suggested_points:['说动作','说结果','说个人贡献']},
+                {section:'收束',guidance:'最后把内容拉回岗位匹配。',suggested_points:[`说明这段内容为什么能证明你适合 ${session.role_name||'这个岗位'}`]}
+            ],
+            delivery_tips:commonTips,
+            copyable_outline:`先回答问题，再用最相关的经历或判断展开，最后收回到岗位匹配。`
+        }
+    };
+    const current=map[framework]||map.STAR;
+    if(matchedBrief&&current.structure?.[0]){
+        current.structure[0].suggested_points.unshift(`如果问题里出现「${matchedBrief.term}」，可以先说明：它在公开语境里通常指 ${matchedBrief.meaning}`);
+    }
+    return{
+        question_id:question.id,
+        framework_type:framework,
+        structure:current.structure,
+        delivery_tips:current.delivery_tips,
+        copyable_outline:current.copyable_outline,
+        resume_evidence_used:resumeEvidence,
+        gap_note:gapNote
+    };
+}
+async function generatePrepareOutputs(session){
+    const aiOutput=sanitizePrepareOutputs(await requestPrepareSessionAI(session),session);
+    return Object.assign({},aiOutput,{
+        meta:Object.assign({},aiOutput.meta||{},{
+            provider:aiOutput?.meta?.provider||getPrepareConfig().provider,
+            model:aiOutput?.meta?.model||getPrepareConfig().model,
+            source:'ai'
+        }),
+        answer_cache:aiOutput.answer_cache||{}
+    });
+}
+async function generatePrepareAnswerFramework(session,question,framework){
+    const cached=session?.outputs?.answer_cache?.[question.id]?.[framework];
+    if(cached)return cached;
+    const aiAnswer=await requestPrepareAnswerAI(session,question,framework);
+    return Object.assign({},aiAnswer,{
+        framework_type:framework,
+        source:'ai'
+    });
+}
+async function hydratePrepareSessionResumeContext(session){
+    if(!session)return session;
+    const linkedResume=getPrepareLinkedResume(session);
+    if(!linkedResume)return session;
+    const supplementalSummary=['manual_summary','linked_resume_notes','linked_resume_notes_plus_summary'].includes(session.resume_source)?session.resume_text:'';
+    const resolved=await resolvePrepareResumeContext({
+        linkedResume,
+        resumeSummary:supplementalSummary,
+        resumeNameFallback:session.resume_name
+    });
+    const patch={
+        resume_name:resolved.resume_name||session.resume_name||linkedResume.file_name||'',
+        resume_text:resolved.resume_text,
+        resume_file_meta:resolved.resume_file_meta||session.resume_file_meta||null,
+        resume_source:resolved.resume_source,
+        resume_verified:resolved.resume_verified
+    };
+    const hasChanged=['resume_name','resume_text','resume_source','resume_verified'].some(function(key){
+        return JSON.stringify(session[key]??null)!==JSON.stringify(patch[key]??null);
+    })||JSON.stringify(session.resume_file_meta||null)!==JSON.stringify(patch.resume_file_meta||null);
+    if(!hasChanged)return session;
+    await store.updatePrepareSession(session.id,patch);
+    return store.getPrepareSession(session.id)||Object.assign({},session,patch);
+}
+async function createPrepareSessionFromApp(appId){
+    const app=store.getApp(appId);
+    if(!app)return null;
+    const existing=store.prepareSessions.find(session=>session.source_type==='application'&&session.application_id===appId);
+    if(existing){
+        prepareState.selectedSessionId=existing.id;
+        prepareState.activeTab='research';
+        prepareState.screen='workspace';
+        return existing;
+    }
+    const draft=getPrepareApplicationDraft(app);
+    if(!draft||draft.requiresJd){
+        toast(`请先补完整 JD 文本，至少 ${PREP_MIN_JD_LENGTH} 个字后再生成。`,'error');
+        return null;
+    }
+    if(draft.requiresResume){
+        toast('这条投递还没有简历信息。请先选择已有简历、上传临时简历，或填写简历摘要。','error');
+        return null;
+    }
+    let resumeContext;
+    try{
+        resumeContext=await resolvePrepareResumeContext({
+            linkedResume:draft.linkedResume,
+            resumeFile:prepareState.appSupplementFile,
+            resumeSummary:draft.resumeText,
+            resumeNameFallback:draft.linkedResume?.file_name||''
+        });
+    }catch(error){
+        toast(error instanceof Error?error.message:String(error),'error');
+        return null;
+    }
+    if(!normalizePrepareText(resumeContext.resume_text)){
+        toast('没有读到可用的简历正文。请上传可读取的 PDF / DOCX / TXT / Markdown，或至少补一段简历摘要后再生成。','error');
+        return null;
+    }
+    const sessionId=crypto.randomUUID();
+    const access=await ensurePrepareExperienceAccess(sessionId);
+    if(!access||access.allowed===false)return null;
+    const payload={
+        id:sessionId,
+        source_type:'application',
+        application_id:app.id,
+        company_name:app.company_name||'',
+        role_name:app.position_title||'',
+        role_category:app.position_category||'',
+        jd_text:draft.jdText,
+        jd_url:draft.jdUrl,
+        resume_id:draft.linkedResume?.id||null,
+        resume_name:resumeContext.resume_name,
+        resume_text:resumeContext.resume_text,
+        resume_file_meta:resumeContext.resume_file_meta,
+        resume_source:resumeContext.resume_source,
+        resume_verified:resumeContext.resume_verified,
+        status:'pending',
+        error_message:''
+    };
+    const session=await store.addPrepareSession(payload);
+    if(!session)return null;
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_prepare_session_created',{
+        source_type:'application',
+        company_name:app.company_name||'',
+        role_name:app.position_title||''
+    });
+    prepareState.screen='workspace';
+    prepareState.selectedSessionId=session.id;
+    prepareState.activeTab='research';
+    prepareState.selectedQuestionId=null;
+    prepareState.selectedFramework='STAR';
+    prepareState.sessionLoading=true;
+    prepareState.sessionError='';
+    startPrepareLoading('session');
+    renderPrepare();
+    try{
+        const outputs=await generatePrepareOutputs(session);
+        await store.updatePrepareSession(session.id,{outputs,generated_at:new Date().toISOString(),status:'generated',error_message:''});
+        const next=store.getPrepareSession(session.id);
+        prepareState.appSupplementFile=null;
+        prepareState.appSupplementParse={status:'idle',text:'',message:''};
+        const fileInput=$('#prepare-app-file');
+        if(fileInput)fileInput.value='';
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        return next;
+    }catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        prepareState.sessionError=message;
+        await store.updatePrepareSession(session.id,{status:'error',error_message:message,generated_at:new Date().toISOString()});
+        renderPrepare();
+        toast(message,'error');
+        return store.getPrepareSession(session.id);
+    }
+}
+async function createManualPrepareSession(){
+    const companyName=normalizePrepareText(prepareState.manualDraft.companyName);
+    const roleName=normalizePrepareText(prepareState.manualDraft.roleName);
+    const jdText=normalizePrepareText(prepareState.manualDraft.jdText);
+    const resumeId=normalizePrepareText(prepareState.manualDraft.resumeId);
+    const resumeText=normalizePrepareText(prepareState.manualDraft.resumeText);
+    if(!companyName||!roleName){
+        toast('请至少填写公司和岗位。','error');
+        return null;
+    }
+    if(!hasPrepareUsableJd(jdText)){
+        toast(`JD 文本太短了。请至少粘贴 ${PREP_MIN_JD_LENGTH} 个字，避免生成失真内容。`,'error');
+        return null;
+    }
+    const file=prepareState.manualResumeFile;
+    const linkedResume=resumeId?store.getResume(resumeId):null;
+    let resumeContext;
+    try{
+        resumeContext=await resolvePrepareResumeContext({
+            linkedResume,
+            resumeFile:file,
+            resumeSummary:resumeText,
+            resumeNameFallback:linkedResume?.file_name||file?.name||''
+        });
+    }catch(error){
+        toast(error instanceof Error?error.message:String(error),'error');
+        return null;
+    }
+    if(!normalizePrepareText(resumeContext.resume_text)){
+        toast('没有读到可用的简历正文。请上传可读取的 PDF / DOCX / TXT / Markdown，或至少补一段简历摘要后再生成。','error');
+        return null;
+    }
+    const sessionId=crypto.randomUUID();
+    const access=await ensurePrepareExperienceAccess(sessionId);
+    if(!access||access.allowed===false)return null;
+    const payload={
+        id:sessionId,
+        source_type:'manual',
+        application_id:null,
+        company_name:companyName,
+        role_name:roleName,
+        role_category:'',
+        jd_text:jdText,
+        jd_url:'',
+        resume_id:linkedResume?.id||null,
+        resume_name:resumeContext.resume_name,
+        resume_text:resumeContext.resume_text,
+        resume_file_meta:resumeContext.resume_file_meta,
+        resume_source:resumeContext.resume_source,
+        resume_verified:resumeContext.resume_verified,
+        status:'pending',
+        error_message:''
+    };
+    const session=await store.addPrepareSession(payload);
+    if(!session)return null;
+    if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_prepare_session_created',{
+        source_type:'manual',
+        company_name:companyName,
+        role_name:roleName
+    });
+    prepareState.screen='workspace';
+    prepareState.selectedSessionId=session.id;
+    prepareState.activeTab='research';
+    prepareState.selectedQuestionId=null;
+    prepareState.selectedFramework='STAR';
+    prepareState.sessionLoading=true;
+    prepareState.sessionError='';
+    prepareState.screen='workspace';
+    startPrepareLoading('session');
+    renderPrepare();
+    try{
+        const outputs=await generatePrepareOutputs(session);
+        await store.updatePrepareSession(session.id,{outputs,generated_at:new Date().toISOString(),status:'generated',error_message:''});
+        const next=store.getPrepareSession(session.id);
+        prepareState.manualResumeFile=null;
+        prepareState.manualResumeParse={status:'idle',text:'',message:''};
+        prepareState.manualDraft={companyName:'',roleName:'',jdText:'',resumeId:'',resumeText:''};
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        const fileInput=$('#prepare-manual-file');
+        if(fileInput)fileInput.value='';
+        return next;
+    }catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        prepareState.manualResumeFile=null;
+        prepareState.manualResumeParse={status:'idle',text:'',message:''};
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        prepareState.sessionError=message;
+        await store.updatePrepareSession(session.id,{status:'error',error_message:message,generated_at:new Date().toISOString()});
+        renderPrepare();
+        toast(message,'error');
+        return store.getPrepareSession(session.id);
+    }finally{
+        const fileInput=$('#prepare-manual-file');
+        if(fileInput)fileInput.value='';
+    }
+}
+async function regeneratePrepareSession(sessionId){
+    let session=store.getPrepareSession(sessionId);
+    if(!session)return;
+    if(!hasPrepareUsableJd(session.jd_text)){
+        toast(`这套准备会话缺少完整 JD。请补齐至少 ${PREP_MIN_JD_LENGTH} 个字后再重新生成。`,'error');
+        return;
+    }
+    try{
+        session=await hydratePrepareSessionResumeContext(session);
+    }catch(error){
+        toast(error instanceof Error?error.message:String(error),'error');
+        return;
+    }
+    if(!normalizePrepareText(session.resume_text||'')){
+        toast('这套准备会话还没有可用的简历正文。请补一份能被读取的简历，再重新生成。','error');
+        return;
+    }
+    prepareState.sessionLoading=true;
+    prepareState.sessionError='';
+    startPrepareLoading('session');
+    renderPrepare();
+    try{
+        const outputs=await generatePrepareOutputs(session);
+        await store.updatePrepareSession(session.id,{outputs,generated_at:new Date().toISOString(),status:'generated',error_message:''});
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        prepareState.selectedQuestionId=null;
+        renderPrepare();
+        toast('已重新生成准备工作台','success');
+    }catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        prepareState.sessionLoading=false;
+        stopPrepareLoading();
+        prepareState.sessionError=message;
+        await store.updatePrepareSession(session.id,{status:'error',error_message:message,generated_at:new Date().toISOString()});
+        renderPrepare();
+        toast(message,'error');
+    }
+}
+function renderPrepareResearch(session){
+    const research=session.outputs?.research;
+    if(!research)return'<div class="prepare-empty">先生成一套准备工作台，再查看背调。</div>';
+    const companyOverview=research.company_overview||{};
+    const businessLines=Array.isArray(companyOverview.business_lines)?companyOverview.business_lines:[];
+    const productsServices=Array.isArray(companyOverview.products_services)?companyOverview.products_services:[];
+    const recentFocus=Array.isArray(companyOverview.recent_focus)?companyOverview.recent_focus:[];
+    const isDetailed=prepareState.companyOverviewMode==='detailed';
+    return `
+        <div class="prepare-grid prepare-grid-two">
+            <article class="prepare-card-surface prepare-section-shell${isDetailed?' prepare-card-span-all':''}">
+                <div class="prepare-shell-head">
+                    <div>
+                        <div class="prepare-section-kicker">公司与业务速览</div>
+                    </div>
+                    <div class="prepare-view-switch" role="tablist" aria-label="公司与业务速览视图切换">
+                        <button type="button" class="prepare-view-btn${!isDetailed?' is-active':''}" data-prepare-company-mode="simple">简单版</button>
+                        <button type="button" class="prepare-view-btn${isDetailed?' is-active':''}" data-prepare-company-mode="detailed">详尽版</button>
+                    </div>
+                </div>
+                <h3>${escapeHTML(session.company_name||'目标公司')}</h3>
+                <p>${escapeHTML(companyOverview.one_liner||'')}</p>
+                ${isDetailed?`
+                    <div class="prepare-detail-stack">
+                        <section class="prepare-detail-item">
+                            <strong>核心业务线</strong>
+                            <ul class="prepare-bullet-list">${businessLines.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
+                        </section>
+                        ${productsServices.length?`
+                            <section class="prepare-detail-item">
+                                <strong>产品与服务</strong>
+                                <ul class="prepare-bullet-list">${productsServices.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
+                            </section>
+                        `:''}
+                        ${companyOverview.business_model?`
+                            <section class="prepare-detail-item">
+                                <strong>商业模式</strong>
+                                <p>${escapeHTML(companyOverview.business_model)}</p>
+                            </section>
+                        `:''}
+                        ${companyOverview.market_position?`
+                            <section class="prepare-detail-item">
+                                <strong>市场位置</strong>
+                                <p>${escapeHTML(companyOverview.market_position)}</p>
+                            </section>
+                        `:''}
+                        ${recentFocus.length?`
+                            <section class="prepare-detail-item">
+                                <strong>近期重点</strong>
+                                <ul class="prepare-bullet-list">${recentFocus.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
+                            </section>
+                        `:''}
+                    </div>
+                `:`
+                    <ul class="prepare-bullet-list">
+                        ${businessLines.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}
+                    </ul>
+                `}
+            </article>
+            <article class="prepare-card-surface prepare-section-shell prepare-role-analysis-card${isDetailed?' prepare-card-span-all':''}">
+                ${isDetailed?`
+                    <div class="prepare-role-analysis-copy">
+                        <div class="prepare-section-kicker">岗位视角拆解</div>
+                        <h3>${escapeHTML(research.role_analysis.role_type)}</h3>
+                        <p>${escapeHTML(research.role_analysis.business_context)}</p>
+                    </div>
+                    <div class="prepare-role-analysis-skills">
+                        <strong>面试官重点验证</strong>
+                        <div class="prepare-token-row">${research.role_analysis.target_capabilities.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+                    </div>
+                `:`
+                    <div class="prepare-section-kicker">岗位视角拆解</div>
+                    <h3>${escapeHTML(research.role_analysis.role_type)}</h3>
+                    <p>${escapeHTML(research.role_analysis.business_context)}</p>
+                    <div class="prepare-token-row">${research.role_analysis.target_capabilities.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+                `}
+            </article>
+        </div>
+        <article class="prepare-card-surface prepare-section-shell">
+            <div class="prepare-section-kicker">JD 关键词翻译</div>
+            <div class="prepare-translation-list">
+                ${research.keyword_translation.map(item=>`
+                    <div class="prepare-translation-item">
+                        <div class="prepare-translation-key">${escapeHTML(item.jd_keyword)}</div>
+                        <div class="prepare-translation-body">
+                            <p>${escapeHTML(item.meaning)}</p>
+                            <span>${escapeHTML(item.prep_direction)}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </article>
+    `;
+}
+function renderPrepareFocus(session){
+    const focus=session.outputs?.focus;
+    if(!focus)return'<div class="prepare-empty">先生成一套准备工作台，再查看准备重点。</div>';
+    return `
+        <div class="prepare-grid prepare-grid-two">
+            <article class="prepare-card-surface prepare-section-shell">
+                <div class="prepare-section-kicker">准备优先级</div>
+                <div class="prepare-stack-list">
+                    ${focus.prep_priorities.map(item=>`
+                        <section class="prepare-priority">
+                            <h3>${escapeHTML(item.title)}</h3>
+                            <p>${escapeHTML(item.reason)}</p>
+                            <ul class="prepare-bullet-list">${item.what_to_prepare.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                        </section>
+                    `).join('')}
+                </div>
+            </article>
+            <article class="prepare-card-surface prepare-section-shell">
+                <div class="prepare-section-kicker">最该讲的经历</div>
+                <div class="prepare-stack-list">
+                    ${focus.best_experiences.map(item=>`
+                        <section class="prepare-experience">
+                            <h3>${escapeHTML(item.resume_section)}</h3>
+                            <p>${escapeHTML(item.why_match)}</p>
+                            <ul class="prepare-bullet-list">${item.highlight_points.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                        </section>
+                    `).join('')}
+                </div>
+            </article>
+        </div>
+        <article class="prepare-card-surface prepare-section-shell">
+            <div class="prepare-section-kicker">风险提示</div>
+            <div class="prepare-warning-grid">
+                ${focus.risk_warnings.map(item=>`
+                    <section class="prepare-warning-card">
+                        <h3>${escapeHTML(item.title)}</h3>
+                        <p>${escapeHTML(item.description)}</p>
+                        <span>${escapeHTML(item.avoidance_tip)}</span>
+                    </section>
+                `).join('')}
+            </div>
+        </article>
+    `;
+}
+function renderPrepareQuestions(session){
+    const questions=session.outputs?.questions?.question_groups||[];
+    if(!questions.length)return'<div class="prepare-empty">先生成一套准备工作台，再查看模拟问题。</div>';
+    return `
+        <div class="prepare-question-groups">
+            ${questions.map(group=>`
+                <section class="prepare-card-surface prepare-section-shell">
+                    <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
+                    <div class="prepare-question-list">
+                        ${group.questions.map(function(rawQuestion){
+                            const question=normalizePrepareQuestionRecord(rawQuestion);
+                            return `
+                            <button class="prepare-question-card${prepareState.selectedQuestionId===question.id?' is-active':''}" type="button" data-prepare-question="${question.id}">
+                                <div class="prepare-question-main">
+                                    <strong>${escapeHTML(question.question)}</strong>
+                                    <span>${escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':'来自岗位信息')}</span>
+                                    <div class="prepare-question-frameworks">
+                                        ${question.recommended_frameworks.map(function(framework){
+                                            return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
+                                        }).join('')}
+                                    </div>
+                                </div>
+                                <em>${question.importance==='high'?'高优先级':'建议准备'}</em>
+                            </button>
+                        `;
+                        }).join('')}
+                    </div>
+                </section>
+            `).join('')}
+        </div>
+    `;
+}
+async function ensurePrepareAnswer(sessionId,questionId,framework){
+    const session=store.getPrepareSession(sessionId);
+    if(!session||!session.outputs)return;
+    const groups=session.outputs?.questions?.question_groups||[];
+    const rawQuestion=groups.flatMap(group=>group.questions||[]).find(item=>item.id===questionId);
+    const question=rawQuestion?normalizePrepareQuestionRecord(rawQuestion):null;
+    if(!question)return;
+    framework=frameworkMetaFromSelection(framework,question.recommended_frameworks);
+    const existing=session.outputs.answer_cache?.[questionId]?.[framework];
+    if(existing)return;
+    prepareState.answerLoading=true;
+    prepareState.answerError='';
+    startPrepareLoading('answer');
+    renderPrepare();
+    try{
+        const answer=await generatePrepareAnswerFramework(session,question,framework);
+        const current=store.getPrepareSession(sessionId);
+        if(!current||!current.outputs)return;
+        const answerCache=cloneData(current.outputs.answer_cache||{});
+        answerCache[questionId]=Object.assign({},answerCache[questionId]||{},{
+            [framework]:answer
+        });
+        await store.updatePrepareSession(sessionId,{
+            outputs:Object.assign({},current.outputs,{answer_cache:answerCache})
+        });
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        renderPrepare();
+    }catch(error){
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        prepareState.answerError=error instanceof Error?error.message:String(error);
+        renderPrepare();
+        toast(prepareState.answerError,'error');
+    }
+}
+async function ensurePrepareFreeAnswer(sessionId){
+    const session=store.getPrepareSession(sessionId);
+    const questionText=normalizePrepareText(prepareState.freeQuestionText);
+    if(!session||!session.outputs)return;
+    if(!questionText){
+        toast('先输入你想追问的问题。','error');
+        return;
+    }
+    const cacheKey=getPrepareFreeQuestionKey(questionText);
+    const existing=session.outputs.answer_cache?.[cacheKey]?.FREE;
+    if(existing){
+        renderPrepare();
+        return;
+    }
+    prepareState.answerLoading=true;
+    prepareState.answerError='';
+    startPrepareLoading('answer');
+    renderPrepare();
+    try{
+        const answer=await generatePrepareAnswerFramework(session,{
+            id:cacheKey,
+            question:questionText,
+            question_type:'free',
+            source:'custom'
+        },'FREE');
+        const current=store.getPrepareSession(sessionId);
+        if(!current||!current.outputs)return;
+        const answerCache=cloneData(current.outputs.answer_cache||{});
+        answerCache[cacheKey]=Object.assign({},answerCache[cacheKey]||{},{FREE:answer});
+        await store.updatePrepareSession(sessionId,{
+            outputs:Object.assign({},current.outputs,{answer_cache:answerCache})
+        });
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        renderPrepare();
+    }catch(error){
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        prepareState.answerError=error instanceof Error?error.message:String(error);
+        renderPrepare();
+        toast(prepareState.answerError,'error');
+    }
+}
+function renderPrepareAnswerBody(answer){
+    return `
+        <div class="prepare-section-kicker">回答骨架</div>
+        ${answer.resume_evidence_used?.length?`
+            <div class="prepare-answer-evidence">
+                <div class="prepare-section-kicker">简历依据</div>
+                <div class="prepare-token-row">${answer.resume_evidence_used.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+            </div>
+        `:''}
+        ${answer.gap_note?`<div class="prepare-inline-notice">${escapeHTML(answer.gap_note)}</div>`:''}
+        <div class="prepare-answer-structure">
+            ${answer.structure.map(part=>`
+                <div class="prepare-answer-block">
+                    <h3>${escapeHTML(part.section)}</h3>
+                    <p>${escapeHTML(part.guidance)}</p>
+                    <ul class="prepare-bullet-list">${part.suggested_points.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                </div>
+            `).join('')}
+        </div>
+        <div class="prepare-answer-footer">
+            <div class="prepare-answer-panel prepare-answer-tips-card">
+                <div class="prepare-section-kicker">表达提醒</div>
+                <ul class="prepare-bullet-list">${answer.delivery_tips.map(tip=>`<li>${escapeHTML(tip)}</li>`).join('')}</ul>
+            </div>
+            <div class="prepare-answer-panel prepare-answer-outline-card">
+                <div class="prepare-answer-panel-head">
+                    <div class="prepare-section-kicker">可复制骨架</div>
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-copy-outline">复制骨架</button>
+                </div>
+                <div class="prepare-answer-outline">
+                    <pre>${escapeHTML(answer.copyable_outline)}</pre>
+                </div>
+            </div>
+        </div>
+    `;
+}
+function renderPrepareAnswers(session){
+    const selectedQuestion=session&&prepareState.selectedQuestionId?getPrepareAllQuestions(session).find(function(item){
+        return item.id===prepareState.selectedQuestionId;
+    }):null;
+    const questionMeta=selectedQuestion?normalizePrepareQuestionRecord(selectedQuestion):null;
+    const availableFrameworks=questionMeta?questionMeta.recommended_frameworks:PREP_FRAMEWORKS.filter(function(item){return item.key!=='FREE';}).map(function(item){return item.key;});
+    const framework=frameworkMetaFromSelection(prepareState.selectedFramework,availableFrameworks);
+    if(questionMeta&&prepareState.selectedFramework!==framework)prepareState.selectedFramework=framework;
+    const frameworkMeta=getPrepareFrameworkMeta(framework);
+    if(framework==='FREE'){
+        const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
+        const answer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
+        return `
+            <div class="prepare-answer-flow">
+                <section class="prepare-card-surface prepare-answer-hero-card">
+                    <div class="prepare-answer-hero-copy">
+                        <div class="prepare-section-kicker">自由追问</div>
+                        <h3>${escapeHTML(frameworkMeta.label)}</h3>
+                        <p>${escapeHTML(frameworkMeta.description)}</p>
+                        <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
+                    </div>
+                    <div class="prepare-answer-hero-actions">
+                        <label class="prepare-field prepare-free-field">
+                            <span>你想怎么问</span>
+                            <textarea id="prepare-free-question" rows="5" placeholder="例如：如果面试官追问我为什么转产品，我应该怎么答？">${escapeHTML(prepareState.freeQuestionText)}</textarea>
+                            <em>会基于当前 JD 和简历上下文生成，不会凭空补故事。</em>
+                        </label>
+                        <div class="prepare-entry-actions prepare-answer-actions">
+                            <button type="button" class="btn-primary" id="prepare-generate-free-answer">生成自由回答</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="prepare-card-surface prepare-answer-surface${prepareState.answerLoading?' prepare-loading-panel':''}">
+                    ${prepareState.answerError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.answerError)}</div>`:''}
+                    ${prepareState.answerLoading?renderPrepareLoadingScene('answer'):answer?renderPrepareAnswerBody(answer):'<div class="prepare-empty">先输入一个问题，再生成回答骨架。</div>'}
+                </section>
+            </div>
+        `;
+    }
+    const question=questionMeta||getPrepareSelectedQuestion(session);
+    if(!question)return'<div class="prepare-empty">先在问题列表里选一道题，再生成回答骨架。</div>';
+    const answer=session.outputs?.answer_cache?.[question.id]?.[framework];
+    const frameworkPills=availableFrameworks.map(function(key){
+        const item=getPrepareFrameworkMeta(key);
+        return `<button type="button" class="prepare-framework-btn${framework===item.key?' is-active':''}" data-prepare-framework="${item.key}">${escapeHTML(item.label)}</button>`;
+    }).join('');
+    const questionSource=escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':'来自岗位信息');
+    const answerMeta=`
+        <section class="prepare-card-surface prepare-answer-hero-card">
+            <div class="prepare-answer-hero-copy">
+                <div class="prepare-section-kicker">回答策略</div>
+                <h3>${escapeHTML(question.question)}</h3>
+                <p>${escapeHTML(question.framework_reason||'')}</p>
+                <span>${questionSource}</span>
+            </div>
+            <div class="prepare-answer-hero-actions">
+                <div class="prepare-answer-intro">
+                    <div class="prepare-section-kicker">当前模板</div>
+                    <h3>${escapeHTML(frameworkMeta.label)}</h3>
+                    <p>${escapeHTML(frameworkMeta.description)}</p>
+                    <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
+                </div>
+                <div class="prepare-framework-switch" role="tablist">${frameworkPills}</div>
+            </div>
+        </section>
+    `;
+    if(prepareState.answerLoading&&!answer){
+        return `
+            <div class="prepare-answer-flow">
+                ${answerMeta}
+                <section class="prepare-card-surface prepare-answer-surface prepare-loading-panel">
+                    ${renderPrepareLoadingScene('answer')}
+                </section>
+            </div>
+        `;
+    }
+    if(!answer){
+        return `
+            <div class="prepare-answer-flow">
+                ${answerMeta}
+                <section class="prepare-card-surface prepare-answer-surface">
+                    ${prepareState.answerError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.answerError)}</div>`:''}
+                    <div class="prepare-empty">回答骨架还没生成出来。${prepareState.answerError?'修复后再点模板重新生成。':'点击模板或问题后会自动生成。'}</div>
+                </section>
+            </div>
+        `;
+    }
+    return `
+        <div class="prepare-answer-flow">
+            ${answerMeta}
+            <section class="prepare-card-surface prepare-answer-surface">
+                ${renderPrepareAnswerBody(answer)}
+            </section>
+        </div>
+    `;
+}
+function renderPrepareWorkbench(session){
+    const linkedApp=getPrepareLinkedApp(session);
+    const linkedResume=getPrepareLinkedResume(session);
+    const account=window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
+    const resumeStatus=getPrepareResumeStatus(session);
+    const resumePreview=getPrepareResumePreviewData({
+        linkedText:linkedResume?.extracted_text,
+        summaryText:session.resume_text
+    });
+    const generatedAt=session.generated_at?fmtDT(session.generated_at):'刚刚生成';
+    const generationMeta=session.outputs?.meta||{};
+    const prepareConfig=getPrepareConfig();
+    const modelOptions=getPrepareModelOptions();
+    const activeModel=modelOptions.find(option=>option.key===(generationMeta.model||prepareConfig.model))||modelOptions[0];
+    const summaryText=generationMeta.summary||'围绕当前岗位整理一套背调、重点、问题与回答骨架。';
+    const tabContent=session.outputs?{
+        research:renderPrepareResearch(session),
+        focus:renderPrepareFocus(session),
+        questions:renderPrepareQuestions(session),
+        answers:renderPrepareAnswers(session)
+    }[prepareState.activeTab]||renderPrepareResearch(session):`
+        <div class="prepare-state-panel${session.error_message?' is-error':''}">
+            <div class="prepare-section-kicker">${session.error_message?'生成失败':'准备中'}</div>
+            <h3>${session.error_message?'这套准备暂时没生成出来':'这套准备会话还在等待生成'}</h3>
+            <p>${escapeHTML(session.error_message||'点右上角重新生成后，我们会基于 JD 与简历重新整理一套工作台。')}</p>
+            <ul class="prepare-bullet-list">
+                <li>确认 JD 文本足够完整，最好直接粘贴岗位原文。</li>
+                <li>如果有简历摘要，尽量补上关键经历和结果。</li>
+                <li>信息补齐后重新生成，就不会靠猜测补内容。</li>
+            </ul>
+        </div>
+    `;
+    return `
+        <div class="prepare-workbench">
+            <div class="prepare-workbench-head">
+                <div>
+                    <h2>${escapeHTML(session.company_name||'目标公司')} · ${escapeHTML(session.role_name||'目标岗位')}</h2>
+                    <p>${escapeHTML(session.role_category||generationMeta.lens||'准备工作台')} · ${escapeHTML(linkedResume?.file_name||session.resume_name||'未绑定简历')} · ${generatedAt}</p>
+                    <div class="prepare-workbench-summary">${escapeHTML(summaryText)}</div>
+                    <div class="prepare-session-meta prepare-session-meta-secondary">
+                        <span>${escapeHTML(generationMeta.provider||prepareConfig.provider||'DeepSeek')}</span>
+                        <span>${escapeHTML(activeModel.label)}</span>
+                        <span>${hasPrepareUsableJd(session.jd_text)?'JD 已就位':'JD 需要补齐'}</span>
+                        <span>${escapeHTML(resumeStatus.label)}</span>
+                    </div>
+                </div>
+                <div class="prepare-workbench-actions">
+                    ${resumePreview.text?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-resume-preview">查看简历正文</button>':''}
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-regenerate">重新生成</button>
+                    ${linkedApp?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-app">查看投递</button>':''}
+                </div>
+            </div>
+            ${prepareState.sessionError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.sessionError)}</div>`:''}
+            ${renderPrepareAccessBanner(account,{showRegister:true})}
+            <div class="prepare-tabs">
+                <button type="button" class="prepare-tab${prepareState.activeTab==='research'?' is-active':''}" data-prepare-tab="research">背调</button>
+                <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
+                <button type="button" class="prepare-tab${prepareState.activeTab==='questions'?' is-active':''}" data-prepare-tab="questions">问题</button>
+                <button type="button" class="prepare-tab${prepareState.activeTab==='answers'?' is-active':''}" data-prepare-tab="answers">回答</button>
+            </div>
+            <div class="prepare-tab-panel">
+                ${tabContent}
+            </div>
+            ${renderPrepareResumePreviewOverlay(resumePreview)}
+        </div>
+    `;
+}
+function renderPrepare(){
+    const root=$('#prepare-root');
+    if(!root)return;
+    const account=window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
+    const sessions=getPrepareSessionsSorted();
+    const selectedSession=getPrepareSelectedSession();
+    const appOptions=store.apps.filter(app=>app.status!=='WITHDRAWN');
+    const prepareConfig=getPrepareConfig();
+    const modelOptions=getPrepareModelOptions();
+    const selectedAppId=prepareState.selectedApplicationId||'';
+    const selectedApp=selectedAppId?store.getApp(selectedAppId):null;
+    const appDraft=selectedApp?getPrepareApplicationDraft(selectedApp):null;
+    const manualLinkedResume=prepareState.manualDraft.resumeId?store.getResume(prepareState.manualDraft.resumeId):null;
+    const appLinkedResumeStatus=appDraft?.linkedResume
+        ?(normalizeResumeExtractedText(appDraft.linkedResume.extracted_text||'')?'正文已读取':appDraft.linkedResume.data_url?'待读取正文':appDraft.linkedResume.notes?'仅有摘要':'未读取')
+        :'未绑定';
+    const appResumePreview=selectedApp?getPrepareResumePreviewData({
+        parseText:prepareState.appSupplementParse.text,
+        linkedText:appDraft?.linkedResume?.extracted_text,
+        summaryText:prepareState.appSupplement.resumeText||appDraft?.linkedResume?.notes||''
+    }):null;
+    const manualResumePreview=getPrepareResumePreviewData({
+        parseText:prepareState.manualResumeParse.text,
+        linkedText:manualLinkedResume?.extracted_text,
+        summaryText:prepareState.manualDraft.resumeText||manualLinkedResume?.notes||''
+    });
+    const missingMessages=appDraft?[
+        appDraft.requiresJd?`补一段至少 ${PREP_MIN_JD_LENGTH} 个字的 JD 原文`:null,
+        appDraft.requiresResume?'补一份简历上下文（绑定简历、临时文件或摘要）':null
+    ].filter(Boolean):[];
+    const showWorkspace=Boolean(selectedSession)&&prepareState.screen==='workspace';
+    root.innerHTML=showWorkspace?`
+        <div class="prepare-shell prepare-shell-workspace-view">
+            <section class="prepare-workspace-screen">
+                <div class="prepare-workspace-topbar">
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-back-compose">重新填写</button>
+                    <div class="prepare-workspace-topbar-copy">
+                        <strong>${escapeHTML(selectedSession.company_name||'目标公司')} · ${escapeHTML(selectedSession.role_name||'目标岗位')}</strong>
+                        <span>${escapeHTML(selectedSession.source_type==='application'?'来自已投递岗位':'准备会话')} · ${fmtDT(selectedSession.updated_at||selectedSession.created_at)}</span>
+                    </div>
+                    <div class="prepare-workspace-topbar-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="prepare-start-new">新建分析</button>
+                    </div>
+                </div>
+                ${prepareState.sessionLoading&&selectedSession?`<div class="prepare-workbench-empty is-shellless"><div class="prepare-workbench-placeholder prepare-workbench-loading is-shellless">${renderPrepareLoadingScene('session')}</div></div>`:renderPrepareWorkbench(selectedSession)}
+            </section>
+        </div>
+    `:`
+        <div class="prepare-shell prepare-shell-compose-view">
+            <section class="prepare-compose-screen">
+                <div class="prepare-compose-hero">
+                    <div class="prepare-kicker">Prepare Session</div>
+                    <h2>先把岗位、JD 和简历上下文填完整，再一键切换到全屏分析结果。</h2>
+                    <p>这一页只负责输入与选择；点击分析后，我们会进入独立的结果工作台，不再左右挤压。</p>
+                </div>
+                ${renderPrepareAccessBanner(account,{showRegister:true})}
+                <div class="prepare-compose-grid">
+                    <div class="prepare-card-surface prepare-compose-primary">
+                        <div class="prepare-mode-switch" role="tablist">
+                            <button type="button" class="prepare-mode-btn${prepareState.mode==='application'?' is-active':''}" data-prepare-mode="application">选择已有投递</button>
+                            <button type="button" class="prepare-mode-btn${prepareState.mode==='manual'?' is-active':''}" data-prepare-mode="manual">新建准备</button>
+                        </div>
+                        <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='application'?' is-visible':''}" id="prepare-existing-panel">
+                            <div class="prepare-section-kicker">从已投递岗位开始</div>
+                            <h3>自动带入岗位与简历</h3>
+                            <p>适合已经录进系统的机会，选中后直接补齐缺的信息。</p>
+                            <div class="prepare-form-grid prepare-form-grid-wide">
+                                <label class="prepare-field prepare-field-full">
+                                    <span>选择岗位</span>
+                                    <select id="prepare-application-select">
+                                        <option value="">请选择一条投递…</option>
+                                        ${appOptions.map(app=>`<option value="${app.id}" ${selectedAppId===app.id?'selected':''}>${escapeHTML(app.company_name)} · ${escapeHTML(app.position_title)}</option>`).join('')}
+                                    </select>
+                                </label>
+                                ${selectedApp?`
+                                    <div class="prepare-application-summary prepare-field-full">
+                                        <div>
+                                            <strong>${escapeHTML(selectedApp.company_name)} · ${escapeHTML(selectedApp.position_title)}</strong>
+                                            <span>${escapeHTML(getSI(selectedApp.status).label)} · 当前简历：${escapeHTML(appDraft?.linkedResume?.file_name||'未绑定')} · ${escapeHTML(appLinkedResumeStatus)}</span>
+                                        </div>
+                                        <em>${hasPrepareUsableJd(appDraft?.jdText)?'JD 已就位':'需要补 JD'}</em>
+                                    </div>
+                                    ${appDraft?.requiresJd?`
+                                        <label class="prepare-field prepare-field-full">
+                                            <span>JD 文本</span>
+                                            <textarea id="prepare-app-jd-text" rows="5" placeholder="请直接粘贴岗位 JD 原文。">${escapeHTML(prepareState.appSupplement.jdText||'')}</textarea>
+                                            <em>至少 ${PREP_MIN_JD_LENGTH} 个字，避免 AI 只靠公司名和岗位名猜。</em>
+                                        </label>
+                                    `:''}
+                                    <label class="prepare-field">
+                                        <span>选择已有简历</span>
+                                        <select id="prepare-app-resume-select">
+                                            <option value="">暂不绑定</option>
+                                            ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.appSupplement.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label class="prepare-field prepare-upload-field">
+                                        <span>附简历文件</span>
+                                        <input type="file" id="prepare-app-file" accept=".pdf,.doc,.docx,.txt,.md">
+                                        <em id="prepare-app-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.appSupplementFile,prepareState.appSupplementParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
+                                    </label>
+                                    <label class="prepare-field prepare-field-full">
+                                        <span>简历摘要</span>
+                                        <textarea id="prepare-app-resume-text" rows="4" placeholder="补几段你最希望面试里被用到的经历、结果和项目线索。">${escapeHTML(prepareState.appSupplement.resumeText||'')}</textarea>
+                                    </label>
+                                    ${renderPrepareResumePreviewCard(appResumePreview,{
+                                        title:'当前会用于分析的简历内容',
+                                        hint:'上传 PDF / DOCX 后会优先展示解析出来的正文；如果只有摘要，这里也会明确告诉你。'
+                                    })}
+                                    ${missingMessages.length?`
+                                        <div class="prepare-inline-notice prepare-field-full">${escapeHTML(missingMessages.join('；'))}</div>
+                                    `:'<div class="prepare-inline-notice is-success prepare-field-full">JD 和简历上下文都已就位，可以直接进入分析结果。</div>'}
+                                `:''}
+                            </div>
+                            <div class="prepare-entry-actions">
+                                <button type="button" class="btn-primary" id="prepare-create-from-app">开始分析</button>
+                            </div>
+                        </div>
+                        <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='manual'?' is-visible':''}" id="prepare-manual-panel">
+                            <div class="prepare-section-kicker">新建准备工作台</div>
+                            <h3>为还没录入系统的岗位单独拉起准备会话</h3>
+                            <p>把关键输入集中在一页里填完，再进入结果工作台。</p>
+                            <div class="prepare-form-grid prepare-form-grid-wide">
+                                <label class="prepare-field">
+                                    <span>公司名</span>
+                                    <input type="text" id="prepare-manual-company" placeholder="例如：字节跳动" value="${escapeHTML(prepareState.manualDraft.companyName||'')}">
+                                </label>
+                                <label class="prepare-field">
+                                    <span>岗位名</span>
+                                    <input type="text" id="prepare-manual-role" placeholder="例如：产品经理" value="${escapeHTML(prepareState.manualDraft.roleName||'')}">
+                                </label>
+                                <label class="prepare-field prepare-field-full">
+                                    <span>JD 文本</span>
+                                    <textarea id="prepare-manual-jd" rows="5" placeholder="把职位描述直接贴进来，越完整越好。">${escapeHTML(prepareState.manualDraft.jdText||'')}</textarea>
+                                </label>
+                                <label class="prepare-field">
+                                    <span>选择已有简历（可选）</span>
+                                    <select id="prepare-manual-resume">
+                                        <option value="">不绑定现有简历</option>
+                                        ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.manualDraft.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
+                                    </select>
+                                </label>
+                                <label class="prepare-field prepare-upload-field">
+                                    <span>附简历文件（可选）</span>
+                                    <input type="file" id="prepare-manual-file" accept=".pdf,.doc,.docx,.txt,.md">
+                                    <em id="prepare-manual-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.manualResumeFile,prepareState.manualResumeParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
+                                </label>
+                                <label class="prepare-field prepare-field-full">
+                                    <span>简历摘要（可选）</span>
+                                    <textarea id="prepare-manual-resume-text" rows="4" placeholder="把你最希望 AI 用到的经历、成果、项目线索贴进来。">${escapeHTML(prepareState.manualDraft.resumeText||'')}</textarea>
+                                </label>
+                                ${renderPrepareResumePreviewCard(manualResumePreview,{
+                                    title:'当前会用于分析的简历内容',
+                                    hint:'这里会实时展示解析出的正文或你手动补的摘要，开始分析前先确认它读全了。'
+                                })}
+                            </div>
+                            <div class="prepare-entry-actions">
+                                <button type="button" class="btn-primary" id="prepare-create-manual">开始分析</button>
+                            </div>
+                        </div>
+                    </div>
+                    <aside class="prepare-compose-side">
+                        <div class="prepare-card-surface prepare-config-card">
+                            <div class="prepare-config-compact">
+                                <div>
+                                    <div class="prepare-section-kicker">AI 模型</div>
+                                    <h3>先选这次想用的 DeepSeek 档位</h3>
+                                    <p>只保留模型切换，其他预览配置都隐藏在本机环境里。</p>
+                                </div>
+                                <div class="prepare-model-switch" role="tablist">
+                                    ${modelOptions.map(option=>`
+                                        <button type="button" class="prepare-model-btn${(prepareConfig.model||'deepseek-v4-pro')===option.key?' is-active':''}" data-prepare-model="${option.key}">
+                                            <strong>${escapeHTML(option.label)}</strong>
+                                            <span>${escapeHTML(option.desc)}</span>
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
+                            <div class="prepare-section-kicker">最近会话</div>
+                            <div class="prepare-recent-list prepare-recent-list-compact">
+                                ${sessions.length?sessions.slice(0,6).map(session=>`
+                                    <button type="button" class="prepare-recent-item${prepareState.selectedSessionId===session.id?' is-active':''}" data-prepare-session="${session.id}">
+                                        <div>
+                                            <strong>${escapeHTML(session.company_name||'目标公司')} · ${escapeHTML(session.role_name||'目标岗位')}</strong>
+                                            <span>${escapeHTML(session.source_type==='application'?'来自已投递岗位':'准备会话')} · ${fmtDT(session.updated_at||session.created_at)}</span>
+                                        </div>
+                                        <em>${escapeHTML(getPrepareSessionStatusLabel(session))}</em>
+                                    </button>
+                                `).join(''):`
+                                    <div class="prepare-recent-empty">
+                                        <strong>还没有准备会话</strong>
+                                        <span>先选一个岗位，或新建一套准备。</span>
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+        </div>
+    `;
+    syncPrepareLoadingTicker();
+    $('#prepare-banner-upgrade')?.addEventListener('click',function(){
+        openPrepareUpgradeModal({account:window.rtReadCachedAccount&&window.rtReadCachedAccount()||null});
+    });
+    $('#prepare-banner-register')?.addEventListener('click',function(){
+        if(typeof window.rtStartUpgradeRegistration==='function')window.rtStartUpgradeRegistration();
+    });
+    $$('.prepare-mode-btn').forEach(button=>button.addEventListener('click',function(){
+        prepareState.mode=this.dataset.prepareMode||'application';
+        renderPrepare();
+    }));
+    $$('[data-prepare-model]').forEach(button=>button.addEventListener('click',function(){
+        savePrepareRuntimeConfig({model:this.dataset.prepareModel||'deepseek-v4-pro'});
+        renderPrepare();
+    }));
+    $('#prepare-application-select')?.addEventListener('change',function(){
+        syncPrepareApplicationDraft(this.value||'');
+        renderPrepare();
+    });
+    $('#prepare-app-jd-text')?.addEventListener('input',function(){
+        prepareState.appSupplement.jdText=this.value;
+    });
+    $('#prepare-app-resume-select')?.addEventListener('change',function(){
+        prepareState.appSupplement.resumeId=this.value||'';
+        renderPrepare();
+    });
+    $('#prepare-app-resume-text')?.addEventListener('input',function(){
+        prepareState.appSupplement.resumeText=this.value;
+    });
+    $('#prepare-app-file')?.addEventListener('change',function(){
+        prepareState.appSupplementFile=this.files&&this.files[0]?this.files[0]:null;
+        setPrepareResumeParseState('application',{status:'idle',text:'',message:''});
+        refreshPrepareResumeMetaLabel('application');
+        if(prepareState.appSupplementFile)void warmPrepareResumeFileParse('application',prepareState.appSupplementFile);
+    });
+    $('#prepare-create-from-app')?.addEventListener('click',async function(){
+        const appId=$('#prepare-application-select')?.value||'';
+        if(!appId){
+            toast('先选一条已投递岗位。','error');
+            return;
+        }
+        await withButtonBusy(this,async function(){
+            const session=await createPrepareSessionFromApp(appId);
+            if(session?.outputs){
+                renderPrepare();
+                toast('准备工作台已生成','success');
+            }
+        },'生成中...');
+    });
+    $('#prepare-manual-file')?.addEventListener('change',function(){
+        prepareState.manualResumeFile=this.files&&this.files[0]?this.files[0]:null;
+        setPrepareResumeParseState('manual',{status:'idle',text:'',message:''});
+        refreshPrepareResumeMetaLabel('manual');
+        if(prepareState.manualResumeFile)void warmPrepareResumeFileParse('manual',prepareState.manualResumeFile);
+    });
+    $('#prepare-manual-company')?.addEventListener('input',function(){
+        prepareState.manualDraft.companyName=this.value;
+    });
+    $('#prepare-manual-role')?.addEventListener('input',function(){
+        prepareState.manualDraft.roleName=this.value;
+    });
+    $('#prepare-manual-jd')?.addEventListener('input',function(){
+        prepareState.manualDraft.jdText=this.value;
+    });
+    $('#prepare-manual-resume')?.addEventListener('change',function(){
+        prepareState.manualDraft.resumeId=this.value||'';
+        renderPrepare();
+    });
+    $('#prepare-manual-resume-text')?.addEventListener('input',function(){
+        prepareState.manualDraft.resumeText=this.value;
+    });
+    $('#prepare-create-manual')?.addEventListener('click',async function(){
+        await withButtonBusy(this,async function(){
+            const session=await createManualPrepareSession();
+            if(session?.outputs){
+                renderPrepare();
+                toast('准备工作台已生成','success');
+            }
+        },'生成中...');
+    });
+    $$('[data-prepare-session]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.selectedSessionId=this.dataset.prepareSession;
+        prepareState.sessionError=store.getPrepareSession(this.dataset.prepareSession)?.error_message||'';
+        prepareState.activeTab='research';
+        prepareState.selectedQuestionId=null;
+        prepareState.screen='workspace';
+        renderPrepare();
+    }));
+    $('#prepare-back-compose')?.addEventListener('click',function(){
+        prepareState.screen='compose';
+        prepareState.showResumePreview=false;
+        renderPrepare();
+    });
+    $('#prepare-start-new')?.addEventListener('click',function(){
+        prepareState.screen='compose';
+        prepareState.selectedSessionId=null;
+        prepareState.selectedQuestionId=null;
+        prepareState.activeTab='research';
+        prepareState.showResumePreview=false;
+        renderPrepare();
+    });
+    $('#prepare-open-resume-preview')?.addEventListener('click',function(){
+        prepareState.showResumePreview=true;
+        renderPrepare();
+    });
+    $('#prepare-close-resume-preview')?.addEventListener('click',function(){
+        prepareState.showResumePreview=false;
+        renderPrepare();
+    });
+    $('#prepare-resume-overlay')?.addEventListener('click',function(event){
+        if(event.target===this){
+            prepareState.showResumePreview=false;
+            renderPrepare();
+        }
+    });
+    $$('[data-prepare-tab]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.activeTab=this.dataset.prepareTab||'research';
+        renderPrepare();
+    }));
+    $$('[data-prepare-company-mode]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.companyOverviewMode=this.dataset.prepareCompanyMode==='detailed'?'detailed':'simple';
+        renderPrepare();
+    }));
+    $$('[data-prepare-question]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.selectedQuestionId=this.dataset.prepareQuestion;
+        const session=getPrepareSelectedSession();
+        const question=session?getPrepareAllQuestions(session).find(item=>item.id===this.dataset.prepareQuestion):null;
+        prepareState.selectedFramework=getPrepareQuestionDefaultFramework(question);
+        prepareState.activeTab='answers';
+        renderPrepare();
+        if(session)ensurePrepareAnswer(session.id,prepareState.selectedQuestionId,prepareState.selectedFramework||'PREP');
+    }));
+    $$('[data-prepare-framework]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.selectedFramework=this.dataset.prepareFramework||'PREP';
+        renderPrepare();
+        const session=getPrepareSelectedSession();
+        const questionId=prepareState.selectedQuestionId;
+        if(session&&prepareState.selectedFramework==='FREE')return;
+        if(session&&questionId)ensurePrepareAnswer(session.id,questionId,prepareState.selectedFramework);
+    }));
+    $('#prepare-free-question')?.addEventListener('input',function(){
+        prepareState.freeQuestionText=this.value;
+    });
+    $('#prepare-generate-free-answer')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        if(session)withButtonBusy(this,async()=>{await ensurePrepareFreeAnswer(session.id);},'生成中...');
+    });
+    $('#prepare-regenerate')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        if(session)withButtonBusy(this,async()=>{await regeneratePrepareSession(session.id);},'生成中...');
+    });
+    $('#prepare-open-app')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        const app=session&&session.application_id?store.getApp(session.application_id):null;
+        if(app){
+            switchView('pipeline');
+            openDrawer(app.id);
+        }
+    });
+    $('#prepare-copy-outline')?.addEventListener('click',async function(){
+        const session=getPrepareSelectedSession();
+        if(!session)return;
+        const framework=prepareState.selectedFramework||'STAR';
+        const question=framework==='FREE'?null:getPrepareSelectedQuestion(session);
+        const cacheKey=framework==='FREE'?getPrepareFreeQuestionKey(prepareState.freeQuestionText):question?.id;
+        const answer=cacheKey?session.outputs?.answer_cache?.[cacheKey]?.[framework]:null;
+        if(!answer){
+            toast('先生成回答骨架。','info');
+            return;
+        }
+        try{
+            await navigator.clipboard.writeText(answer.copyable_outline);
+            toast('已复制回答骨架','success');
+        }catch(err){
+            toast('复制失败，请手动复制','error');
+        }
+    });
+}
 function switchView(v){
     curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
-    const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
-    const tm={pipeline:'投递看板',table:'表格视图',resumes:'简历文件舱',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
+    const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
+    const tm={pipeline:'投递看板',table:'表格视图',resumes:'简历文件舱',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
     $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${v}"]`)?.classList.add('active');
     $('#view-title').textContent=tm[v]||'';$('#view-subtitle').textContent=v==='pipeline'?`${store.apps.length} 条投递`:'';
-    if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
+    if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
     if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
         window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
             view:v,
@@ -1891,13 +5453,13 @@ function setFieldValue(id,value){
     const element=$(id);
     if(element)element.value=value??'';
 }
-function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-status-date').value=getStatusDateForApp(a)||(a?.applied_date||new Date().toISOString().split('T')[0]);$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';setFieldValue('#form-visa',a?.visa_requirement||HIDDEN_VISA_VALUE);$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';setFieldValue('#form-contact',a?.contact_name||'');setFieldValue('#form-next-followup',a?.next_followup_date||'');setFieldValue('#form-last-followup',a?.last_followup_date||'');setFieldValue('#form-followup-note',a?.followup_note||'');$('#form-jd-url').value=a?.jd_url||'';$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
+function openAppModal(id=null,defSt='APPLIED'){editId=id;const a=id?store.getApp(id):null;$('#modal-title').textContent=a?'编辑投递':'新建投递';$('#form-company').value=a?.company_name||'';$('#form-position').value=a?.position_title||'';fillCatSelect($('#form-category'),a?.position_category||'');$('#form-status').value=a?.status||defSt;$('#form-status-date').value=getStatusDateForApp(a)||(a?.applied_date||new Date().toISOString().split('T')[0]);$('#form-date').value=a?.applied_date||new Date().toISOString().split('T')[0];$('#form-base').value=a?.base_location||'';$('#form-preference').value=a?.preference_level||'3';setFieldValue('#form-visa',a?.visa_requirement||HIDDEN_VISA_VALUE);$('#form-channel').value=a?.source_channel||'';$('#form-channel-link').value=a?.source_link||'';$('#form-salary').value=a?.salary_expectation||'';$('#form-next-action').value=a?.next_action||'';$('#form-deadline').value=a?.next_deadline||'';setFieldValue('#form-contact',a?.contact_name||'');setFieldValue('#form-next-followup',a?.next_followup_date||'');setFieldValue('#form-last-followup',a?.last_followup_date||'');setFieldValue('#form-followup-note',a?.followup_note||'');$('#form-jd-url').value=a?.jd_url||'';setFieldValue('#form-jd-text',a?.jd_text||'');$('#form-notes').value=a?.notes||'';jdImg=a?.jd_image||null;renderJdDropzone(jdImg);const rs=$('#form-resume');rs.textContent='';const emptyOpt=document.createElement('option');emptyOpt.value='';emptyOpt.textContent='不绑定';rs.appendChild(emptyOpt);store.resumes.forEach(r=>{const opt=document.createElement('option');opt.value=r.id;opt.selected=a?.resume_id===r.id;opt.textContent=r.file_name;rs.appendChild(opt);});
 // 渲染自定义字段
 const cfa=$('#custom-fields-area');cfa.innerHTML='';
 const customCols=store.tableCols.filter(c=>c.custom);
 if(customCols.length){customCols.forEach(col=>{const val=a?.customFields?.[col.id]||'';const group=createEl('div','form-group');group.appendChild(createEl('label','',col.label));const input=document.createElement('input');input.type='text';input.className='custom-field-input';input.dataset.colId=col.id;input.value=val;input.placeholder=`输入${col.label}...`;group.appendChild(input);cfa.appendChild(group);});}
 updIntl();$('#modal-overlay').classList.add('active');}
-async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const selectedStatus=$('#form-status').value||'APPLIED';const statusDate=$('#form-status-date').value||'';const appliedDate=$('#form-date').value;if(!appliedDate){toast('请填写投递日期','error');return;}if(selectedStatus!=='WATCHING'&&!statusDate){toast('请填写当前状态日期','error');return;}const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,current_status_date:statusDate||appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:HIDDEN_VISA_VALUE,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact')?.value.trim()||'',next_followup_date:$('#form-next-followup')?.value||'',last_followup_date:$('#form-last-followup')?.value||'',followup_note:$('#form-followup-note')?.value.trim()||'',jd_url:$('#form-jd-url').value,jd_image:jdImg,notes:$('#form-notes').value,status:selectedStatus};
+async function saveApp(cont=false){const co=$('#form-company').value.trim(),po=$('#form-position').value.trim(),ca=$('#form-category').value;if(!co||!po||!ca){toast('请填写公司、岗位和类别','error');return;}const selectedStatus=$('#form-status').value||'APPLIED';const statusDate=$('#form-status-date').value||'';const appliedDate=$('#form-date').value;if(!appliedDate){toast('请填写投递日期','error');return;}if(selectedStatus!=='WATCHING'&&!statusDate){toast('请填写当前状态日期','error');return;}const rawSourceLink=$('#form-channel-link').value.trim();const normalizedSourceLink=rawSourceLink&&!/^https?:\/\//i.test(rawSourceLink)?('https://'+rawSourceLink):rawSourceLink;const d={company_name:co,position_title:po,position_category:ca,base_location:$('#form-base').value.trim(),applied_date:appliedDate,current_status_date:statusDate||appliedDate,resume_id:$('#form-resume').value||null,preference_level:$('#form-preference').value,visa_requirement:HIDDEN_VISA_VALUE,source_channel:$('#form-channel').value.trim(),source_link:normalizedSourceLink,salary_expectation:$('#form-salary').value,next_action:$('#form-next-action').value,next_deadline:$('#form-deadline').value,contact_name:$('#form-contact')?.value.trim()||'',next_followup_date:$('#form-next-followup')?.value||'',last_followup_date:$('#form-last-followup')?.value||'',followup_note:$('#form-followup-note')?.value.trim()||'',jd_url:$('#form-jd-url').value,jd_text:$('#form-jd-text')?.value.trim()||'',jd_image:jdImg,notes:$('#form-notes').value,status:selectedStatus};
 // 收集自定义字段
 const cf={};$$('.custom-field-input').forEach(inp=>{cf[inp.dataset.colId]=inp.value.trim();});if(Object.keys(cf).length)d.customFields=cf;
 if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.customFields||{},cf);
@@ -1965,6 +5527,16 @@ function renderDInfo(a){
         row.appendChild(value);
         info.appendChild(row);
     });
+    if((a.jd_text||'').trim()){
+        const row=createEl('div','info-field');
+        row.appendChild(createEl('div','info-label','JD 文本'));
+        const value=createEl('div','info-value');
+        value.style.whiteSpace='pre-wrap';
+        value.style.lineHeight='1.7';
+        value.textContent=a.jd_text;
+        row.appendChild(value);
+        info.appendChild(row);
+    }
     if(a.jd_image){
         const row=createEl('div','info-field');
         row.appendChild(createEl('div','info-label','JD截图'));
@@ -2049,9 +5621,26 @@ function renderDRefs(a){
 }
 function updDActions(){
     const acts=$('#drawer-actions');
-    if(curTab==='info')acts.innerHTML='<button class="btn-secondary" id="d-edit">编辑详情</button><button class="btn-danger" id="d-del">删除</button>';
+    if(curTab==='info')acts.innerHTML='<button class="btn-primary" id="d-prepare">开始准备</button><button class="btn-secondary" id="d-edit">编辑详情</button><button class="btn-danger" id="d-del">删除</button>';
     else if(curTab==='timeline')acts.innerHTML=`<button class="btn-secondary" id="d-edit">${tlEditing?'取消编辑':'编辑时间线'}</button><button class="btn-danger" id="d-del">删除</button>`;
     else acts.innerHTML='<button class="btn-primary" id="d-newref">+ 新建复盘</button><button class="btn-danger" id="d-del">删除</button>';
+    $('#d-prepare')?.addEventListener('click',async ()=>{
+        const app=store.getApp(curDId);
+        if(!app)return;
+        syncPrepareApplicationDraft(app.id);
+        prepareState.mode='application';
+        switchView('prepare');
+        const draft=getPrepareApplicationDraft(app);
+        if(draft&&(draft.requiresJd||draft.requiresResume)){
+            toast('这条投递还缺关键输入。先补齐 JD 或简历信息，再生成准备工作台。','info');
+            return;
+        }
+        const session=await createPrepareSessionFromApp(curDId);
+        if(session?.outputs){
+            renderPrepare();
+            toast('已切到面试准备','success');
+        }
+    });
     $('#d-edit')?.addEventListener('click',()=>{
         if(curTab==='info'){$('#drawer-overlay').classList.remove('active');openAppModal(curDId);}
         else if(curTab==='timeline'){tlEditing=!tlEditing;const a=store.getApp(curDId);renderDTL(a,tlEditing);updDActions();}
@@ -2062,7 +5651,7 @@ function updDActions(){
 $$('.drawer-tab').forEach(t=>{t.addEventListener('click',()=>{$$('.drawer-tab').forEach(x=>x.classList.remove('active'));$$('.drawer-tab-content').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(`#tab-${t.dataset.tab}`).classList.add('active');curTab=t.dataset.tab;updDActions();});});
 $('#drawer-close').addEventListener('click',()=>$('#drawer-overlay').classList.remove('active'));
 $('#drawer-overlay').addEventListener('click',e=>{if(e.target===$('#drawer-overlay'))$('#drawer-overlay').classList.remove('active');});
-function refresh(){const q=$('#global-search').value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);else if(curView==='resumes')renderResumes();else if(curView==='reflections')renderRefs();else if(curView==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(curView==='analytics')renderAnalytics();}
+function refresh(){const q=$('#global-search').value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);else if(curView==='resumes')renderResumes();else if(curView==='prepare')renderPrepare();else if(curView==='reflections')renderRefs();else if(curView==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(curView==='analytics')renderAnalytics();}
 // ---- 简历 ----
 function renderResumeStats(){
     const statsEl=$('#resumes-stats');
@@ -2610,6 +6199,19 @@ $('#resume-save').addEventListener('click',async e=>{await withButtonBusy(e.curr
     const basePayload={file_name:n,tags,notes};
     if(selFile){
         const payload=Object.assign({},basePayload,{orig:selFile.name,file_type:selFile.name.toLowerCase().endsWith('.pdf')?'PDF':'DOCX',size:selFile.size,data_url:null});
+        try{
+            const extractedText=await extractResumeTextFromFile(selFile);
+            payload.extracted_text=extractedText;
+            payload.extracted_at=new Date().toISOString();
+            payload.extraction_status='ready';
+            payload.extraction_error='';
+        }catch(error){
+            payload.extracted_text='';
+            payload.extracted_at=null;
+            payload.extraction_status='error';
+            payload.extraction_error=error instanceof Error?error.message:String(error);
+            toast('文件已保存，但这份简历正文暂时没读出来。后续准备前请优先换成 PDF、DOCX、TXT 或 Markdown。','info');
+        }
         const reader=new FileReader();
         reader.onload=async e=>{
             payload.data_url=e.target.result;
@@ -2861,6 +6463,7 @@ async function doInsight(ap,cs,rs){
     renderAIBlocks(el,result.text,'insight');
 }
 
+
 $$('#trend-granularity .chart-segment').forEach(function(button){
     button.addEventListener('click',function(){
         if(analyticsTrendGranularity===button.dataset.granularity)return;
@@ -3035,6 +6638,7 @@ document.querySelectorAll('.theme-toggle').forEach(function(themeToggleBtn){
 applyThemeMode(getStoredThemeMode(),{remember:true});
 syncThemeToggleVisibility(false);
 function init(){
+    handleBillingReturnState();
     initFilters();
     renderTableControlOptions();
     syncKanbanSortDirection();

@@ -2,7 +2,7 @@
 const SUPABASE_URL='https://bpynqhujzvadyakypfju.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJweW5xaHVqenZhZHlha3lwZmp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODIzMTAsImV4cCI6MjA5Mjk1ODMxMH0.sdU-HLNvVlyVstDUAesvKM_MX_4kBhxTd9OSTlRLXF8';
 const RT_SESSION_KEY='rt_session';
-const USER_DATA_FIELDS=['apps','resumes','refs','logs','categories','pain_points','settings','table_cols'];
+const USER_DATA_FIELDS=['apps','resumes','prepare_sessions','refs','logs','categories','pain_points','settings','table_cols'];
 
 function rtLog(label,payload){
   console.log('[RT]',label,payload||'');
@@ -17,6 +17,7 @@ function rtDefaultUserData(){
   return {
     apps:[],
     resumes:[],
+    prepare_sessions:[],
     refs:[],
     logs:[],
     categories:[],
@@ -459,6 +460,7 @@ const cloudStore={
       return typeof normalizeAppRecord==='function'?normalizeAppRecord(app):app;
     }):[];
     store.resumes=data.resumes;
+    store.prepareSessions=data.prepare_sessions||[];
     store.refs=data.refs;
     store.logs=data.logs;
     store.categories=data.categories;
@@ -471,6 +473,7 @@ const cloudStore={
     return {
       apps:rtClone(store.apps),
       resumes:rtClone(store.resumes),
+      prepare_sessions:rtClone(store.prepareSessions||[]),
       refs:rtClone(store.refs),
       logs:rtClone(store.logs),
       categories:rtClone(store.categories),
@@ -605,3 +608,185 @@ const cloudStore={
     return true;
   }
 };
+
+function rtRpcHeaders(token){
+  return {
+    'Content-Type':'application/json',
+    'apikey':SUPABASE_KEY,
+    'Authorization':'Bearer '+(token||SUPABASE_KEY)
+  };
+}
+
+async function rtRpcCall(name,body,token){
+  return sb.requestJson(SUPABASE_URL+'/rest/v1/rpc/'+name,{
+    method:'POST',
+    headers:rtRpcHeaders(token),
+    body:JSON.stringify(body||{})
+  });
+}
+
+async function rtInvokeEdgeFunction(name,body,token){
+  return sb.requestJson(SUPABASE_URL+'/functions/v1/'+name,{
+    method:'POST',
+    headers:rtRpcHeaders(token),
+    body:JSON.stringify(body||{})
+  });
+}
+
+function rtGetGuestIdentityIdSafe(){
+  if(typeof window!=='undefined'&&typeof window.rtGetGuestIdentityId==='function')return window.rtGetGuestIdentityId();
+  return '';
+}
+
+function rtReadCachedAccountSafe(){
+  if(typeof window!=='undefined'&&typeof window.rtReadCachedAccount==='function')return window.rtReadCachedAccount();
+  return null;
+}
+
+function rtWriteCachedAccountSafe(account){
+  if(typeof window!=='undefined'&&typeof window.rtWriteCachedAccount==='function')window.rtWriteCachedAccount(account);
+}
+
+function rtGetAccountDisplayName(){
+  if(typeof window!=='undefined'&&typeof window.getProfileNickname==='function'){
+    const value=window.getProfileNickname();
+    if(value&&value.trim())return value.trim();
+  }
+  try{
+    const local=localStorage.getItem('rt_nickname')||'';
+    return local.trim();
+  }catch(err){
+    return '';
+  }
+}
+
+function rtNormalizeAccountPayload(payload){
+  if(!payload)return null;
+  const account=payload.account||payload;
+  return account&&typeof account==='object'?account:null;
+}
+
+const rtAccountService={
+  currentAccount:rtReadCachedAccountSafe(),
+
+  getGuestId(){
+    return rtGetGuestIdentityIdSafe();
+  },
+
+  getSessionToken(){
+    return sb.getAccessToken()||SUPABASE_KEY;
+  },
+
+  getCachedAccount(){
+    return this.currentAccount||rtReadCachedAccountSafe();
+  },
+
+  setCachedAccount(account){
+    this.currentAccount=account||null;
+    rtWriteCachedAccountSafe(account||null);
+    if(typeof window!=='undefined'){
+      window.dispatchEvent(new CustomEvent('rt:account',{detail:{account:account||null}}));
+    }
+  },
+
+  buildIdentityBody(extra){
+    const session=sb.getSession();
+    return Object.assign({
+      input_guest_id:this.getGuestId(),
+      input_display_name:rtGetAccountDisplayName(),
+      input_email:session&&session.user&&session.user.email||'',
+      input_source_channel:'resume_trail_web'
+    },extra||{});
+  },
+
+  async ensureAccount(extra){
+    const result=await rtRpcCall('rt_get_my_account',this.buildIdentityBody(extra),this.getSessionToken());
+    if(!result.ok){
+      throw new Error(result.error||'账号初始化失败');
+    }
+    const account=rtNormalizeAccountPayload(result.data);
+    this.setCachedAccount(account);
+    return account;
+  },
+
+  async logEvent(name,props){
+    const result=await rtRpcCall('rt_log_activity_event',Object.assign(this.buildIdentityBody(),{
+      input_event_name:name,
+      input_props:props||{}
+    }),this.getSessionToken());
+    if(!result.ok)throw new Error(result.error||'事件上报失败');
+    const account=rtNormalizeAccountPayload(result.data);
+    if(account)this.setCachedAccount(account);
+    return result.data;
+  },
+
+  async consumePrepareAccess(sessionKey){
+    const result=await rtRpcCall('rt_consume_prepare_access',Object.assign(this.buildIdentityBody(),{
+      input_session_key:sessionKey
+    }),this.getSessionToken());
+    if(!result.ok)throw new Error(result.error||'试用次数校验失败');
+    const payload=result.data&&typeof result.data==='object'?result.data:{};
+    const account=rtNormalizeAccountPayload(payload);
+    if(account)this.setCachedAccount(account);
+    return payload;
+  },
+
+  async startMembershipCheckout(planKey,options){
+    const session=sb.getSession();
+    if(!session||!session.user||!session.user.id){
+      throw new Error('请先注册并登录账号，再开通会员。');
+    }
+    const account=await this.ensureAccount({input_source_channel:'billing_checkout'});
+    if(!account||!account.id){
+      throw new Error('账号还没初始化完成，请稍后重试。');
+    }
+    const functionName=options&&options.functionName||'stripe-create-checkout';
+    const result=await rtInvokeEdgeFunction(functionName,{
+      plan_key:planKey,
+      method_key:options&&options.methodKey||'wechat',
+      account_id:account.id,
+      return_url:window.location.href
+    },this.getSessionToken());
+    if(!result.ok){
+      throw new Error(result.error||'创建支付链接失败');
+    }
+    const payload=result.data&&typeof result.data==='object'?result.data:{};
+    if(payload.account)this.setCachedAccount(rtNormalizeAccountPayload(payload.account));
+    if(payload.url){
+      window.location.assign(payload.url);
+      return payload;
+    }
+    throw new Error('支付链接还没准备好，请检查 Stripe 配置。');
+  },
+
+  async listAdminAccounts(){
+    const result=await rtRpcCall('rt_admin_list_accounts',{},this.getSessionToken());
+    if(!result.ok)throw new Error(result.error||'读取账号列表失败');
+    return Array.isArray(result.data)?result.data:[];
+  },
+
+  async listAdminEvents(days,limit){
+    const result=await rtRpcCall('rt_admin_list_events',{
+      input_days:days||30,
+      input_limit:limit||2000
+    },this.getSessionToken());
+    if(!result.ok)throw new Error(result.error||'读取后台事件失败');
+    return Array.isArray(result.data)?result.data:[];
+  },
+
+  async updateAdminAccount(payload){
+    const result=await rtRpcCall('rt_admin_update_account',payload||{},this.getSessionToken());
+    if(!result.ok)throw new Error(result.error||'更新账号失败');
+    return rtNormalizeAccountPayload(result.data);
+  },
+
+  async isAdmin(){
+    const result=await rtRpcCall('rt_is_admin_caller',{},this.getSessionToken());
+    if(!result.ok)return false;
+    return !!result.data;
+  }
+};
+
+if(typeof window!=='undefined'){
+  window.rtAccountService=rtAccountService;
+}

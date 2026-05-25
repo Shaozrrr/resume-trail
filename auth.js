@@ -141,6 +141,11 @@ function enterGuestMode(){
     if(typeof updIntl==='function')updIntl();
     if(typeof refresh==='function')refresh();
     if(typeof switchView==='function')switchView('pipeline');
+    if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
+        window.rtAccountService.ensureAccount({input_source_channel:'guest_mode'}).catch(function(err){
+            console.warn('[RT auth] guest ensure account failed',err);
+        });
+    }
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_workspace_entered',{
         entry:'guest_mode',
         application_count:store.apps.length,
@@ -166,10 +171,21 @@ async function checkAuth(){
         updateAppShell(true);
         updateAvatar();
         if(typeof window.rtIdentifyUser==='function')window.rtIdentifyUser(session.user,{auth_state:'authenticated'});
+        if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
+            try{
+                await window.rtAccountService.ensureAccount({
+                    input_email:session.user&&session.user.email||'',
+                    input_source_channel:'email_auth'
+                });
+            }catch(accountErr){
+                console.warn('[RT auth] ensure account failed',accountErr);
+            }
+        }
         console.log('[RT auth] active user',{userId:session.user&&session.user.id||null,email:session.user&&session.user.email||null});
         try{
             const loadResult=await cloudStore.loadInto(store);
             console.log('[RT auth] cloudStore.loadInto(store) returned',loadResult);
+            await migrateGuestStateToAccount(session);
             var localNick=localStorage.getItem('rt_nickname')||'';
             if(localNick&&localNick!==getGuestDefaultNickname()&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
                 await store.setSetting('profileNickname',localNick);
@@ -544,7 +560,97 @@ function clearLocalBusinessData(){
     store.resetState();
 }
 
+function hasGuestBusinessData(data){
+    if(!data)return false;
+    return !!((data.apps&&data.apps.length)||(data.resumes&&data.resumes.length)||(data.prepare_sessions&&data.prepare_sessions.length)||(data.refs&&data.refs.length)||(data.logs&&data.logs.length));
+}
+
+function mergeUniqueRecords(primary,secondary){
+    const map=new Map();
+    (primary||[]).forEach(function(item){
+        if(!item||!item.id)return;
+        map.set(item.id,cloneData(item));
+    });
+    (secondary||[]).forEach(function(item){
+        if(!item||!item.id)return;
+        if(!map.has(item.id))map.set(item.id,cloneData(item));
+    });
+    return Array.from(map.values());
+}
+
+function mergeStringCollections(primary,secondary){
+    const set=new Set();
+    (primary||[]).forEach(function(item){
+        const text=String(item||'').trim();
+        if(text)set.add(text);
+    });
+    (secondary||[]).forEach(function(item){
+        const text=String(item||'').trim();
+        if(text)set.add(text);
+    });
+    return Array.from(set);
+}
+
+function mergeSettingsWithGuest(currentSettings,guestSettings){
+    const current=Object.assign(getDefaultSettings(),currentSettings||{});
+    const guest=Object.assign({},guestSettings||{});
+    return {
+        intlMode:typeof current.intlMode==='boolean'?current.intlMode:!!guest.intlMode,
+        weeklyGoal:current.weeklyGoal||guest.weeklyGoal||getDefaultSettings().weeklyGoal,
+        profileNickname:current.profileNickname||guest.profileNickname||'',
+        profileAvatar:current.profileAvatar||guest.profileAvatar||'',
+        themeMode:current.themeMode||guest.themeMode||getDefaultSettings().themeMode
+    };
+}
+
+async function migrateGuestStateToAccount(session){
+    if(!window.rtGuestStore||!window.rtAccountService||!session||!session.user)return false;
+    const pending=typeof window.rtReadGuestMigrationPending==='function'?window.rtReadGuestMigrationPending():null;
+    const guestData=window.rtGuestStore.load();
+    if(!pending&&!hasGuestBusinessData(guestData))return false;
+    if(!hasGuestBusinessData(guestData)){
+        if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
+        return false;
+    }
+    const guestId=(pending&&pending.guest_id)||(typeof window.rtGetGuestIdentityId==='function'&&window.rtGetGuestIdentityId())||'';
+    try{
+        await window.rtAccountService.ensureAccount({
+            input_guest_id:guestId,
+            input_email:session.user.email||'',
+            input_source_channel:'guest_upgrade'
+        });
+        const mergedSnapshot={
+            apps:mergeUniqueRecords(store.apps,guestData.apps),
+            resumes:mergeUniqueRecords(store.resumes,guestData.resumes),
+            prepareSessions:mergeUniqueRecords(store.prepareSessions,guestData.prepare_sessions),
+            refs:mergeUniqueRecords(store.refs,guestData.refs),
+            logs:mergeUniqueRecords(store.logs,guestData.logs),
+            categories:mergeStringCollections(store.categories,guestData.categories),
+            painPoints:mergeStringCollections(store.painPoints,guestData.pain_points),
+            tableCols:normalizeTableColumns((store.tableCols||[]).concat(guestData.table_cols||[])),
+            settings:mergeSettingsWithGuest(store.settings,guestData.settings)
+        };
+        store.restore(mergedSnapshot);
+        const ok=await store.save('guest.migrateToAccount');
+        if(ok===false)throw new Error('访客数据迁移保存失败');
+        window.rtGuestStore.clear();
+        if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
+        if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_guest_data_migrated',{
+            entry:'upgrade_to_registered',
+            application_count:store.apps.length,
+            resume_count:store.resumes.length,
+            reflection_count:store.refs.length
+        });
+        return true;
+    }catch(err){
+        console.error('[RT auth] guest migration failed',err);
+        return false;
+    }
+}
+
 function onSuccess(result,meta){
+    var guestWasActive=!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled());
+    if(guestWasActive&&typeof window.rtMarkGuestMigrationPending==='function')window.rtMarkGuestMigrationPending({reason:'signup_or_login'});
     if(window.rtGuestStore)window.rtGuestStore.disable();
     clearLocalBusinessData();
     if(result&&result.user&&result.user.email){
@@ -762,6 +868,20 @@ function closeForgotModal(){
     hideForgotMsg();
 }
 
+window.rtStartUpgradeRegistration=function(){
+    if(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()){
+        if(typeof window.rtMarkGuestMigrationPending==='function')window.rtMarkGuestMigrationPending({reason:'membership_upgrade'});
+        window.rtGuestStore.disable();
+    }
+    updateAppShell(false);
+    resetVerifyStep();
+    hideForgotMsg();
+    showMsg('注册后会自动继承刚才的体验数据，再继续开通会员。',false);
+    var emailInput=document.getElementById('login-email');
+    if(emailInput)emailInput.focus();
+    window.scrollTo({top:0,behavior:'smooth'});
+};
+
 var forgotModalClose=document.getElementById('forgot-modal-close');
 if(forgotModalClose)forgotModalClose.addEventListener('click',closeForgotModal);
 var forgotCancel=document.getElementById('forgot-cancel');
@@ -895,9 +1015,40 @@ if(pwdInput)pwdInput.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&submitBtn)submitBtn.click();
 });
 
-function openProfileModal(){
+function getProfileAccountSnapshot(){
+    if(window.rtAccountService&&typeof window.rtAccountService.getCachedAccount==='function'){
+        return window.rtAccountService.getCachedAccount();
+    }
+    if(typeof window.rtReadCachedAccount==='function'){
+        return window.rtReadCachedAccount();
+    }
+    return null;
+}
+
+function getProfileMembershipLabel(account){
+    if(typeof window.rtGetAccountMembershipLabel==='function')return window.rtGetAccountMembershipLabel(account);
+    if(!account)return'试用中';
+    if(account.is_admin)return'管理员';
+    if(account.is_lifetime||account.membership_tier==='lifetime')return'永久会员';
+    if(account.membership_tier==='monthly')return'月会员';
+    return'试用中';
+}
+
+function getProfileEntitlementText(account){
+    if(typeof window.rtGetAccountEntitlementText==='function')return window.rtGetAccountEntitlementText(account);
+    if(!account)return'当前账号信息还没同步完成。';
+    return '账号权益已同步，可继续在准备页查看和使用。';
+}
+
+async function openProfileModal(){
     var isGuest=window.rtGuestStore&&window.rtGuestStore.isEnabled()&&!rtSession;
     if(!rtSession&&!isGuest)return;
+    var account=getProfileAccountSnapshot();
+    if(!account&&window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
+        try{
+            account=await window.rtAccountService.ensureAccount();
+        }catch(err){}
+    }
     var u=rtSession&&rtSession.user||{};
     var nick=isGuest?ensureGuestNickname():((store&&store.settings&&store.settings.profileNickname)||localStorage.getItem('rt_nickname')||getDefaultNicknameFromEmail(u.email)||'');
     profileAvatarDraft=(store&&store.settings&&store.settings.profileAvatar)||'';
@@ -909,10 +1060,22 @@ function openProfileModal(){
     document.getElementById('profile-login-method').textContent=isGuest?'体验模式 · 当前设备保存':(u.email||'');
     var authChipEl=document.getElementById('profile-auth-chip');
     if(authChipEl)authChipEl.textContent=isGuest?'本地体验模式':'邮箱密码登录';
+    var membershipChipEl=document.getElementById('profile-membership-chip');
+    if(membershipChipEl)membershipChipEl.textContent=getProfileMembershipLabel(account);
     var syncDescEl=document.getElementById('profile-sync-desc');
     if(syncDescEl)syncDescEl.textContent=isGuest?'昵称、偏好和标签会保存在当前设备，登录后才可同步到云端。':'昵称、偏好和标签都会跟随账号一起同步。';
     var emailEl=document.getElementById('profile-email-display');
     if(emailEl)emailEl.textContent=isGuest?'未登录，数据仅保存在本机':(u.email||'—');
+    var accountIdEl=document.getElementById('profile-account-id-display');
+    if(accountIdEl)accountIdEl.textContent=account&&account.id||'暂未生成';
+    var entitlementEl=document.getElementById('profile-membership-detail');
+    if(entitlementEl)entitlementEl.textContent=getProfileEntitlementText(account);
+    var entitlementTitleEl=document.getElementById('profile-entitlement-title');
+    if(entitlementTitleEl)entitlementTitleEl.textContent='当前账号权益：'+getProfileMembershipLabel(account);
+    var entitlementDescEl=document.getElementById('profile-entitlement-desc');
+    if(entitlementDescEl)entitlementDescEl.textContent=getProfileEntitlementText(account);
+    var registerUpgradeBtn=document.getElementById('profile-register-upgrade');
+    if(registerUpgradeBtn)registerUpgradeBtn.style.display=isGuest?'inline-flex':'none';
     var footerNoteEl=document.getElementById('profile-footer-note-text');
     if(footerNoteEl)footerNoteEl.textContent=isGuest?'当前仅保存在本地，登录后才可保存云端并多端同步':'业务数据自动保存到云端';
     var logoutBtn=document.getElementById('profile-logout');
@@ -931,6 +1094,34 @@ function openProfileModal(){
 
 var profileBtn=document.getElementById('profile-btn');
 if(profileBtn)profileBtn.addEventListener('click',openProfileModal);
+
+var profileAccountCopy=document.getElementById('profile-account-id-copy');
+if(profileAccountCopy)profileAccountCopy.addEventListener('click',async function(){
+    var value=document.getElementById('profile-account-id-display')&&document.getElementById('profile-account-id-display').textContent||'';
+    if(!value||value==='暂未生成')return;
+    try{
+        await navigator.clipboard.writeText(value);
+        this.textContent='已复制';
+        setTimeout(()=>{this.textContent='复制';},1200);
+    }catch(err){
+        this.textContent='复制失败';
+        setTimeout(()=>{this.textContent='复制';},1200);
+    }
+});
+
+var profileUpgradeBtn=document.getElementById('profile-upgrade-btn');
+if(profileUpgradeBtn)profileUpgradeBtn.addEventListener('click',function(){
+    document.getElementById('profile-modal-overlay').classList.remove('active');
+    if(typeof window.rtOpenPrepareUpgradeModal==='function'){
+        window.rtOpenPrepareUpgradeModal({account:getProfileAccountSnapshot()});
+    }
+});
+
+var profileRegisterUpgrade=document.getElementById('profile-register-upgrade');
+if(profileRegisterUpgrade)profileRegisterUpgrade.addEventListener('click',function(){
+    document.getElementById('profile-modal-overlay').classList.remove('active');
+    if(typeof window.rtStartUpgradeRegistration==='function')window.rtStartUpgradeRegistration();
+});
 
 var profileSave=document.getElementById('profile-save');
 if(profileSave)profileSave.addEventListener('click',async function(){
