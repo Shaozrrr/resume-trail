@@ -329,6 +329,14 @@ function isWeakPasswordError(result){
         message.indexOf('password is too weak')>=0;
 }
 
+function isSamePasswordNoopError(result){
+    var code=getAuthErrorCode(result).toLowerCase();
+    var message=getAuthErrorText(result).toLowerCase();
+    return code.indexOf('same_password')>=0||
+        message.indexOf('new password should be different from the old password')>=0||
+        message.indexOf('password should be different from the old password')>=0;
+}
+
 function isNetworkLikeError(result){
     var message=getAuthErrorText(result).toLowerCase();
     return !result||
@@ -794,7 +802,7 @@ if(verifyBtn)verifyBtn.addEventListener('click',async function(){
         if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_otp_verified',{flow:'signup'});
         if(pendingOtpAuth.syncPassword&&pendingOtpAuth.password){
             var updateRes=await sb.updatePassword(verifyRes.access_token,pendingOtpAuth.password);
-            if(updateRes&&updateRes.error){
+            if(updateRes&&updateRes.error&&!isSamePasswordNoopError(updateRes)){
                 showMsg(getAuthErrorText(updateRes)||'密码保存失败，请重新获取验证码后再试。',true);
                 verifyBtn.textContent='验证并进入';
                 verifyBtn.disabled=false;
