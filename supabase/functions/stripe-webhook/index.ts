@@ -2,9 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import Stripe from 'https://esm.sh/stripe@14?target=denonext'
 
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') as string, {
-  apiVersion: '2024-11-20',
-})
+const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') as string)
 const cryptoProvider = Stripe.createSubtleCryptoProvider()
 
 function json(data: unknown, status = 200) {

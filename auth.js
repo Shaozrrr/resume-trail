@@ -1036,7 +1036,6 @@ function getProfileAccountSnapshot(){
 function getProfileMembershipLabel(account){
     if(typeof window.rtGetAccountMembershipLabel==='function')return window.rtGetAccountMembershipLabel(account);
     if(!account)return'试用中';
-    if(account.is_admin)return'管理员';
     if(account.is_lifetime||account.membership_tier==='lifetime')return'永久会员';
     if(account.membership_tier==='monthly')return'月会员';
     return'试用中';

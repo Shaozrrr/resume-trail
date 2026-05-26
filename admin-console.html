@@ -6,15 +6,15 @@
     <title>履迹 · 运营后台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="admin-console.css?v=20260525-admin-console-05">
+    <link rel="stylesheet" href="admin-console.css?v=20260526-admin-console-07">
 </head>
 <body>
     <div class="admin-shell">
         <header class="admin-header">
             <div>
-                <div class="admin-kicker">Admin only</div>
+                <div class="admin-kicker">Local Console</div>
                 <h1>履迹运营后台</h1>
-                <p>只给你自己看的独立后台。这里统一看用户进入、登录注册、创建、准备消耗、会员状态与授权。</p>
+                <p>只在你本机打开的独立后台。这里统一看用户进入、登录注册、创建、准备消耗、会员状态与授权，并且可以直接改账号状态。</p>
             </div>
             <div class="admin-header-actions">
                 <div class="admin-sync-pill" id="admin-sync-pill">实时同步已开启</div>
@@ -24,8 +24,8 @@
         </header>
 
         <section class="admin-status-card" id="admin-status-card">
-            <h2 id="admin-status-title">正在验证管理员权限…</h2>
-            <p id="admin-status-desc">如果你还没在主产品登录，请先登录管理员账号，再回到这个独立后台页。</p>
+            <h2 id="admin-status-title">正在连接独立后台…</h2>
+            <p id="admin-status-desc">如果你已经在本地填好了后台 service role key，这里会直接进入实时可编辑状态；否则先展示历史快照。</p>
         </section>
 
         <main class="admin-main" id="admin-main" hidden>
@@ -50,7 +50,6 @@
                             <option value="trial">试用</option>
                             <option value="monthly">月会员</option>
                             <option value="lifetime">买断</option>
-                            <option value="admin">管理员</option>
                         </select>
                     </label>
                     <label class="admin-field">
@@ -126,7 +125,8 @@
     <div class="admin-toast-stack" id="admin-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
     <script src="ops-dashboard-data.js"></script>
+    <script src=".admin-console.local.js"></script>
     <script src="supabase.js"></script>
-    <script src="admin-console.js?v=20260525-admin-console-05"></script>
+    <script src="admin-console.js?v=20260526-admin-console-07"></script>
 </body>
 </html>

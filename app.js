@@ -1649,7 +1649,6 @@ function getPrepareBillingConfig(){
 
 function getAccountMembershipKey(account){
     if(!account)return'trial';
-    if(account.is_admin)return'admin';
     if(account.is_lifetime||account.membership_tier==='lifetime')return'lifetime';
     if(account.membership_tier==='monthly')return'monthly';
     return'trial';
@@ -1664,7 +1663,6 @@ function getMembershipRemainingDays(account){
 
 function getAccountMembershipLabel(account){
     const membership=getAccountMembershipKey(account);
-    if(membership==='admin')return'管理员';
     if(membership==='lifetime')return'永久会员';
     if(membership==='monthly')return'月会员';
     return'试用中';
@@ -1673,16 +1671,28 @@ function getAccountMembershipLabel(account){
 function getAccountEntitlementText(account){
     if(!account)return'当前账号信息还没同步完成。';
     const membership=getAccountMembershipKey(account);
-    if(membership==='admin')return'管理员账号默认拥有完整功能与无限次准备权限。';
     if(membership==='lifetime')return'当前已开通永久会员，可持续使用准备功能。';
     if(membership==='monthly'){
         const remainingDays=getMembershipRemainingDays(account);
-        if(remainingDays===null)return'当前已开通月会员，可继续不限次使用准备功能。';
-        return remainingDays>0
+        const baseText=remainingDays===null?'当前已开通月会员，可继续不限次使用准备功能。':(remainingDays>0
             ? `当前已开通月会员，还剩 ${remainingDays} 天，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`
-            : `月会员已到期，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`;
+            : `月会员已到期，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`);
+        return baseText;
     }
-    return `当前是试用账号，还可完整体验 ${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||1} 次准备。`;
+    const trialText=`当前是试用账号，还可完整体验 ${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||1} 次准备。`;
+    return trialText;
+}
+
+function accountHasFormalAccess(account){
+    if(!account)return false;
+    if(account.has_paid_access)return true;
+    if(account.is_lifetime||account.membership_tier==='lifetime')return true;
+    if(account.membership_tier==='monthly'){
+        if(!account.membership_expires_at)return true;
+        const expiry=new Date(account.membership_expires_at).getTime();
+        return !Number.isNaN(expiry)&&expiry>Date.now();
+    }
+    return false;
 }
 
 function renderPrepareAccessBanner(account,options){
@@ -1752,6 +1762,10 @@ function openPrepareUpgradeModal(accessPayload){
     const overlay=$('#prepare-upgrade-overlay');
     if(!overlay)return;
     const account=accessPayload&&accessPayload.account||window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
+    if(accountHasFormalAccess(account)){
+        toast('当前会员权益已生效，可继续不限次使用准备功能。','success');
+        return;
+    }
     const remaining=account&&typeof account.remaining_prepare_quota==='number'?account.remaining_prepare_quota:0;
     const hasPaid=!!(account&&account.has_paid_access);
     const title=$('#prepare-upgrade-title');
@@ -1808,9 +1822,16 @@ async function ensurePrepareExperienceAccess(sessionKey){
     }
     try{
         const access=await window.rtAccountService.consumePrepareAccess(sessionKey);
+        if(access&&accountHasFormalAccess(access.account||null)){
+            return Object.assign({},access,{allowed:true});
+        }
         if(access&&access.allowed===false)openPrepareUpgradeModal(access);
         return access||{allowed:true};
     }catch(error){
+        const cachedAccount=window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
+        if(accountHasFormalAccess(cachedAccount)){
+            return {allowed:true,account:cachedAccount,recoveredFromError:true};
+        }
         toast(error instanceof Error?error.message:String(error),'error');
         return {allowed:false,error:error instanceof Error?error.message:String(error)};
     }

@@ -115,6 +115,12 @@ const sb={
 
   setSession(session,label){
     if(!session)return this.clearSession(label||'setSession.empty');
+    const previous=this.getSession();
+    const previousUserId=previous&&previous.user&&previous.user.id||'';
+    const nextUserId=session&&session.user&&session.user.id||'';
+    if(previousUserId&&nextUserId&&previousUserId!==nextUserId&&typeof window!=='undefined'&&typeof window.rtWriteCachedAccount==='function'){
+      window.rtWriteCachedAccount(null);
+    }
     localStorage.setItem(RT_SESSION_KEY,JSON.stringify(session));
     rtLog(label||'session.set',{hasAccess:!!session.access_token,hasRefresh:!!session.refresh_token,userId:session.user&&session.user.id||null});
     if(window.rtDebug)window.rtDebug.update({email:session.user&&session.user.email||'-',userId:session.user&&session.user.id||'-',sessionExists:'yes'});
@@ -124,6 +130,9 @@ const sb={
 
   clearSession(label){
     localStorage.removeItem(RT_SESSION_KEY);
+    if(typeof window!=='undefined'&&typeof window.rtWriteCachedAccount==='function'){
+      window.rtWriteCachedAccount(null);
+    }
     rtLog(label||'session.clear',{});
     if(window.rtDebug)window.rtDebug.update({email:'-',userId:'-',sessionExists:'no'});
     window.dispatchEvent(new CustomEvent('rt:session',{detail:{session:null}}));

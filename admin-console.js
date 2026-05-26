@@ -1,5 +1,6 @@
 (function(){
     const LIVE_SYNC_INTERVAL=15000;
+    const ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||{};
     const EVENT_LABELS={
         rt_workspace_entered:'进入产品',
         rt_login_page_view:'打开登录页',
@@ -22,6 +23,7 @@
         lastSyncAt:'',
         liveSync:true,
         canManage:false,
+        accessMode:'snapshot',
         syncTimer:null,
         selectedIds:new Set(),
         filters:{
@@ -32,6 +34,7 @@
             rangeDays:30
         }
     };
+    let adminDataSource=null;
 
     function $(id){return document.getElementById(id);}
 
@@ -85,14 +88,89 @@
     function updateSyncPill(){
         const pill=$('admin-sync-pill');
         if(!pill)return;
-        pill.textContent=state.canManage
-            ? (state.liveSync?'实时同步已开启':'实时同步已暂停')
-            : '当前为历史快照模式';
+        if(state.accessMode==='local_service_role'){
+            pill.textContent=state.liveSync?'本地后台实时同步已开启':'本地后台实时同步已暂停';
+            return;
+        }
+        pill.textContent='当前为历史快照模式';
+    }
+
+    function hasLocalAdminConfig(){
+        return ADMIN_LOCAL_CONFIG
+            && ADMIN_LOCAL_CONFIG.mode==='local_service_role'
+            && ADMIN_LOCAL_CONFIG.supabaseUrl
+            && ADMIN_LOCAL_CONFIG.serviceRoleKey;
+    }
+
+    function createLocalAdminDataSource(config){
+        const baseUrl=String(config.supabaseUrl||'').replace(/\/$/,'');
+        const serviceRoleKey=String(config.serviceRoleKey||'').trim();
+
+        async function request(path,options){
+            const response=await fetch(baseUrl+path,Object.assign({
+                headers:{
+                    apikey:serviceRoleKey,
+                    Authorization:'Bearer '+serviceRoleKey
+                }
+            },options||{}));
+            const text=await response.text();
+            let data=null;
+            if(text){
+                try{
+                    data=JSON.parse(text);
+                }catch(err){
+                    data=text;
+                }
+            }
+            if(!response.ok){
+                const message=data&&typeof data==='object'
+                    ? (data.message||data.error_description||data.error||JSON.stringify(data))
+                    : (text||('HTTP '+response.status));
+                throw new Error(message);
+            }
+            return data;
+        }
+
+        return {
+            async listAccounts(){
+                const data=await request('/rest/v1/rt_accounts?select=*&order=last_seen_at.desc.nullslast,created_at.desc', {
+                    method:'GET'
+                });
+                return (Array.isArray(data)?data:[]).map(function(account){
+                    return {account:account};
+                });
+            },
+            async listEvents(days,limit){
+                const sinceDate=new Date(Date.now()-Math.max(1,days||30)*86400000).toISOString();
+                const path='/rest/v1/rt_activity_events?select=*&created_at=gte.'+encodeURIComponent(sinceDate)+'&order=created_at.desc&limit='+(limit||3000);
+                const data=await request(path,{method:'GET'});
+                return Array.isArray(data)?data:[];
+            },
+            async updateAccount(patch){
+                const accountId=patch&&patch.id;
+                if(!accountId)throw new Error('缺少账号 ID，无法更新。');
+                const body=Object.assign({},patch);
+                delete body.id;
+                const path='/rest/v1/rt_accounts?id=eq.'+encodeURIComponent(accountId);
+                const data=await request(path,{
+                    method:'PATCH',
+                    headers:{
+                        apikey:serviceRoleKey,
+                        Authorization:'Bearer '+serviceRoleKey,
+                        'Content-Type':'application/json',
+                        Prefer:'return=representation'
+                    },
+                    body:JSON.stringify(body)
+                });
+                const row=Array.isArray(data)?data[0]:data;
+                if(!row)throw new Error('更新成功，但没有返回账号记录。');
+                return row;
+            }
+        };
     }
 
     function getMembershipKey(account){
         if(!account)return'trial';
-        if(account.is_admin)return'admin';
         if(account.is_lifetime||account.membership_tier==='lifetime')return'lifetime';
         if(account.membership_tier==='monthly')return'monthly';
         return'trial';
@@ -100,7 +178,6 @@
 
     function formatMembership(account){
         return({
-            admin:'管理员',
             lifetime:'买断',
             monthly:'月会员',
             trial:'试用'
@@ -134,9 +211,6 @@
         }
         if(account.status==='history'){
             return '这是旧埋点快照用户，只用于历史分析，不会直接写回真实会员状态。';
-        }
-        if(membership==='admin'){
-            return '管理员账号默认拥有完整权限与无限制准备次数。';
         }
         if(membership==='lifetime'||account.is_lifetime){
             return '买断会员已生效，当前为永久有效。';
@@ -172,6 +246,18 @@
             return {
                 title:'买断已生效',
                 message:`${name} 现在是永久会员，不再受月度到期限制。`
+            };
+        }
+        if(action==='pause'){
+            return {
+                title:'账号已暂停',
+                message:`${name} 已被暂停，恢复前不会按正常会员状态使用。`
+            };
+        }
+        if(action==='activate'){
+            return {
+                title:'账号已恢复活跃',
+                message:`${name} 现在重新回到活跃状态。`
             };
         }
         return {
@@ -382,8 +468,8 @@
             }).map(function(item){return item.actor_key||item.account_id||item.id;})).size,note:'准备权限或会话触发'},
             {label:'付费 / 授权用户',value:accounts.filter(function(item){
                 const account=item.account||{};
-                return getMembershipKey(account)==='monthly'||getMembershipKey(account)==='lifetime'||account.is_admin;
-            }).length,note:'月会员 / 买断 / 管理员'}
+                return getMembershipKey(account)==='monthly'||getMembershipKey(account)==='lifetime';
+            }).length,note:'月会员 / 买断'}
         ];
         container.innerHTML=cards.map(function(card){
             return `<div class="admin-metric-card">
@@ -467,6 +553,8 @@
             const quota=account.has_paid_access?'无限制':`${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||0}`;
             const isLegacy=account.admin_source==='legacy_snapshot';
             const isReadonly=isLegacy||!state.canManage;
+            const statusToggleLabel=account.status==='paused'?'恢复活跃':'暂停账号';
+            const statusToggleAction=account.status==='paused'?'activate':'pause';
             return `<div class="admin-account-item">
                 <label class="admin-account-check">
                     <input type="checkbox" data-select-account="${escapeHTML(id)}" ${state.selectedIds.has(id)?'checked':''} ${isReadonly?'disabled':''}>
@@ -496,11 +584,14 @@
                 </div>
                 <div class="admin-account-actions">
                     ${isReadonly
-                        ? `<div class="admin-card-meta">${isLegacy?'历史访客仅用于分析，不支持直接授权':'登录管理员账号后才能实时授权'}</div>`
-                        : `<button type="button" class="admin-action-btn" data-style="highlight" data-action="trial" data-account-id="${escapeHTML(id)}">+1 次体验</button>
-                           <button type="button" class="admin-action-btn" data-action="monthly" data-account-id="${escapeHTML(id)}">开月卡</button>
-                           <button type="button" class="admin-action-btn" data-action="lifetime" data-account-id="${escapeHTML(id)}">买断</button>
-                           <button type="button" class="admin-action-btn" data-action="reset" data-account-id="${escapeHTML(id)}">设回试用</button>`}
+                        ? `<div class="admin-card-meta">${isLegacy?'历史访客仅用于分析，不支持直接授权':'当前只读：先把本地 service role key 填进 .admin-console.local.js'}</div>`
+                        : `<div class="admin-inline-actions">
+                               <button type="button" class="admin-action-btn" data-style="highlight" data-action="trial" data-account-id="${escapeHTML(id)}">+1 次体验</button>
+                               <button type="button" class="admin-action-btn" data-action="monthly" data-account-id="${escapeHTML(id)}">开月卡</button>
+                               <button type="button" class="admin-action-btn" data-action="lifetime" data-account-id="${escapeHTML(id)}">买断</button>
+                               <button type="button" class="admin-action-btn" data-action="reset" data-account-id="${escapeHTML(id)}">设回试用</button>
+                               <button type="button" class="admin-action-btn" data-style="calm" data-action="${escapeHTML(statusToggleAction)}" data-account-id="${escapeHTML(id)}">${escapeHTML(statusToggleLabel)}</button>
+                           </div>`}
                 </div>
             </div>`;
         }).join('');
@@ -534,30 +625,43 @@
         if(!entry||!entry.account)return;
         const account=entry.account;
         if(action==='trial'){
-            await window.rtAccountService.updateAdminAccount({
-                input_account_id:accountId,
-                input_bonus_prepare_credits:(account.bonus_prepare_credits||0)+1
+            await adminDataSource.updateAccount({
+                id:accountId,
+                bonus_prepare_credits:(account.bonus_prepare_credits||0)+1
             });
         }else if(action==='monthly'){
-            await window.rtAccountService.updateAdminAccount({
-                input_account_id:accountId,
-                input_membership_tier:'monthly',
-                input_membership_expires_at:new Date(Date.now()+30*24*60*60*1000).toISOString(),
-                input_is_lifetime:false
+            await adminDataSource.updateAccount({
+                id:accountId,
+                membership_tier:'monthly',
+                membership_expires_at:new Date(Date.now()+30*24*60*60*1000).toISOString(),
+                is_lifetime:false,
+                status:'active'
             });
         }else if(action==='lifetime'){
-            await window.rtAccountService.updateAdminAccount({
-                input_account_id:accountId,
-                input_membership_tier:'lifetime',
-                input_membership_expires_at:null,
-                input_is_lifetime:true
+            await adminDataSource.updateAccount({
+                id:accountId,
+                membership_tier:'lifetime',
+                membership_expires_at:null,
+                is_lifetime:true,
+                status:'active'
             });
         }else if(action==='reset'){
-            await window.rtAccountService.updateAdminAccount({
-                input_account_id:accountId,
-                input_membership_tier:'trial',
-                input_membership_expires_at:null,
-                input_is_lifetime:false
+            await adminDataSource.updateAccount({
+                id:accountId,
+                membership_tier:'trial',
+                membership_expires_at:null,
+                is_lifetime:false,
+                status:'active'
+            });
+        }else if(action==='pause'){
+            await adminDataSource.updateAccount({
+                id:accountId,
+                status:'paused'
+            });
+        }else if(action==='activate'){
+            await adminDataSource.updateAccount({
+                id:accountId,
+                status:'active'
             });
         }
         return getActionSuccessMessage(account,action);
@@ -603,9 +707,9 @@
             const legacy=buildLegacySnapshotEntries();
             state.legacyAccounts=legacy.accounts;
             state.legacyEvents=legacy.events;
-            if(window.rtAccountService&&state.canManage){
-                state.backendAccounts=await window.rtAccountService.listAdminAccounts();
-                state.backendEvents=await window.rtAccountService.listAdminEvents(state.filters.rangeDays,3000);
+            if(adminDataSource&&state.canManage){
+                state.backendAccounts=await adminDataSource.listAccounts();
+                state.backendEvents=await adminDataSource.listEvents(state.filters.rangeDays,3000);
             }else{
                 state.backendAccounts=[];
                 state.backendEvents=[];
@@ -645,31 +749,25 @@
     async function boot(){
         setMainVisible(true);
         try{
-            const session=await sb.ensureSession();
-            if(!session||!session.access_token){
-                state.canManage=false;
-                showStatus('当前为历史快照模式','你还没有管理员会话，所以现在先展示历史埋点快照。登录主产品里的管理员账号后，这里会自动叠加实时账号、会员和授权数据。');
+            if(hasLocalAdminConfig()){
+                adminDataSource=createLocalAdminDataSource(ADMIN_LOCAL_CONFIG);
+                state.canManage=true;
+                state.accessMode='local_service_role';
+                showStatus('本地独立后台已连接','当前后台直接使用你本机保存的 service role key 拉实时数据，不依赖主产品登录态。你可以随时编辑任何账号的会员状态、体验次数和账号状态。');
                 updateSyncPill();
                 startLiveSync();
                 await refreshData({preserveScroll:true,silent:true});
                 return;
             }
-            const isAdmin=await window.rtAccountService.isAdmin();
-            if(!isAdmin){
-                state.canManage=false;
-                showStatus('当前为历史快照模式','检测到会话存在，但当前账号不是管理员，所以这里先展示历史快照。切回管理员账号后，可自动解锁实时授权能力。');
-                updateSyncPill();
-                startLiveSync();
-                await refreshData({preserveScroll:true,silent:true});
-                return;
-            }
-            state.canManage=true;
-            showStatus('管理员身份已验证','当前页已经解锁实时后台数据，会把历史快照和 Supabase 实时账号 / 事件 / 权益表合并展示。');
+            state.canManage=false;
+            state.accessMode='snapshot';
+            showStatus('当前为历史快照模式','你还没有填本地后台专用的 service role key，所以现在先展示历史埋点快照。把 key 填进 .admin-console.local.js 后，这里会直接变成实时可编辑后台。');
             updateSyncPill();
             startLiveSync();
             await refreshData({preserveScroll:true,silent:true});
         }catch(error){
             state.canManage=false;
+            state.accessMode='snapshot';
             showStatus('后台初始化失败',error instanceof Error?error.message:String(error));
             updateSyncPill();
             await refreshData({preserveScroll:true,silent:true});
