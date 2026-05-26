@@ -46,6 +46,9 @@ function getPaymentMethodTypes(methodKey?: string) {
 
 function normalizeErrorMessage(error: unknown) {
   if (error instanceof Stripe.errors.StripeError) {
+    if (error.param === 'payment_method_types') {
+      return '当前 Stripe 账号还没有启用你选择的支付方式。请先到 Stripe Dashboard 的 Payment method settings 打开微信支付或支付宝，然后再试。'
+    }
     return error.message || 'Stripe 返回了一个未知错误。'
   }
   if (error instanceof Error) return error.message
@@ -127,23 +130,11 @@ Deno.serve(async (req) => {
     }
 
     let session: Stripe.Checkout.Session
-    let resolvedMode = methodKey || 'auto'
-    try {
-      session = await stripe.checkout.sessions.create({
-        ...baseSessionPayload,
-        payment_method_types: getPaymentMethodTypes(methodKey),
-      })
-    } catch (primaryError) {
-      console.error('[stripe-create-checkout] primary create failed', {
-        methodKey,
-        planKey,
-        accountId,
-        message: normalizeErrorMessage(primaryError),
-      })
-      if (!methodKey) throw primaryError
-      resolvedMode = 'dynamic_fallback'
-      session = await stripe.checkout.sessions.create(baseSessionPayload)
-    }
+    const resolvedMode = methodKey || 'auto'
+    session = await stripe.checkout.sessions.create({
+      ...baseSessionPayload,
+      payment_method_types: getPaymentMethodTypes(methodKey),
+    })
 
     await adminClient.from('rt_billing_orders').upsert(
       {

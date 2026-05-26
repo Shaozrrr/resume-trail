@@ -52,6 +52,28 @@ async function applyMembership(adminClient: ReturnType<typeof createClient>, acc
     .eq('id', accountId)
 }
 
+async function syncOrderState(adminClient: ReturnType<typeof createClient>, session: Stripe.Checkout.Session, nextStatus: string) {
+  await adminClient.from('rt_billing_orders').upsert(
+    {
+      account_id: (session.metadata || {}).account_id || null,
+      auth_user_id: (session.metadata || {}).auth_user_id || null,
+      stripe_checkout_session_id: session.id,
+      stripe_customer_email: session.customer_details?.email || session.customer_email || null,
+      stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+      plan_key: (session.metadata || {}).plan_key || 'monthly',
+      provider: 'stripe',
+      payment_status: nextStatus,
+      amount_total: session.amount_total || null,
+      currency: session.currency || 'cny',
+      payment_method_types: session.payment_method_types || [],
+      metadata: session.metadata || {},
+      paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'stripe_checkout_session_id' }
+  )
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
   const signature = req.headers.get('Stripe-Signature')
@@ -77,27 +99,11 @@ Deno.serve(async (req) => {
     const accountId = metadata.account_id || ''
     const authUserId = metadata.auth_user_id || ''
     const planKey = metadata.plan_key || 'monthly'
+    const isPaid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required'
 
-    await adminClient.from('rt_billing_orders').upsert(
-      {
-        account_id: accountId || null,
-        auth_user_id: authUserId || null,
-        stripe_checkout_session_id: session.id,
-        stripe_customer_email: session.customer_details?.email || session.customer_email || null,
-        stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
-        plan_key: planKey,
-        provider: 'stripe',
-        payment_status: session.payment_status || 'paid',
-        amount_total: session.amount_total || null,
-        currency: session.currency || 'cny',
-        payment_method_types: session.payment_method_types || [],
-        metadata,
-        paid_at: new Date().toISOString(),
-      },
-      { onConflict: 'stripe_checkout_session_id' }
-    )
+    await syncOrderState(adminClient, session, isPaid ? 'paid' : (session.payment_status || 'open'))
 
-    if (accountId) {
+    if (isPaid && accountId) {
       await applyMembership(adminClient, accountId, planKey)
       await adminClient.from('rt_activity_events').insert({
         account_id: accountId,
@@ -115,15 +121,42 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (event.type === 'checkout.session.async_payment_succeeded') {
+    const session = event.data.object
+    const metadata = session.metadata || {}
+    const accountId = metadata.account_id || ''
+    const authUserId = metadata.auth_user_id || ''
+    const planKey = metadata.plan_key || 'monthly'
+
+    await syncOrderState(adminClient, session, 'paid')
+
+    if (accountId) {
+      await applyMembership(adminClient, accountId, planKey)
+      await adminClient.from('rt_activity_events').insert({
+        account_id: accountId,
+        auth_user_id: authUserId || null,
+        actor_key: authUserId || accountId,
+        event_name: 'membership_payment_completed',
+        props: {
+          provider: 'stripe',
+          plan_key: planKey,
+          amount_total: session.amount_total || null,
+          currency: session.currency || 'cny',
+          stripe_checkout_session_id: session.id,
+          async_payment: true,
+        },
+      })
+    }
+  }
+
+  if (event.type === 'checkout.session.async_payment_failed') {
+    const session = event.data.object
+    await syncOrderState(adminClient, session, 'failed')
+  }
+
   if (event.type === 'checkout.session.expired') {
     const session = event.data.object
-    await adminClient
-      .from('rt_billing_orders')
-      .update({
-        payment_status: 'expired',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('stripe_checkout_session_id', session.id)
+    await syncOrderState(adminClient, session, 'expired')
   }
 
   return json({ ok: true })

@@ -1762,8 +1762,9 @@ function openPrepareUpgradeModal(accessPayload){
     const overlay=$('#prepare-upgrade-overlay');
     if(!overlay)return;
     const account=accessPayload&&accessPayload.account||window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
-    if(accountHasFormalAccess(account)){
-        toast('当前会员权益已生效，可继续不限次使用准备功能。','success');
+    const membership=getAccountMembershipKey(account);
+    if(membership==='lifetime'){
+        toast('当前账号已经是永久会员，无需再次开通。','success');
         return;
     }
     const remaining=account&&typeof account.remaining_prepare_quota==='number'?account.remaining_prepare_quota:0;
@@ -1776,9 +1777,13 @@ function openPrepareUpgradeModal(accessPayload){
     const paymentNote=$('#prepare-upgrade-payment-note');
     const registerBtn=$('#prepare-upgrade-register');
     const billingConfig=getPrepareBillingConfig();
-    if(title)title.textContent=hasPaid?'当前账号已具备正式权限':'体验次数已用完';
-    if(desc)desc.textContent=hasPaid?'当前账号已拥有持续使用权限，你可以继续生成更多准备会话。':'每个履迹账号默认可以完整体验 1 次准备。继续使用可开通 30 天会员，或直接买断。';
-    if(meta)meta.textContent=remaining>0?`当前还剩 ${remaining} 次体验机会。`:'当前体验额度已耗尽。';
+    if(title)title.textContent=membership==='monthly'?'升级或续费会员':'体验次数已用完';
+    if(desc)desc.textContent=membership==='monthly'
+        ? '当前账号已是月会员。你可以续 30 天会员，或直接升级到永久会员。'
+        : '每个履迹账号默认可以完整体验 1 次准备。继续使用可开通 30 天会员，或直接买断。';
+    if(meta)meta.textContent=membership==='monthly'
+        ? getAccountEntitlementText(account)
+        : (remaining>0?`当前还剩 ${remaining} 次体验机会。`:'当前体验额度已耗尽。');
     if(guestHint){
         guestHint.style.display=isGuestExperienceMode()?'':'none';
         guestHint.textContent='你现在是体验模式。先注册，刚才的体验数据会自动迁移到新账号，再继续开通会员。';
@@ -1789,7 +1794,10 @@ function openPrepareUpgradeModal(accessPayload){
     }
     if(registerBtn)registerBtn.style.display=isGuestExperienceMode()?'inline-flex':'none';
     if(cards){
-        cards.innerHTML=PREPARE_MEMBERSHIP_PLANS.map(function(plan){
+        const visiblePlans=membership==='monthly'
+            ? PREPARE_MEMBERSHIP_PLANS.filter(plan=>plan.membershipTier==='monthly'||plan.membershipTier==='lifetime')
+            : PREPARE_MEMBERSHIP_PLANS;
+        cards.innerHTML=visiblePlans.map(function(plan){
             const configPlan=billingConfig?.plans?.[plan.membershipTier]||{};
             const methods=configPlan.methods||[];
             return `<div class="prepare-upgrade-plan">
