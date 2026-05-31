@@ -3462,11 +3462,95 @@ function sanitizePrepareTextList(list,fallback,maxItems){
     const primary=(Array.isArray(list)?list:[]).map(function(item){
         return normalizePrepareText(item);
     }).filter(Boolean);
-    if(primary.length)return primary.slice(0,maxItems||primary.length);
+    const uniquePrimary=[...new Set(primary)];
+    if(uniquePrimary.length)return uniquePrimary.slice(0,maxItems||uniquePrimary.length);
     const backup=(Array.isArray(fallback)?fallback:[]).map(function(item){
         return normalizePrepareText(item);
     }).filter(Boolean);
-    return backup.slice(0,maxItems||backup.length);
+    const uniqueBackup=[...new Set(backup)];
+    return uniqueBackup.slice(0,maxItems||uniqueBackup.length);
+}
+function normalizePrepareCompareKey(value){
+    return normalizePrepareText(value).replace(/\s+/g,'').replace(/[，。；、,.!?？！（）()\-_"'“”‘’:/]/g,'').toLowerCase();
+}
+function inferPrepareEvidenceType(text){
+    const source=normalizePrepareText(text);
+    if(/论文|研究|课题|文献|访谈|田野|政治学|学术/.test(source))return'RESEARCH';
+    if(/社团|学生会|组织|活动|招募|宣传|策划/.test(source))return'CAMPUS';
+    if(/实习|兼职|项目|上线|交付|需求|prd|产品/.test(source.toLowerCase()))return'PROJECT';
+    if(/数据|sql|分析|指标|问卷|统计/.test(source.toLowerCase()))return'DATA';
+    return'GENERAL';
+}
+function summarizePrepareEvidenceTitle(text,index){
+    const source=normalizePrepareText(text);
+    if(!source)return`经历线索 ${index+1}`;
+    if(/论文|研究|课题|文献|访谈|田野|政治学|学术/.test(source))return'论文 / 研究项目';
+    if(/社团|学生会|组织|活动|招募|宣传|策划/.test(source))return'校园 / 社团经历';
+    if(/实习|兼职|项目|上线|交付|需求|prd|产品/.test(source.toLowerCase()))return'项目 / 实习经历';
+    if(/数据|sql|分析|指标|问卷|统计/.test(source.toLowerCase()))return'分析 / 调研经历';
+    return source.length>18?`${source.slice(0,18)}...`:source;
+}
+function isPrepareResumeBoilerplate(text){
+    const source=normalizePrepareText(text);
+    if(!source)return true;
+    return /^(教育背景|教育经历|个人评价|自我评价|技能|技能特长|获奖经历|荣誉奖励|基本信息|联系方式|简历|resume|个人简历|求职意向)$/i.test(source);
+}
+function isPrepareGenericExperienceItem(item){
+    const section=normalizePrepareText(item?.resume_section);
+    const reason=normalizePrepareText(item?.why_match);
+    const highlights=sanitizePrepareTextList(item?.highlight_points,[],6).join(' ');
+    const genericSection=/^(resume\s*\d+|经历线索\s*\d+|当前简历缺少直接证据)$/i.test(section);
+    const genericReason=/未必与.+直接同题|可迁移能力线索|关键在于把真实动作、判断和结果补挖出来/.test(reason);
+    const genericHighlights=/先回忆这段里你有没有做过调研|把它改写成“问题是什么|如果这段离岗位较远/.test(highlights);
+    return genericSection||genericReason||genericHighlights;
+}
+function buildPrepareExperienceExample(entry,roleName){
+    switch(entry?.type){
+        case'RESEARCH':
+            return `例如：如果这段是论文/研究，就讲“我先定义研究问题，快速梳理文献和信息来源，搭建分析框架，在 deadline 前完成写作或汇报；这证明我能把陌生问题快速拆开，并输出结构化结论，这和 ${roleName} 需要先理解业务再形成方案的能力是相通的”。`;
+        case'CAMPUS':
+            return '例如：如果这段是社团/校园项目，就讲“我负责把目标拆成时间表、分工和交付物，过程中协调不同同学推进，最后按时完成活动或项目；这能证明我有推进节奏、跨角色协作和收尾交付能力”。';
+        case'DATA':
+            return '例如：如果这段里有问卷、统计或数据分析，就讲“我先看数据或样本里最关键的异常和模式，再据此形成判断和建议；虽然不是产品岗位，但它能证明我能从信息里提炼决策依据”。';
+        case'PROJECT':
+            return `例如：如果这段本身就是项目/实习，就直接讲“目标是什么、你具体负责什么、你做了哪些判断和推进、最后结果如何”，然后补一句“这就是我最接近 ${roleName} 的证据”。`;
+        default:
+            return `例如：把这段讲成“当时要解决什么问题、你怎么整理信息、怎么推动事情往前走、最后交付了什么”，再补一句“它最能证明我在 ${roleName} 需要的协作推进和结构化表达上是能上手的”。`;
+    }
+}
+function buildPrepareExperienceFollowups(entry,roleName){
+    switch(entry?.type){
+        case'RESEARCH':
+            return[
+                '把论文/研究里最像产品工作的动作单独写出来：定义问题、查资料、搭框架、写结论、做汇报。',
+                '补一个可验证结果，例如导师反馈、是否被采纳、完成周期、答辩结果或引用的核心结论。',
+                `如果这段仍然偏学术，面试前补做一个 ${roleName} 相关的小案例，例如“某个 AI Agent 财务场景分析 + 一页方案”。`
+            ];
+        case'CAMPUS':
+            return[
+                '把活动目标、分工人数、排期、你解决过的卡点写清楚，不要只说“参与过”。',
+                '补一个结果，例如到场人数、完成率、满意度、传播效果、周期缩短或执行效率提升。',
+                `可以把这段包装成“我最接近产品推进的经历”，再补一个你最近为 ${roleName} 做的学习或 demo。`
+            ];
+        case'DATA':
+            return[
+                '把你看过哪些数据、如何得出判断、最后给了什么建议说具体。',
+                '补一个结果，例如判断被采纳、报告被使用、结论影响了后续动作。',
+                `再加一个 ${roleName} 相关的小练习，把“分析”延伸到“方案建议”，说服力会强很多。`
+            ];
+        case'PROJECT':
+            return[
+                '把你负责的判断节点和推进动作写实，不要只写团队做了什么。',
+                '补一个结果数字，哪怕只是时间、效率、交付完成度或反馈改善。',
+                `最后用一句话说明：为什么这段就是你最能支撑 ${roleName} 的例子。`
+            ];
+        default:
+            return[
+                '先把这段里最像“扛事”的动作找出来，不要泛泛描述经历背景。',
+                '补一个最小结果，不一定非得是商业指标，也可以是交付、反馈、完成度或影响范围。',
+                `如果这段还是太弱，就并上一个最近新做的 ${roleName} 相关案例，再一起讲。`
+            ];
+    }
 }
 function sanitizePrepareFocus(output,session){
     const fallbackFocus=buildPrepareOutputsFallback(session||{}).focus||{};
@@ -3481,7 +3565,7 @@ function sanitizePrepareFocus(output,session){
     }).filter(function(item){
         return item.title&&item.reason&&item.what_to_prepare.length;
     });
-    const bestExperiences=((currentFocus.best_experiences||[]).length?currentFocus.best_experiences:fallbackFocus.best_experiences||[]).map(function(item,index){
+    const currentExperiences=((currentFocus.best_experiences||[]).length?currentFocus.best_experiences:fallbackFocus.best_experiences||[]).map(function(item,index){
         const fallbackItem=(fallbackFocus.best_experiences||[])[index]||(fallbackFocus.best_experiences||[])[0]||{};
         return{
             resume_section:normalizePrepareText(item?.resume_section||fallbackItem.resume_section||`经历线索 ${index+1}`),
@@ -3491,6 +3575,21 @@ function sanitizePrepareFocus(output,session){
         };
     }).filter(function(item){
         return item.resume_section&&item.why_match&&(item.highlight_points.length||item.possible_followups.length);
+    });
+    const bestExperiences=[];
+    const seenExperienceKeys=new Set();
+    currentExperiences.forEach(function(item){
+        if(isPrepareGenericExperienceItem(item))return;
+        const compareKey=normalizePrepareCompareKey(`${item.resume_section} ${item.why_match}`);
+        if(!compareKey||seenExperienceKeys.has(compareKey))return;
+        seenExperienceKeys.add(compareKey);
+        bestExperiences.push(item);
+    });
+    (fallbackFocus.best_experiences||[]).forEach(function(item){
+        const compareKey=normalizePrepareCompareKey(`${item.resume_section} ${item.why_match}`);
+        if(!compareKey||seenExperienceKeys.has(compareKey))return;
+        seenExperienceKeys.add(compareKey);
+        bestExperiences.push(item);
     });
     const riskWarnings=((currentFocus.risk_warnings||[]).length?currentFocus.risk_warnings:fallbackFocus.risk_warnings||[]).map(function(item,index){
         const fallbackItem=(fallbackFocus.risk_warnings||[])[index]||{};
@@ -3504,7 +3603,7 @@ function sanitizePrepareFocus(output,session){
     });
     return{
         prep_priorities:prepPriorities,
-        best_experiences:bestExperiences,
+        best_experiences:bestExperiences.slice(0,3),
         risk_warnings:riskWarnings
     };
 }
@@ -3680,7 +3779,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）所有问题和建议都必须尽量回扣 JD；7）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；8）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；9）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；10）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -3896,16 +3995,36 @@ function buildPrepareKeywordTranslation(session,lens){
     ];
 }
 function getPrepareResumeSignals(session){
-    const linkedResume=getPrepareLinkedResume(session);
-    const tags=linkedResume?.tags||[];
-    const fileName=linkedResume?.file_name||session.resume_name||'当前简历';
-    const notes=session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'';
-    const noteParts=String(notes||'').split(/[\n。；;]+/).map(part=>part.trim()).filter(Boolean).slice(0,3);
-    const tagParts=tags.slice(0,3);
-    const entries=[...tagParts,...noteParts];
+    const snapshot=getPrepareResumeSnapshot(session);
+    const rawFragments=String(snapshot.raw_text||'').split(/[\n。；;]+/).map(function(item){
+        return normalizePrepareText(item);
+    }).filter(Boolean);
+    const candidateTexts=[...new Set([...(snapshot.evidence_lines||[]),...rawFragments])]
+        .filter(function(item){
+            return item.length>=8&&!isPrepareResumeBoilerplate(item);
+        })
+        .slice(0,3);
+    const entries=candidateTexts.map(function(text,index){
+        return{
+            title:summarizePrepareEvidenceTitle(text,index),
+            text,
+            type:inferPrepareEvidenceType(text)
+        };
+    });
     const hasConcreteEntries=entries.length>0;
-    if(!entries.length)entries.push('当前简历缺少直接证据');
-    return{fileName,entries,hasConcreteEntries};
+    if(!entries.length){
+        entries.push({
+            title:'当前简历缺少直接证据',
+            text:'当前简历缺少直接证据',
+            type:'GAP'
+        });
+    }
+    return{
+        fileName:snapshot.resume_name||session.resume_name||'当前简历',
+        entries,
+        hasConcreteEntries,
+        evidenceLines:snapshot.evidence_lines||[]
+    };
 }
 function buildPrepareOutputsFallback(session){
     const lens=getPrepareLens(session);
@@ -3914,25 +4033,28 @@ function buildPrepareOutputsFallback(session){
     const companyName=session.company_name||'目标公司';
     const roleName=session.role_name||'目标岗位';
     const category=session.role_category||lens.label;
-    const experiences=resumeSignals.entries.map(function(entry,index){
-        const isGap=entry==='当前简历缺少直接证据';
+    const experiences=resumeSignals.entries.map(function(entry){
+        const isGap=entry?.type==='GAP'||entry?.text==='当前简历缺少直接证据';
         const bridgeLabel=lens.key==='data'?'数据分析、结构化判断和业务拆解':(lens.key==='operations'||lens.key==='pm'?'协作推进、节奏管理和复杂事项收束':lens.key==='strategy'?'研究分析、信息整合和商业判断':'用户理解、问题拆解和方案表达');
+        const exampleText=buildPrepareExperienceExample(entry,roleName);
+        const followupHints=buildPrepareExperienceFollowups(entry,roleName);
         return{
-            resume_section:isGap?'当前简历缺少直接证据':(index===0?resumeSignals.fileName:`经历线索 ${index+1}`),
-            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容未必与 ${roleName} 直接同题，但它可能是你现阶段最能翻译成 ${bridgeLabel} 的线索，关键在于把真实动作、判断和结果补挖出来。`,
+            resume_section:isGap?'当前简历缺少直接证据':entry.title,
+            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容未必与 ${roleName} 直接同题，但它是你简历里目前最能翻译成 ${bridgeLabel} 的一条真实线索。关键不是硬说对口，而是把这条线索里的动作、判断和结果翻译成岗位语言。`,
             highlight_points:[
-                isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`先回忆这段里你有没有做过调研、拆解、写作、协调、交付或复盘，把这些真实动作单独拎出来`,
-                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个': '补充一组能够体现结果的数字或变化，哪怕只是效率提升、周期缩短、反馈改善',
-                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`把它改写成“问题是什么、你怎么判断、你做了什么、结果如何”，再连回 ${roleName}`,
-                isGap?`如果完全没有直接案例，就先补做一个和 ${roleName} 最近的最小项目，再把它和已有背景一起讲`:'如果这段离岗位较远，要主动解释它证明的是哪类可迁移能力，而不是假装完全对口'
+                isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`原始线索：${entry.text}`,
+                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个':exampleText,
+                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`面试里把这段收束成“这说明我虽然不是直接做过同岗位，但已经具备 ${bridgeLabel} 里的哪两项能力”。`
             ],
             possible_followups:[
-                isGap?'这段经历里你最能证明自己扛事的动作是什么？有没有你独立推进、组织材料、做判断或推动交付的部分？':'如果资源更少、时间更紧，你会怎么取舍？这能帮你把经历讲得更像岗位判断题。',
-                isGap?'最终结果有没有任何可验证的数字、反馈、采纳记录、老师/同事评价或后续影响？':'面试官追问结果真实性时，你会拿什么细节证明？提前准备数字、反馈、文档或关键决策细节。',
-                isGap?`如果没有直接相关经历，面试前 3 到 7 天内你能补做什么最小案例，来证明你对 ${roleName} 的理解？`:`如果这段只是线索，不够成型，看看能不能把相关 side project、课程项目、社团/实习协作经历并到这段里一起讲。`,
-                `包装时不要说“虽然我没做过”。改成“我现有最接近的是这段，它证明了我的 ${bridgeLabel}，同时我已经补了哪些学习或实操”。`
+                ...(isGap?[
+                    '这段经历里你最能证明自己扛事的动作是什么？有没有你独立推进、组织材料、做判断或推动交付的部分？',
+                    '最终结果有没有任何可验证的数字、反馈、采纳记录、老师/同事评价或后续影响？',
+                    `如果没有直接相关经历，面试前 3 到 7 天内你能补做什么最小案例，来证明你对 ${roleName} 的理解？`
+                ]:followupHints),
+                `包装时不要说“虽然我没做过”。改成“我最接近 ${roleName} 的例子是这段，它证明了我的 ${bridgeLabel}，同时我已经补了哪些学习或实操”。`
             ],
-            raw:entry
+            raw:entry.text
         };
     });
     const companyOverview={
