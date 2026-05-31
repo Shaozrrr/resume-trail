@@ -1500,7 +1500,8 @@ const prepareState={
     loadingKind:'',
     loadingStartedAt:0,
     loadingFrame:0,
-    supplementalExperienceDraft:''
+    supplementalExperienceDraft:'',
+    showSupplementModal:false
 };
 const prepareMockState={
     sessionId:'',
@@ -1757,21 +1758,31 @@ function accountHasFormalAccess(account){
 function renderPrepareAccessBanner(account,options){
     const opts=Object.assign({showRegister:false},options||{});
     const membershipLabel=getAccountMembershipLabel(account);
-    const detailText=getAccountEntitlementText(account);
     const quota=getPrepareQuotaSnapshot(account);
     const isGuest=isGuestExperienceMode();
-    const ctaText=membershipLabel==='月会员'?'续费 / 升级':(membershipLabel==='永久会员'?'':'开通会员');
+    const hasPaidAccess=accountHasFormalAccess(account);
+    const noTrialLeft=!hasPaidAccess&&quota.remaining<=0;
+    const detailText=noTrialLeft
+        ? (isGuest
+            ? '试用机会已经用完了。要不要现在充值继续用，或者先注册再领 1 次额外准备机会？'
+            : '试用机会已经用完了。要不要现在充值继续使用这套准备工作台？')
+        : getAccountEntitlementText(account);
+    const ctaText=membershipLabel==='月会员'
+        ? '续费 / 升级'
+        : (membershipLabel==='永久会员'
+            ? ''
+            : (noTrialLeft?'去充值':'开通会员'));
     const supportingText=membershipLabel==='月会员'
         ? '可续 30 天，或升级永久会员。'
         : '';
     return `
-        <div class="prepare-access-banner">
+        <div class="prepare-access-banner${noTrialLeft?' is-paywall':''}">
             <div class="prepare-access-banner-copy">
-                <strong>准备权益：${escapeHTML(membershipLabel)}</strong>
+                <strong>${escapeHTML(noTrialLeft?'试用次数已用完':`准备权益：${membershipLabel}`)}</strong>
                 <p>${escapeHTML(detailText)}${supportingText?` ${escapeHTML(supportingText)}`:''}</p>
             </div>
             <div class="prepare-access-banner-actions">
-                <span class="prepare-access-badge">${escapeHTML(membershipLabel)}</span>
+                <span class="prepare-access-badge">${escapeHTML(noTrialLeft?'试用已用完':membershipLabel)}</span>
                 ${opts.showRegister&&isGuest?'<button type="button" class="btn-secondary btn-sm" id="prepare-banner-register">先注册账号</button>':''}
                 ${membershipLabel==='永久会员'
                     ? ''
@@ -1845,13 +1856,19 @@ function openPrepareUpgradeModal(accessPayload){
     const billingConfig=getPrepareBillingConfig();
     if(title)title.textContent=membership==='monthly'
         ?'升级或续费会员'
-        :(quota.remaining>0?'准备体验说明':'体验次数已用完');
+        :(quota.remaining>0?'准备体验说明':'试用次数已用完');
     if(desc)desc.textContent=membership==='monthly'
         ? '月会员可继续续费或升级永久会员。'
-        : `当前可用 ${quota.remaining}/${quota.total} 次。`;
+        : (quota.remaining>0
+            ? `当前可用 ${quota.remaining}/${quota.total} 次。`
+            : '这套准备的试用机会已经用完了，要不要现在开通继续使用？');
     if(meta)meta.textContent=membership==='monthly'
         ? getAccountEntitlementText(account)
-        : `已用 ${quota.used} 次，还剩 ${quota.remaining} 次。`;
+        : (quota.remaining>0
+            ? `已用 ${quota.used} 次，还剩 ${quota.remaining} 次。`
+            : (isGuestExperienceMode()
+                ? '当前体验额度已用完。你也可以先注册，再领取 1 次额外准备机会。'
+                : '当前试用额度已全部使用，开通后可继续生成准备、问题与回答。'));
     if(guestHint){
         guestHint.style.display=isGuestExperienceMode()?'':'none';
         guestHint.textContent='体验模式可先注册，注册后再继续。';
@@ -3933,7 +3950,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -4970,10 +4987,93 @@ function renderPrepareResearch(session){
         </article>
     `;
 }
+function getPrepareExperienceGroupMeta(section){
+    const text=normalizePrepareText(section).toLowerCase();
+    if(/实习|intern|internship|任职|工作|公司|分析师|产品经理|运营|业务/.test(text)){
+        return {
+            key:'internship',
+            label:'实习 / 工作经历',
+            description:'优先把每段实习里最贴近岗位职责的那部分单独拆开讲。'
+        };
+    }
+    if(/项目|project|side project|课程|作品|毕设|毕业设计|创业/.test(text)){
+        return {
+            key:'project',
+            label:'项目经历',
+            description:'把项目里你真正做判断、推动和拿结果的部分单独拎出来。'
+        };
+    }
+    if(/社团|学生会|校园|志愿|组织|活动/.test(text)){
+        return {
+            key:'campus',
+            label:'校园 / 组织经历',
+            description:'如果没有强相关实习，就把可迁移的组织推进能力讲扎实。'
+        };
+    }
+    return {
+        key:'other',
+        label:'其他可迁移经历',
+        description:'这些经历不一定直接对口，但可以翻译成岗位需要的判断力和执行力。'
+    };
+}
+
+function groupPrepareFocusExperiences(experiences){
+    const order=['internship','project','campus','other'];
+    const groups=new Map();
+    (experiences||[]).forEach(function(item){
+        const meta=getPrepareExperienceGroupMeta(item.resume_section||'');
+        if(!groups.has(meta.key)){
+            groups.set(meta.key,Object.assign({},meta,{items:[]}));
+        }
+        groups.get(meta.key).items.push(item);
+    });
+    return order.map(function(key){
+        return groups.get(key)||null;
+    }).filter(Boolean);
+}
+
+function breakdownPrepareExperienceHighlights(points){
+    const buckets={jd:[],expand:[],gap:[],example:[],extra:[]};
+    (points||[]).forEach(function(point){
+        const text=normalizePrepareText(point);
+        if(!text)return;
+        if(/对应\s*JD|对应岗位|对应要求|直接对应|匹配的是|JD/.test(text)){
+            buckets.jd.push(text);
+            return;
+        }
+        if(/怎么展开|怎么讲|展开|先讲|围绕|结构|讲法|展开成/.test(text)){
+            buckets.expand.push(text);
+            return;
+        }
+        if(/还缺|缺口|补清|补齐|补上|证据|细节|数字|量化|没讲清/.test(text)){
+            buckets.gap.push(text);
+            return;
+        }
+        if(/示例|可以这样讲|可以直接讲|直接开讲|开场可以说|你可以说/.test(text)){
+            buckets.example.push(text);
+            return;
+        }
+        buckets.extra.push(text);
+    });
+    return buckets;
+}
+
+function renderPrepareExperienceDetailBlock(title,items,fallbacks){
+    const resolvedItems=(items&&items.length?items:fallbacks||[]).filter(Boolean);
+    if(!resolvedItems.length)return'';
+    return `
+        <section class="prepare-experience-detail">
+            <strong>${escapeHTML(title)}</strong>
+            <ul class="prepare-bullet-list prepare-bullet-list-subtle">${resolvedItems.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
+        </section>
+    `;
+}
+
 function renderPrepareFocus(session){
     const hasFocus=!!session.outputs?.focus;
     const focus=sanitizePrepareFocus(session.outputs||{},session);
     if(!hasFocus&&!focus.best_experiences.length&&!focus.prep_priorities.length&&!focus.risk_warnings.length)return'<div class="prepare-empty">先生成一套准备工作台，再查看准备重点。</div>';
+    const experienceGroups=groupPrepareFocusExperiences(focus.best_experiences);
     return `
         <div class="prepare-grid prepare-grid-two">
             <article class="prepare-card-surface prepare-section-shell">
@@ -4990,20 +5090,39 @@ function renderPrepareFocus(session){
             </article>
             <article class="prepare-card-surface prepare-section-shell">
                 <div class="prepare-section-kicker">最该讲的经历</div>
-                <div class="prepare-stack-list">
-                    ${focus.best_experiences.map(item=>`
-                        <section class="prepare-experience">
-                            <h3>${escapeHTML(item.resume_section)}</h3>
-                            <p>${escapeHTML(item.why_match)}</p>
-                            <ul class="prepare-bullet-list">${item.highlight_points.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
-                            ${item.possible_followups?.length?`
-                                <div class="prepare-followup-block">
-                                    <strong>补挖 / 补做 / 包装建议</strong>
-                                    <ul class="prepare-bullet-list prepare-bullet-list-subtle">${item.possible_followups.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
-                                </div>
-                            `:''}
+                <div class="prepare-focus-groups">
+                    ${experienceGroups.length?experienceGroups.map(group=>`
+                        <section class="prepare-focus-group">
+                            <div class="prepare-focus-group-head">
+                                <div class="prepare-section-kicker">${escapeHTML(group.label)}</div>
+                                <p>${escapeHTML(group.description)}</p>
+                            </div>
+                            <div class="prepare-stack-list">
+                                ${group.items.map(function(item){
+                                    const details=breakdownPrepareExperienceHighlights(item.highlight_points||[]);
+                                    return `
+                                        <section class="prepare-experience">
+                                            <h3>${escapeHTML(item.resume_section)}</h3>
+                                            <p>${escapeHTML(item.why_match)}</p>
+                                            <div class="prepare-experience-detail-grid">
+                                                ${renderPrepareExperienceDetailBlock('对应 JD',details.jd,['先说这段经历对应 JD 的哪一项职责或能力。'])}
+                                                ${renderPrepareExperienceDetailBlock('怎么展开',details.expand,['按“场景 / 判断 / 动作 / 结果”来讲，别只报任务名。'])}
+                                                ${renderPrepareExperienceDetailBlock('还要补清楚',details.gap,['补数字、证据、关键判断和你自己的角色边界。'])}
+                                                ${renderPrepareExperienceDetailBlock('可以直接开讲',details.example,['先亮一句结论，再补一段最能证明你的动作和结果。'])}
+                                                ${details.extra.length?renderPrepareExperienceDetailBlock('还能再补',details.extra,[]):''}
+                                            </div>
+                                            ${item.possible_followups?.length?`
+                                                <div class="prepare-followup-block">
+                                                    <strong>补挖 / 补做 / 包装建议</strong>
+                                                    <ul class="prepare-bullet-list prepare-bullet-list-subtle">${item.possible_followups.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                                                </div>
+                                            `:''}
+                                        </section>
+                                    `;
+                                }).join('')}
+                            </div>
                         </section>
-                    `).join('')}
+                    `).join(''):'<div class="prepare-empty">还没抽取到可讲经历，建议先补一段实习、项目或校园经历线索。</div>'}
                 </div>
             </article>
         </div>
@@ -5191,6 +5310,39 @@ function renderPrepareSupplementHub(session){
         </div>
     `;
 }
+
+function renderPrepareSupplementTrigger(session){
+    const items=getPrepareSupplementalExperiences(session);
+    return `
+        <div class="prepare-answer-supplement-trigger">
+            <button type="button" class="btn-secondary btn-sm" id="prepare-open-supplement-modal">补充经历</button>
+            <span>${items.length?`已存 ${items.length} 条，点开就能补到这道题里。`:'这道题想临时补一段经历，可以点这里再记进去。'}</span>
+        </div>
+    `;
+}
+
+function renderPrepareSupplementModal(session){
+    return `
+        <div class="modal-overlay${prepareState.showSupplementModal?' active':''}" id="prepare-supplement-overlay">
+            <div class="modal modal-lg prepare-supplement-modal">
+                <div class="modal-header">
+                    <div>
+                        <h2>补充经历</h2>
+                        <p>先把这道题想提到的经历补进来，后面生成回答和模拟点评都会优先调用。</p>
+                    </div>
+                    <button class="modal-close" id="prepare-supplement-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    ${renderPrepareSupplementalExperienceCard(session,{compact:false})}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="prepare-supplement-done">我补好了</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderPrepareQuestionsList(session){
     const questions=session.outputs?.questions?.question_groups||[];
     const introText='这些问题会混合 JD、简历深挖、行为面 / 宝洁八大问、场景题和反问面试官。点题后会直接进入回答页，不再把答案堆在列表下面。';
@@ -5306,7 +5458,7 @@ function renderPrepareAnswers(session){
                         <div class="prepare-entry-actions prepare-answer-actions">
                             <button type="button" class="btn-primary" id="prepare-generate-free-answer">生成自由回答</button>
                         </div>
-                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
+                        ${renderPrepareSupplementTrigger(session)}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface${prepareState.answerLoading?' prepare-loading-panel':''}">
@@ -5347,7 +5499,7 @@ function renderPrepareAnswers(session){
                             <p>先确认这份岗位前 30 天最重要的交付、团队最看重的结果和你最需要补强的能力，再决定自己要不要补学或补做什么。</p>
                             <span>这类题没有标准答案，关键是问得具体、问得有信息量。</span>
                         </div>
-                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
+                        ${renderPrepareSupplementTrigger(session)}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface">
@@ -5393,7 +5545,7 @@ function renderPrepareAnswers(session){
                     </div>
                     <div class="prepare-answer-hero-actions">
                         <div class="prepare-answer-top-actions">${backButton}</div>
-                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
+                        ${renderPrepareSupplementTrigger(session)}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface">
@@ -5425,7 +5577,7 @@ function renderPrepareAnswers(session){
                     <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
                 </div>
                 <div class="prepare-framework-switch" role="tablist">${frameworkPills}</div>
-                ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
+                        ${renderPrepareSupplementTrigger(session)}
             </div>
         </section>
     `;
@@ -5968,6 +6120,7 @@ function renderPrepareWorkbench(session){
                 ${tabContent}
             </div>
             ${renderPrepareResumePreviewOverlay(resumePreview)}
+            ${renderPrepareSupplementModal(session)}
         </div>
     `;
 }
@@ -6261,12 +6414,14 @@ function renderPrepare(){
         prepareState.selectedQuestionId=null;
         prepareState.questionPane='list';
         prepareState.questionGroupLoadingKey='';
+        prepareState.showSupplementModal=false;
         prepareState.screen='workspace';
         renderPrepare();
     }));
     $('#prepare-back-compose')?.addEventListener('click',function(){
         prepareState.screen='compose';
         prepareState.showResumePreview=false;
+        prepareState.showSupplementModal=false;
         renderPrepare();
     });
     $('#prepare-start-new')?.addEventListener('click',function(){
@@ -6277,6 +6432,7 @@ function renderPrepare(){
         prepareState.questionGroupLoadingKey='';
         prepareState.activeTab='research';
         prepareState.showResumePreview=false;
+        prepareState.showSupplementModal=false;
         renderPrepare();
     });
     $('#prepare-open-resume-preview')?.addEventListener('click',function(){
@@ -6296,12 +6452,32 @@ function renderPrepare(){
     $$('[data-prepare-tab]').forEach(button=>button.addEventListener('click',function(){
         prepareState.activeTab=this.dataset.prepareTab||'research';
         if(prepareState.activeTab==='questions')prepareState.questionPane='list';
+        prepareState.showSupplementModal=false;
         renderPrepare();
     }));
     $('#prepare-open-supplement-tab-answer')?.addEventListener('click',function(){
         prepareState.activeTab='supplement';
         prepareState.questionPane='list';
+        prepareState.showSupplementModal=false;
         renderPrepare();
+    });
+    $('#prepare-open-supplement-modal')?.addEventListener('click',function(){
+        prepareState.showSupplementModal=true;
+        renderPrepare();
+    });
+    $('#prepare-supplement-close')?.addEventListener('click',function(){
+        prepareState.showSupplementModal=false;
+        renderPrepare();
+    });
+    $('#prepare-supplement-done')?.addEventListener('click',function(){
+        prepareState.showSupplementModal=false;
+        renderPrepare();
+    });
+    $('#prepare-supplement-overlay')?.addEventListener('click',function(event){
+        if(event.target===event.currentTarget){
+            prepareState.showSupplementModal=false;
+            renderPrepare();
+        }
     });
     $$('[data-prepare-company-mode]').forEach(button=>button.addEventListener('click',function(){
         prepareState.companyOverviewMode=this.dataset.prepareCompanyMode==='detailed'?'detailed':'simple';
@@ -6421,12 +6597,14 @@ function renderPrepare(){
         prepareState.questionPane='list';
         prepareState.selectedQuestionId=null;
         prepareState.selectedFramework='STAR';
+        prepareState.showSupplementModal=false;
         renderPrepare();
     });
     $('#prepare-shell-back-to-questions')?.addEventListener('click',function(){
         prepareState.questionPane='list';
         prepareState.selectedQuestionId=null;
         prepareState.selectedFramework='STAR';
+        prepareState.showSupplementModal=false;
         renderPrepare();
     });
     $('#prepare-regenerate')?.addEventListener('click',function(){
