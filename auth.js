@@ -6,6 +6,7 @@ var RT_GUEST_DEFAULT_NICKNAME='履迹用户';
 var pendingOtpAuth={email:'',password:'',verifyType:'signup',syncPassword:false};
 var pendingRegisterIntent={active:false,email:'',password:''};
 var passwordFailureCounts={};
+var guestMigrationChoiceResolver=null;
 
 function getDefaultNicknameFromEmail(email){
     return email&&email.indexOf('@')>0?email.split('@')[0]:'';
@@ -185,7 +186,7 @@ async function checkAuth(){
         try{
             const loadResult=await cloudStore.loadInto(store);
             console.log('[RT auth] cloudStore.loadInto(store) returned',loadResult);
-            await migrateGuestStateToAccount(session);
+            await resolveGuestMigrationDecision(session);
             var localNick=localStorage.getItem('rt_nickname')||'';
             if(localNick&&localNick!==getGuestDefaultNickname()&&!(store.settings&&store.settings.profileNickname)&&typeof store.setSetting==='function'){
                 await store.setSetting('profileNickname',localNick);
@@ -611,6 +612,51 @@ function mergeSettingsWithGuest(currentSettings,guestSettings){
     };
 }
 
+function closeGuestMigrationModal(){
+    var overlay=document.getElementById('guest-migration-overlay');
+    if(overlay)overlay.classList.remove('active');
+}
+
+function resolveGuestMigrationModalChoice(choice){
+    closeGuestMigrationModal();
+    if(guestMigrationChoiceResolver){
+        var resolver=guestMigrationChoiceResolver;
+        guestMigrationChoiceResolver=null;
+        resolver(choice);
+    }
+}
+
+function promptGuestMigrationChoice(){
+    return new Promise(function(resolve){
+        guestMigrationChoiceResolver=resolve;
+        document.getElementById('guest-migration-overlay').classList.add('active');
+    });
+}
+
+async function resolveGuestMigrationDecision(session){
+    if(!window.rtGuestStore||!window.rtAccountService||!session||!session.user)return false;
+    var pending=typeof window.rtReadGuestMigrationPending==='function'?window.rtReadGuestMigrationPending():null;
+    if(!pending)return false;
+    var guestData=window.rtGuestStore.load();
+    if(!hasGuestBusinessData(guestData)){
+        if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
+        return false;
+    }
+    var choice=await promptGuestMigrationChoice();
+    if(choice==='inherit'){
+        var migrated=await migrateGuestStateToAccount(session);
+        if(migrated){
+            showMsg('已继承刚才的体验数据，正在继续进入账号。',false);
+        }else{
+            showMsg('体验数据暂时没有迁移成功，你可以先继续使用账号。',true);
+        }
+        return migrated;
+    }
+    if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
+    showMsg('已按新账号继续，刚才的体验草稿仍保留在这台设备。',false);
+    return false;
+}
+
 async function migrateGuestStateToAccount(session){
     if(!window.rtGuestStore||!window.rtAccountService||!session||!session.user)return false;
     const pending=typeof window.rtReadGuestMigrationPending==='function'?window.rtReadGuestMigrationPending():null;
@@ -884,7 +930,7 @@ window.rtStartUpgradeRegistration=function(){
     updateAppShell(false);
     resetVerifyStep();
     hideForgotMsg();
-    showMsg('注册后会自动继承刚才的体验数据，再继续开通会员。',false);
+    showMsg('注册后你可以选择是否继承刚才的体验数据，再继续开通会员。',false);
     var emailInput=document.getElementById('login-email');
     if(emailInput)emailInput.focus();
     window.scrollTo({top:0,behavior:'smooth'});
@@ -932,6 +978,26 @@ if(registerChoiceConfirm)registerChoiceConfirm.addEventListener('click',async fu
     registerChoiceConfirm.disabled=false;
     registerChoiceConfirm.textContent='继续注册';
     setSubmitIdleState();
+});
+
+var guestMigrationClose=document.getElementById('guest-migration-close');
+if(guestMigrationClose)guestMigrationClose.addEventListener('click',function(){
+    resolveGuestMigrationModalChoice('skip');
+});
+
+var guestMigrationSkip=document.getElementById('guest-migration-skip');
+if(guestMigrationSkip)guestMigrationSkip.addEventListener('click',function(){
+    resolveGuestMigrationModalChoice('skip');
+});
+
+var guestMigrationConfirm=document.getElementById('guest-migration-confirm');
+if(guestMigrationConfirm)guestMigrationConfirm.addEventListener('click',function(){
+    resolveGuestMigrationModalChoice('inherit');
+});
+
+var guestMigrationOverlay=document.getElementById('guest-migration-overlay');
+if(guestMigrationOverlay)guestMigrationOverlay.addEventListener('click',function(event){
+    if(event.target===event.currentTarget)resolveGuestMigrationModalChoice('skip');
 });
 
 var forgotSendCodeBtn=document.getElementById('forgot-send-code');

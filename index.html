@@ -15,13 +15,18 @@
         })();
     </script>
     <script>
-        window.RT_PREPARE_CONFIG=Object.assign({
-            apiBase:'http://127.0.0.1:8788',
-            provider:'DeepSeek',
-            model:'deepseek-v4-pro'
-        },window.RT_PREPARE_CONFIG||{});
+        (function(){
+            var isLocalPreview=location.protocol==='file:'||/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+            window.RT_PREPARE_CONFIG=Object.assign({
+                mode:isLocalPreview?'server':'supabase_edge',
+                functionName:'prepare-ai',
+                apiBase:'http://127.0.0.1:8788',
+                provider:'DeepSeek',
+                model:'deepseek-v4-pro'
+            },window.RT_PREPARE_CONFIG||{});
+        })();
     </script>
-  <link rel="stylesheet" href="styles.css?v=20260526-payment-fix-03">
+  <link rel="stylesheet" href="styles.css?v=20260531-prepare-flow-04">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -135,6 +140,32 @@
             <div class="modal-footer register-choice-footer">
                 <button class="btn-secondary" id="register-choice-cancel">暂不注册</button>
                 <button class="btn-primary" id="register-choice-confirm">继续注册</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="guest-migration-overlay">
+        <div class="modal register-choice-modal guest-migration-modal">
+            <div class="modal-header">
+                <div>
+                    <h2>是否继承刚才的体验数据？</h2>
+                    <p>你刚才在体验模式里已经留下了一些投递、简历或准备记录。现在可以选择把它们合并进新账号，或者从一个干净账号开始。</p>
+                </div>
+                <button class="modal-close" id="guest-migration-close">&times;</button>
+            </div>
+            <div class="guest-migration-body">
+                <div class="guest-migration-card">
+                    <strong>继承并继续</strong>
+                    <p>把刚才的体验数据同步到新账号，直接接着用，不会丢失这次体验里的内容。</p>
+                </div>
+                <div class="guest-migration-card">
+                    <strong>暂不继承</strong>
+                    <p>先从新账号开始。刚才的体验草稿会只留在这台设备上，不会进入当前账号。</p>
+                </div>
+            </div>
+            <div class="modal-footer register-choice-footer">
+                <button class="btn-secondary" id="guest-migration-skip">先不继承</button>
+                <button class="btn-primary" id="guest-migration-confirm">继承并继续</button>
             </div>
         </div>
     </div>
@@ -583,20 +614,25 @@
             capturePageleave:true,
             debug:false
         },window.RT_ANALYTICS_CONFIG||{});
-        window.RT_PREPARE_CONFIG=Object.assign({
-            apiBase:'http://127.0.0.1:8788',
-            provider:'DeepSeek',
-            model:'deepseek-v4-pro'
-        },window.RT_PREPARE_CONFIG||{});
+        (function(){
+            var isLocalPreview=location.protocol==='file:'||/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+            window.RT_PREPARE_CONFIG=Object.assign({
+                mode:isLocalPreview?'server':'supabase_edge',
+                functionName:'prepare-ai',
+                apiBase:'http://127.0.0.1:8788',
+                provider:'DeepSeek',
+                model:'deepseek-v4-pro'
+            },window.RT_PREPARE_CONFIG||{});
+        })();
     </script>
     <script src=".prepare-runtime.local.js"></script>
     <script src=".billing-runtime.local.js?v=20260525-stripe-setup-01"></script>
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
-  <script src="app.js?v=20260526-payment-fix-03"></script>
-    <script src="supabase.js"></script>
+  <script src="app.js?v=20260531-prepare-flow-04"></script>
+    <script src="supabase.js?v=20260531-prepare-flow-04"></script>
     <script src="features.js"></script>
     <script src="goal.js"></script>
-    <script src="auth.js?v=20260526-payment-fix-03"></script>
+    <script src="auth.js?v=20260531-prepare-flow-04"></script>
 </body>
 </html>

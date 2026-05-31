@@ -768,6 +768,14 @@ const rtAccountService={
     throw new Error('支付链接还没准备好，请检查 Stripe 配置。');
   },
 
+  async invokeFunction(functionName,payload){
+    const result=await rtInvokeEdgeFunction(functionName,payload||{},this.getSessionToken());
+    if(!result.ok){
+      throw new Error(result.error||'云端函数调用失败');
+    }
+    return result.data;
+  },
+
   async listAdminAccounts(){
     const result=await rtRpcCall('rt_admin_list_accounts',{},this.getSessionToken());
     if(!result.ok)throw new Error(result.error||'读取账号列表失败');

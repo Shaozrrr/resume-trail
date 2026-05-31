@@ -1700,16 +1700,24 @@ function renderPrepareAccessBanner(account,options){
     const membershipLabel=getAccountMembershipLabel(account);
     const detailText=getAccountEntitlementText(account);
     const isGuest=isGuestExperienceMode();
+    const ctaText=membershipLabel==='月会员'?'续费 / 升级':(membershipLabel==='永久会员'?'':'开通会员');
+    const supportingText=membershipLabel==='月会员'
+        ? '你也可以继续续 30 天会员，或者直接升级为 ¥49.9 永久会员。'
+        : (membershipLabel==='永久会员'
+            ? '当前账号已经拥有持续使用权限，可以继续创建更多准备会话。'
+            : '试用账号默认只能完整体验 1 次准备，继续使用可开通 ¥9.9 / 30天 或 ¥49.9 买断。');
     return `
         <div class="prepare-access-banner">
             <div class="prepare-access-banner-copy">
                 <strong>准备权益：${escapeHTML(membershipLabel)}</strong>
-                <p>${escapeHTML(detailText)} 试用账号默认只能完整体验 1 次准备，继续使用可开通 ¥9.9 / 30天 或 ¥49.9 买断。</p>
+                <p>${escapeHTML(detailText)} ${escapeHTML(supportingText)}</p>
             </div>
             <div class="prepare-access-banner-actions">
                 <span class="prepare-access-badge">${escapeHTML(membershipLabel)}</span>
                 ${opts.showRegister&&isGuest?'<button type="button" class="btn-secondary btn-sm" id="prepare-banner-register">先注册账号</button>':''}
-                <button type="button" class="btn-primary btn-sm" id="prepare-banner-upgrade">开通会员</button>
+                ${membershipLabel==='永久会员'
+                    ? ''
+                    : `<button type="button" class="btn-primary btn-sm" id="prepare-banner-upgrade">${escapeHTML(ctaText)}</button>`}
             </div>
         </div>
     `;
@@ -1786,7 +1794,7 @@ function openPrepareUpgradeModal(accessPayload){
         : (remaining>0?`当前还剩 ${remaining} 次体验机会。`:'当前体验额度已耗尽。');
     if(guestHint){
         guestHint.style.display=isGuestExperienceMode()?'':'none';
-        guestHint.textContent='你现在是体验模式。先注册，刚才的体验数据会自动迁移到新账号，再继续开通会员。';
+        guestHint.textContent='你现在是体验模式。先注册，随后可以自己选择是否继承刚才的体验数据，再继续开通会员。';
     }
     if(paymentNote){
         paymentNote.style.display='block';
@@ -2193,8 +2201,10 @@ function savePrepareRuntimeConfig(patch){
     return next;
 }
 function getPrepareConfig(){
+    const isLocalPreview=location.protocol==='file:'||/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
     const defaults={
-        mode:'server',
+        mode:isLocalPreview?'server':'supabase_edge',
+        functionName:'prepare-ai',
         apiBase:'http://127.0.0.1:8788',
         directBaseUrl:'https://api.deepseek.com',
         provider:'DeepSeek',
@@ -3715,9 +3725,27 @@ async function requestPrepareDirectAI(messages,input,kind){
     }
     throw new Error((config.model||'deepseek-v4-pro')==='deepseek-v4-flash'?'DeepSeek 这次没有稳定返回结构化结果。请切到 V4 Pro 再试一次。':'DeepSeek 这次没有稳定返回结构化结果。我已经自动重试过安全路径，你可以再点一次重新生成。');
 }
+async function requestPrepareEdgeAI(messages,kind){
+    if(!window.rtAccountService||typeof window.rtAccountService.invokeFunction!=='function'){
+        throw new Error('线上 AI 服务还没初始化完成，请稍后刷新重试。');
+    }
+    const config=getPrepareConfig();
+    const payload=await window.rtAccountService.invokeFunction(config.functionName||'prepare-ai',{
+        kind:kind||'session',
+        model:config.model||'deepseek-v4-pro',
+        messages:messages
+    });
+    if(!payload||typeof payload!=='object'||!payload.output){
+        throw new Error('AI 服务返回为空，请重新生成一次。');
+    }
+    return payload.output;
+}
 async function requestPrepareSessionAI(session){
+    const payload=getPrepareSessionPayload(session);
+    if(getPrepareConfig().mode==='supabase_edge'){
+        return requestPrepareEdgeAI(buildPrepareSessionMessagesClient(payload),'session');
+    }
     if(getPrepareConfig().mode==='direct'){
-        const payload=getPrepareSessionPayload(session);
         return requestPrepareDirectAI(buildPrepareSessionMessagesClient(payload),payload,'session');
     }
     const response=await fetch(`${getPrepareApiBase()}/api/prepare/session`,{
@@ -3741,6 +3769,9 @@ async function requestPrepareAnswerAI(session,question,framework){
         prep_focus:session.outputs?.focus?.best_experiences||[],
         prep_keywords:session.outputs?.research?.keyword_translation||[]
     });
+    if(getPrepareConfig().mode==='supabase_edge'){
+        return requestPrepareEdgeAI(buildPrepareAnswerMessagesClient(payload),'answer');
+    }
     if(getPrepareConfig().mode==='direct'){
         return requestPrepareDirectAI(buildPrepareAnswerMessagesClient(payload),payload,'answer');
     }
