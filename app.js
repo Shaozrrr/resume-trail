@@ -3458,6 +3458,56 @@ function sanitizePrepareKeywordTranslationItem(item){
         prep_direction:normalizePrepareText(item?.prep_direction||'面试前把这个词放回真实业务场景里理解。')
     };
 }
+function sanitizePrepareTextList(list,fallback,maxItems){
+    const primary=(Array.isArray(list)?list:[]).map(function(item){
+        return normalizePrepareText(item);
+    }).filter(Boolean);
+    if(primary.length)return primary.slice(0,maxItems||primary.length);
+    const backup=(Array.isArray(fallback)?fallback:[]).map(function(item){
+        return normalizePrepareText(item);
+    }).filter(Boolean);
+    return backup.slice(0,maxItems||backup.length);
+}
+function sanitizePrepareFocus(output,session){
+    const fallbackFocus=buildPrepareOutputsFallback(session||{}).focus||{};
+    const currentFocus=output?.focus||{};
+    const prepPriorities=((currentFocus.prep_priorities||[]).length?currentFocus.prep_priorities:fallbackFocus.prep_priorities||[]).map(function(item,index){
+        const fallbackItem=(fallbackFocus.prep_priorities||[])[index]||{};
+        return{
+            title:normalizePrepareText(item?.title||fallbackItem.title||`准备重点 ${index+1}`),
+            reason:normalizePrepareText(item?.reason||fallbackItem.reason||'把这块准备清楚，能明显提升面试稳定性。'),
+            what_to_prepare:sanitizePrepareTextList(item?.what_to_prepare,fallbackItem.what_to_prepare,4)
+        };
+    }).filter(function(item){
+        return item.title&&item.reason&&item.what_to_prepare.length;
+    });
+    const bestExperiences=((currentFocus.best_experiences||[]).length?currentFocus.best_experiences:fallbackFocus.best_experiences||[]).map(function(item,index){
+        const fallbackItem=(fallbackFocus.best_experiences||[])[index]||(fallbackFocus.best_experiences||[])[0]||{};
+        return{
+            resume_section:normalizePrepareText(item?.resume_section||fallbackItem.resume_section||`经历线索 ${index+1}`),
+            why_match:normalizePrepareText(item?.why_match||fallbackItem.why_match||'这段内容可以先当作可迁移能力线索来准备。'),
+            highlight_points:sanitizePrepareTextList(item?.highlight_points,fallbackItem.highlight_points,4),
+            possible_followups:sanitizePrepareTextList(item?.possible_followups,fallbackItem.possible_followups,4)
+        };
+    }).filter(function(item){
+        return item.resume_section&&item.why_match&&(item.highlight_points.length||item.possible_followups.length);
+    });
+    const riskWarnings=((currentFocus.risk_warnings||[]).length?currentFocus.risk_warnings:fallbackFocus.risk_warnings||[]).map(function(item,index){
+        const fallbackItem=(fallbackFocus.risk_warnings||[])[index]||{};
+        return{
+            title:normalizePrepareText(item?.title||fallbackItem.title||`风险提示 ${index+1}`),
+            description:normalizePrepareText(item?.description||fallbackItem.description||'这块如果讲不清，面试官会自然追问。'),
+            avoidance_tip:normalizePrepareText(item?.avoidance_tip||fallbackItem.avoidance_tip||'提前准备一版更具体的表达。')
+        };
+    }).filter(function(item){
+        return item.title&&item.description&&item.avoidance_tip;
+    });
+    return{
+        prep_priorities:prepPriorities,
+        best_experiences:bestExperiences,
+        risk_warnings:riskWarnings
+    };
+}
 function sanitizePrepareOutputs(output,session){
     const next=cloneData(output||{});
     const knownBriefs=getPrepareKnownTermBriefs(session||{});
@@ -3485,6 +3535,7 @@ function sanitizePrepareOutputs(output,session){
         }
     });
     next.research=Object.assign({},next.research||{},{keyword_translation:keywordTranslation});
+    next.focus=sanitizePrepareFocus(next,session);
     const questionGroups=(next?.questions?.question_groups||[]).map(function(group){
         return Object.assign({},group,{
             questions:(group?.questions||[]).map(function(question){
@@ -3758,6 +3809,7 @@ async function requestPrepareSessionAI(session){
     return data.output;
 }
 async function requestPrepareAnswerAI(session,question,framework){
+    const safeFocus=sanitizePrepareFocus(session.outputs||{},session);
     const payload=Object.assign({},getPrepareSessionPayload(session),{
         question_id:question.id,
         question:question.question,
@@ -3766,7 +3818,7 @@ async function requestPrepareAnswerAI(session,question,framework){
         recommended_frameworks:question.recommended_frameworks||[],
         default_framework:question.default_framework||'',
         framework_type:framework||'STAR',
-        prep_focus:session.outputs?.focus?.best_experiences||[],
+        prep_focus:safeFocus.best_experiences||[],
         prep_keywords:session.outputs?.research?.keyword_translation||[]
     });
     if(getPrepareConfig().mode==='supabase_edge'){
@@ -3864,17 +3916,21 @@ function buildPrepareOutputsFallback(session){
     const category=session.role_category||lens.label;
     const experiences=resumeSignals.entries.map(function(entry,index){
         const isGap=entry==='当前简历缺少直接证据';
+        const bridgeLabel=lens.key==='data'?'数据分析、结构化判断和业务拆解':(lens.key==='operations'||lens.key==='pm'?'协作推进、节奏管理和复杂事项收束':lens.key==='strategy'?'研究分析、信息整合和商业判断':'用户理解、问题拆解和方案表达');
         return{
             resume_section:isGap?'当前简历缺少直接证据':(index===0?resumeSignals.fileName:`经历线索 ${index+1}`),
-            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容能直接支撑 ${roleName} 对 ${index===0?'核心判断':'补充能力'} 的要求。`,
+            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容未必与 ${roleName} 直接同题，但它可能是你现阶段最能翻译成 ${bridgeLabel} 的线索，关键在于把真实动作、判断和结果补挖出来。`,
             highlight_points:[
-                isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`把这段经历中的业务背景、目标和你真正负责的部分讲清楚`,
-                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个': '补充一组能够体现结果的数字或变化',
-                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`把它和 ${roleName} 需要解决的问题直接连起来`
+                isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`先回忆这段里你有没有做过调研、拆解、写作、协调、交付或复盘，把这些真实动作单独拎出来`,
+                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个': '补充一组能够体现结果的数字或变化，哪怕只是效率提升、周期缩短、反馈改善',
+                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`把它改写成“问题是什么、你怎么判断、你做了什么、结果如何”，再连回 ${roleName}`,
+                isGap?`如果完全没有直接案例，就先补做一个和 ${roleName} 最近的最小项目，再把它和已有背景一起讲`:'如果这段离岗位较远，要主动解释它证明的是哪类可迁移能力，而不是假装完全对口'
             ],
             possible_followups:[
-                isGap?'这段经历里你最能证明自己扛事的动作是什么？':'如果资源更少，你会怎么做取舍？',
-                isGap?'最终结果有没有任何可验证的数字或反馈？':'面试官追问结果真实性时，你会拿什么细节证明？'
+                isGap?'这段经历里你最能证明自己扛事的动作是什么？有没有你独立推进、组织材料、做判断或推动交付的部分？':'如果资源更少、时间更紧，你会怎么取舍？这能帮你把经历讲得更像岗位判断题。',
+                isGap?'最终结果有没有任何可验证的数字、反馈、采纳记录、老师/同事评价或后续影响？':'面试官追问结果真实性时，你会拿什么细节证明？提前准备数字、反馈、文档或关键决策细节。',
+                isGap?`如果没有直接相关经历，面试前 3 到 7 天内你能补做什么最小案例，来证明你对 ${roleName} 的理解？`:`如果这段只是线索，不够成型，看看能不能把相关 side project、课程项目、社团/实习协作经历并到这段里一起讲。`,
+                `包装时不要说“虽然我没做过”。改成“我现有最接近的是这段，它证明了我的 ${bridgeLabel}，同时我已经补了哪些学习或实操”。`
             ],
             raw:entry
         };
@@ -3926,7 +3982,8 @@ function buildPrepareOutputsFallback(session){
     const riskWarnings=[
         {title:'不要只讲公司印象',description:'如果只停留在品牌层面，面试官很难判断你是否理解这份岗位。',avoidance_tip:'把公司认知翻译成“这个岗位为什么存在、要解决什么问题”。'},
         {title:'不要只讲过程',description:'很多候选人在项目经历里说了很多动作，却没有清楚交代结果。',avoidance_tip:'每段经历至少准备一组结果数字，或明确的变化描述。'},
-        {title:'避免角色模糊',description:'如果讲不清你自己到底负责什么，面试官会质疑真实贡献。',avoidance_tip:'始终把“我负责什么、我做了什么、我改变了什么”拆开说。'}
+        {title:'避免角色模糊',description:'如果讲不清你自己到底负责什么，面试官会质疑真实贡献。',avoidance_tip:'始终把“我负责什么、我做了什么、我改变了什么”拆开说。'},
+        {title:'低匹配时不要只说“我愿意学”',description:`当简历和 ${roleName} 不完全匹配时，只表达兴趣远远不够，面试官会更在意你已经补了什么、做了什么。`,avoidance_tip:'准备一段“我从已有背景里迁移了什么 + 我额外补做了什么 + 现在能怎么上手”的回答。'}
     ];
     const baseQuestions=[
         {
@@ -4425,8 +4482,9 @@ function renderPrepareResearch(session){
     `;
 }
 function renderPrepareFocus(session){
-    const focus=session.outputs?.focus;
-    if(!focus)return'<div class="prepare-empty">先生成一套准备工作台，再查看准备重点。</div>';
+    const hasFocus=!!session.outputs?.focus;
+    const focus=sanitizePrepareFocus(session.outputs||{},session);
+    if(!hasFocus&&!focus.best_experiences.length&&!focus.prep_priorities.length&&!focus.risk_warnings.length)return'<div class="prepare-empty">先生成一套准备工作台，再查看准备重点。</div>';
     return `
         <div class="prepare-grid prepare-grid-two">
             <article class="prepare-card-surface prepare-section-shell">
@@ -4449,6 +4507,12 @@ function renderPrepareFocus(session){
                             <h3>${escapeHTML(item.resume_section)}</h3>
                             <p>${escapeHTML(item.why_match)}</p>
                             <ul class="prepare-bullet-list">${item.highlight_points.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                            ${item.possible_followups?.length?`
+                                <div class="prepare-followup-block">
+                                    <strong>补挖 / 补做 / 包装建议</strong>
+                                    <ul class="prepare-bullet-list prepare-bullet-list-subtle">${item.possible_followups.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                                </div>
+                            `:''}
                         </section>
                     `).join('')}
                 </div>
