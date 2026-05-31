@@ -2236,7 +2236,7 @@ function inferPrepareQuestionFrameworks(question){
     let recommended=[];
     let defaultFramework='PREP';
     let reason='这道题更适合先亮判断，再按结构展开。';
-    if(type==='resume_deep_dive'||type==='behavioral'||/讲.*经历|哪一段经历|举例|项目|具体负责|最后结果/.test(text)){
+    if(type==='resume_deep_dive'||type==='behavioral'||/讲.*经历|哪一段经历|举例|项目|具体负责|最后结果|冲突|失败|成就|影响别人|资源有限|压力|挫折|带领|领导/.test(text)){
         recommended=['STAR','PAR','PREP'];
         defaultFramework='STAR';
         reason='这道题核心在经历与结果，优先用 STAR 或 PAR 把背景、动作和结果讲扎实。';
@@ -3504,48 +3504,87 @@ function isPrepareGenericExperienceItem(item){
     const genericHighlights=/先回忆这段里你有没有做过调研|把它改写成“问题是什么|如果这段离岗位较远/.test(highlights);
     return genericSection||genericReason||genericHighlights;
 }
-function buildPrepareExperienceExample(entry,roleName){
+function getPrepareJdFocusAngles(jdText){
+    const source=normalizePrepareText(jdText).toLowerCase();
+    const cues=[];
+    const push=(label,keywords)=>{
+        if(cues.includes(label))return;
+        if(keywords.some(keyword=>source.includes(keyword.toLowerCase())))cues.push(label);
+    };
+    push('需求挖掘',['需求','访谈','调研','用户研究','痛点','洞察','问题定义']);
+    push('PRD/方案撰写',['prd','需求文档','方案','原型','文档','写作','说明书']);
+    push('AI Skill/产品落地',['skill','agent','workflow','工作流','智能体','copilot','插件','工具']);
+    push('漏斗/指标验证',['漏斗','转化','留存','指标','埋点','a/b','ab','数据','增长']);
+    push('跨团队推进',['跨团队','协作','研发','算法','设计','运营','业务','推进']);
+    push('行业/业务理解',['行业','竞品','商业模式','业务','生态','市场','调研']);
+    return cues.slice(0,4);
+}
+function getPrepareJdFocusLabel(jdAngles, fallback){
+    const angles=(Array.isArray(jdAngles)?jdAngles:[]).filter(Boolean);
+    if(angles.length)return angles.join(' / ');
+    return fallback||'需求挖掘 / 方案表达 / 结果验证';
+}
+function buildPrepareExperienceExample(entry,roleName,jdAngles){
+    const focusLabel=getPrepareJdFocusLabel(jdAngles);
     switch(entry?.type){
         case'RESEARCH':
-            return `例如：如果这段是论文/研究，就讲“我先定义研究问题，快速梳理文献和信息来源，搭建分析框架，在 deadline 前完成写作或汇报；这证明我能把陌生问题快速拆开，并输出结构化结论，这和 ${roleName} 需要先理解业务再形成方案的能力是相通的”。`;
+            return `例如：如果这段是论文/研究，就别只讲“我做了研究”，而要讲“我先用 ${jdAngles[0]||'用户访谈/资料检索'} 定义问题，再把发现整理成 ${jdAngles.includes('PRD/方案撰写')?'一页 PRD / 方案':'结构化结论'}，最后用反馈、采纳结果或答辩表现验证；这说明我能把陌生问题翻译成产品语言，也能和 ${roleName} 需要的判断方式对上”。`;
         case'CAMPUS':
-            return '例如：如果这段是社团/校园项目，就讲“我负责把目标拆成时间表、分工和交付物，过程中协调不同同学推进，最后按时完成活动或项目；这能证明我有推进节奏、跨角色协作和收尾交付能力”。';
+            return `例如：如果这段是社团/校园项目，就讲“我先把目标拆成时间表、分工和交付物，再协调不同同学推进，最后用结果或反馈收尾；如果 JD 里强调 ${focusLabel}，你就把这段翻成‘我不是只参与活动，而是能组织资源、推进节奏、收束结果’”。`;
         case'DATA':
-            return '例如：如果这段里有问卷、统计或数据分析，就讲“我先看数据或样本里最关键的异常和模式，再据此形成判断和建议；虽然不是产品岗位，但它能证明我能从信息里提炼决策依据”。';
+            return `例如：如果这段里有问卷、统计或数据分析，就讲“我先看样本/指标里最关键的异常，再据此判断问题出在哪、给出什么动作建议；如果 JD 里强调 ${focusLabel}，这段就不要停在‘做过分析’，而要补成‘分析→判断→动作→验证’”。`;
         case'PROJECT':
-            return `例如：如果这段本身就是项目/实习，就直接讲“目标是什么、你具体负责什么、你做了哪些判断和推进、最后结果如何”，然后补一句“这就是我最接近 ${roleName} 的证据”。`;
+            return `例如：如果这段本身就是项目/实习，就直接讲“目标是什么、你具体负责什么、你做了哪些判断和推进、最后结果如何”，并明确对齐 JD 里的 ${focusLabel}；如果其中有用户访谈、需求整理、PRD、Skill 开发或漏斗优化，就一定把那条链路讲出来，这就是你最接近 ${roleName} 的证据。`;
         default:
-            return `例如：把这段讲成“当时要解决什么问题、你怎么整理信息、怎么推动事情往前走、最后交付了什么”，再补一句“它最能证明我在 ${roleName} 需要的协作推进和结构化表达上是能上手的”。`;
+            return `例如：把这段讲成“当时要解决什么问题、你怎么整理信息、怎么推动事情往前走、最后交付了什么”，再补一句“它对应 JD 里的 ${focusLabel}，最能证明我在 ${roleName} 需要的协作推进和结构化表达上是能上手的”。`;
     }
 }
-function buildPrepareExperienceFollowups(entry,roleName){
+function buildPrepareExperienceFollowups(entry,roleName,jdAngles){
+    const focusLabel=getPrepareJdFocusLabel(jdAngles);
+    const highestValueAction=(function(){
+        const segments=[];
+        const labels=new Set(jdAngles||[]);
+        if(labels.has('需求挖掘'))segments.push('用户访谈/痛点提炼');
+        if(labels.has('PRD/方案撰写'))segments.push('一页 PRD / 需求说明');
+        if(labels.has('AI Skill/产品落地'))segments.push('最小 Skill / Workflow demo');
+        if(labels.has('漏斗/指标验证'))segments.push('指标 / 漏斗验证');
+        if(labels.has('跨团队推进'))segments.push('跨团队推进记录');
+        if(labels.has('行业/业务理解'))segments.push('竞品 / 行业判断记录');
+        if(!segments.length)segments.push('问题定义 → 动作 → 结果');
+        return `先把这段补成一条完整故事：${segments.join(' → ')}，这样你在 ${roleName} 面试里就能直接回答“我不是只懂概念，我能把事情做出来”。`;
+    })();
     switch(entry?.type){
         case'RESEARCH':
             return[
+                highestValueAction,
                 '把论文/研究里最像产品工作的动作单独写出来：定义问题、查资料、搭框架、写结论、做汇报。',
                 '补一个可验证结果，例如导师反馈、是否被采纳、完成周期、答辩结果或引用的核心结论。',
-                `如果这段仍然偏学术，面试前补做一个 ${roleName} 相关的小案例，例如“某个 AI Agent 财务场景分析 + 一页方案”。`
+                `如果这段仍然偏学术，面试前补做一个 ${roleName} 相关的小案例，例如“${focusLabel} + 一页方案 / demo / 验证指标”。`
             ];
         case'CAMPUS':
             return[
+                highestValueAction,
                 '把活动目标、分工人数、排期、你解决过的卡点写清楚，不要只说“参与过”。',
                 '补一个结果，例如到场人数、完成率、满意度、传播效果、周期缩短或执行效率提升。',
                 `可以把这段包装成“我最接近产品推进的经历”，再补一个你最近为 ${roleName} 做的学习或 demo。`
             ];
         case'DATA':
             return[
+                highestValueAction,
                 '把你看过哪些数据、如何得出判断、最后给了什么建议说具体。',
                 '补一个结果，例如判断被采纳、报告被使用、结论影响了后续动作。',
                 `再加一个 ${roleName} 相关的小练习，把“分析”延伸到“方案建议”，说服力会强很多。`
             ];
         case'PROJECT':
             return[
+                highestValueAction,
                 '把你负责的判断节点和推进动作写实，不要只写团队做了什么。',
                 '补一个结果数字，哪怕只是时间、效率、交付完成度或反馈改善。',
                 `最后用一句话说明：为什么这段就是你最能支撑 ${roleName} 的例子。`
             ];
         default:
             return[
+                highestValueAction,
                 '先把这段里最像“扛事”的动作找出来，不要泛泛描述经历背景。',
                 '补一个最小结果，不一定非得是商业指标，也可以是交付、反馈、完成度或影响范围。',
                 `如果这段还是太弱，就并上一个最近新做的 ${roleName} 相关案例，再一起讲。`
@@ -3779,7 +3818,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -3813,7 +3852,7 @@ function buildPrepareAnswerMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，不是完整标准答案。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务与行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）copyable_outline 可以使用占位符，比如 [结果数字]、[项目背景]，不能假装用户已经做过。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
+            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，不是完整标准答案。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 可以使用占位符，比如 [结果数字]、[项目背景]，不能假装用户已经做过。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
         },
         {
             role:'user',
@@ -4030,29 +4069,49 @@ function buildPrepareOutputsFallback(session){
     const lens=getPrepareLens(session);
     const translation=buildPrepareKeywordTranslation(session,lens);
     const resumeSignals=getPrepareResumeSignals(session);
+    const jdText=normalizePrepareText(session?.jd_text||'');
+    const jdAngles=getPrepareJdFocusAngles(jdText);
+    const isProductRole=/产品|product|pm/i.test(normalizePrepareText(session?.role_name||''))||jdAngles.some(function(item){
+        return['需求挖掘','PRD/方案撰写','AI Skill/产品落地','漏斗/指标验证'].includes(item);
+    });
     const companyName=session.company_name||'目标公司';
     const roleName=session.role_name||'目标岗位';
     const category=session.role_category||lens.label;
     const experiences=resumeSignals.entries.map(function(entry){
         const isGap=entry?.type==='GAP'||entry?.text==='当前简历缺少直接证据';
-        const bridgeLabel=lens.key==='data'?'数据分析、结构化判断和业务拆解':(lens.key==='operations'||lens.key==='pm'?'协作推进、节奏管理和复杂事项收束':lens.key==='strategy'?'研究分析、信息整合和商业判断':'用户理解、问题拆解和方案表达');
-        const exampleText=buildPrepareExperienceExample(entry,roleName);
-        const followupHints=buildPrepareExperienceFollowups(entry,roleName);
+        const bridgeLabel=isProductRole
+            ?'需求挖掘、PRD 撰写、Skill/方案落地和漏斗验证'
+            :lens.key==='data'
+                ?'数据分析、结构化判断和业务拆解'
+                :(lens.key==='operations'||lens.key==='pm'
+                    ?'协作推进、节奏管理和复杂事项收束'
+                    :lens.key==='strategy'
+                        ?'研究分析、信息整合和商业判断'
+                        :'用户理解、问题拆解和方案表达');
+        const jdFocusLabel=getPrepareJdFocusLabel(jdAngles);
+        const exampleText=buildPrepareExperienceExample(entry,roleName,jdAngles);
+        const followupHints=buildPrepareExperienceFollowups(entry,roleName,jdAngles);
         return{
             resume_section:isGap?'当前简历缺少直接证据':entry.title,
-            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:`这段内容未必与 ${roleName} 直接同题，但它是你简历里目前最能翻译成 ${bridgeLabel} 的一条真实线索。关键不是硬说对口，而是把这条线索里的动作、判断和结果翻译成岗位语言。`,
+            why_match:isGap?`当前简历里还没有能直接支撑 ${roleName} 的经历素材，先别硬编。需要补一段与你申请岗位目标最接近的项目或业务经历。`:(
+                isProductRole
+                    ?`这段最适合拿来对应 JD 里的 ${jdFocusLabel}。它不一定是直接做 AI 产品，但它能证明你已经做过“用户问题 → 需求/方案 → 落地验证”的一部分。关键不是硬说对口，而是把这条线索里的动作、判断和结果翻译成岗位语言。`
+                    :`这段内容未必与 ${roleName} 直接同题，但它是你简历里目前最能翻译成 ${bridgeLabel} 的一条真实线索。关键不是硬说对口，而是把这条线索里的动作、判断和结果翻译成岗位语言。`
+            ),
             highlight_points:[
                 isGap?'优先补挖一段你亲自负责过的项目，讲清背景、目标、动作和结果':`原始线索：${entry.text}`,
-                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个':exampleText,
-                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:`面试里把这段收束成“这说明我虽然不是直接做过同岗位，但已经具备 ${bridgeLabel} 里的哪两项能力”。`
+                isGap?'补上至少一组结果数字，哪怕是效率、转化、收入、节省时间中的一个':`建议优先对齐 JD 里的 ${jdFocusLabel}，把这段讲成“问题是什么、你怎么判断、你做了什么、结果如何”。`,
+                isGap?`补完后再把它和 ${roleName} 需要解决的问题直接连起来`:exampleText
             ],
             possible_followups:[
                 ...(isGap?[
-                    '这段经历里你最能证明自己扛事的动作是什么？有没有你独立推进、组织材料、做判断或推动交付的部分？',
-                    '最终结果有没有任何可验证的数字、反馈、采纳记录、老师/同事评价或后续影响？',
+                    `这段经历里你最能证明自己扛事的动作是什么？有没有你独立推进、组织材料、做判断或推动交付的部分？`,
+                    `最终结果有没有任何可验证的数字、反馈、采纳记录、老师/同事评价或后续影响？`,
                     `如果没有直接相关经历，面试前 3 到 7 天内你能补做什么最小案例，来证明你对 ${roleName} 的理解？`
                 ]:followupHints),
-                `包装时不要说“虽然我没做过”。改成“我最接近 ${roleName} 的例子是这段，它证明了我的 ${bridgeLabel}，同时我已经补了哪些学习或实操”。`
+                isProductRole
+                    ?`包装时不要只说“我做过类似经历”，而要直接讲“我这段最接近 JD 里的 ${jdFocusLabel}，我已经补了哪些学习或实操；如果时间够，我还会补一页最小 PRD / 需求说明、一个 demo 或一个验证指标”。`
+                    :`包装时不要说“虽然我没做过”。改成“我最接近 ${roleName} 的例子是这段，它证明了我的 ${bridgeLabel}，同时我已经补了哪些学习或实操”。`
             ],
             raw:entry.text
         };
@@ -4095,6 +4154,17 @@ function buildPrepareOutputsFallback(session){
         {title:'把最强经历提前选好',reason:'真正拉开差距的不是经历数量，而是你最先讲出的那段是否准确命中岗位。',what_to_prepare:['挑 2 到 3 段最相关经历','每段都补上目标、动作、结果','避免只说过程不说结果']},
         {title:'提前准备追问',reason:'面试深挖往往发生在你讲完案例之后。',what_to_prepare:['准备为什么这么做','准备有没有别的方案','准备结果如何衡量']}
     ];
+    if(isProductRole){
+        prepPriorities.unshift({
+            title:'把 JD 关键词串成一条经历链',
+            reason:`这份岗位更看重你能不能把 ${jdAngles.length?jdAngles.join('、'):'需求挖掘、方案表达、结果验证'} 讲成一条完整链，而不是只说自己参与过。`,
+            what_to_prepare:[
+                `准备一段最接近的经历，按“问题是什么、你怎么判断、你做了什么、结果如何”重写`,
+                `如果缺少直接经历，先补一页最小 PRD / 需求说明 + 一个可验证结果`,
+                '准备面试官追问时能拿出的证据：数据、文档、截图、反馈'
+            ]
+        });
+    }
     if(lens.key==='data'){
         prepPriorities.unshift({title:'指标与分析框架',reason:'数据/分析岗最怕只会报数字，不会解释业务意义。',what_to_prepare:['准备一个完整的指标分析案例','说明你如何判断问题优先级','说明数据如何转成动作建议']});
     }
@@ -4123,11 +4193,28 @@ function buildPrepareOutputsFallback(session){
             })
         },
         {
+            group_name:'行为面 / 宝洁八大问',
+            questions:[
+                {id:'behavior-1',question:'请讲一个你最有成就感的经历，为什么你觉得它最能代表你？',question_type:'behavioral',source:'behavioral',importance:'high'},
+                {id:'behavior-2',question:'请讲一个你和别人有分歧、但最后把事情推进下去的经历。',question_type:'behavioral',source:'behavioral',importance:'high'},
+                {id:'behavior-3',question:'请讲一个你做错了、或者结果不如预期的经历，你后来怎么处理的？',question_type:'behavioral',source:'behavioral',importance:'high'},
+                {id:'behavior-4',question:'请讲一个你在资源有限、时间很紧的情况下做取舍的经历。',question_type:'behavioral',source:'behavioral',importance:'medium'}
+            ]
+        },
+        {
             group_name:'场景 / case / 业务题',
             questions:[
                 {id:'scenario-1',question:`如果你入职后第一个月需要快速判断 ${roleName} 最该先抓的事情，你会怎么拆？`,question_type:'case',source:'jd',importance:'high'},
                 {id:'scenario-2',question:lens.key==='data'?'如果某个核心指标突然下滑，你会如何验证原因并给出动作建议？':'如果业务目标没有达成，你会如何判断是策略问题、执行问题还是资源问题？',question_type:'case',source:'jd',importance:'high'},
                 {id:'scenario-3',question:'如果你需要协调多个角色一起推进，但大家优先级不一致，你会怎么推动？',question_type:'behavioral',source:'role',importance:'medium'}
+            ]
+        },
+        {
+            group_name:'反问 / 补充确认',
+            questions:[
+                {id:'reverse-1',question:'如果我最终入职，最希望我前 30 天先补上的能力或认知是什么？',question_type:'company_fit',source:'role',importance:'medium'},
+                {id:'reverse-2',question:'这份岗位里，团队最看重的结果到底是什么，短期和长期分别怎么衡量？',question_type:'role_understanding',source:'company',importance:'medium'},
+                {id:'reverse-3',question:'如果你看我的背景，最想追问我哪一块经历？',question_type:'behavioral',source:'resume',importance:'medium'}
             ]
         }
     ];
@@ -4656,20 +4743,40 @@ function renderPrepareFocus(session){
 }
 function renderPrepareQuestions(session){
     const questions=session.outputs?.questions?.question_groups||[];
-    if(!questions.length)return'<div class="prepare-empty">先生成一套准备工作台，再查看模拟问题。</div>';
+    const introText='这些问题不只来自 JD，也会混合简历深挖、行为面 / 宝洁八大问、场景题和反问确认。';
     return `
         <div class="prepare-question-groups">
+            <section class="prepare-card-surface prepare-question-toolbox">
+                <div class="prepare-question-toolbox-copy">
+                    <div class="prepare-section-kicker">自定义追问</div>
+                    <h3>把你自己的问题交给 AI，直接生成可开讲的回答骨架</h3>
+                    <p>${escapeHTML(introText)}</p>
+                </div>
+                <div class="prepare-question-toolbox-panel">
+                    <label class="prepare-field prepare-custom-question-field">
+                        <span>你想问什么</span>
+                        <textarea id="prepare-custom-question-input" rows="5" placeholder="例如：如果面试官追问我为什么转产品，我应该怎么答？">${escapeHTML(prepareState.freeQuestionText)}</textarea>
+                        <em>输入后可以直接生成回答骨架，系统会沿用当前 JD 和简历上下文。</em>
+                    </label>
+                    <div class="prepare-custom-question-actions">
+                        <button type="button" class="btn-primary" id="prepare-custom-question-generate">生成回答骨架</button>
+                        <button type="button" class="btn-secondary" id="prepare-custom-question-clear">清空</button>
+                    </div>
+                </div>
+            </section>
+            ${!questions.length?'<div class="prepare-empty prepare-question-empty">先生成一套准备工作台，再查看模拟问题。</div>':''}
             ${questions.map(group=>`
                 <section class="prepare-card-surface prepare-section-shell">
                     <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
                     <div class="prepare-question-list">
                         ${group.questions.map(function(rawQuestion){
                             const question=normalizePrepareQuestionRecord(rawQuestion);
+                            const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':'来自岗位信息';
                             return `
                             <button class="prepare-question-card${prepareState.selectedQuestionId===question.id?' is-active':''}" type="button" data-prepare-question="${question.id}">
                                 <div class="prepare-question-main">
                                     <strong>${escapeHTML(question.question)}</strong>
-                                    <span>${escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':'来自岗位信息')}</span>
+                                    <span>${escapeHTML(sourceLabel)}</span>
                                     <div class="prepare-question-frameworks">
                                         ${question.recommended_frameworks.map(function(framework){
                                             return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
@@ -4847,7 +4954,7 @@ function renderPrepareAnswers(session){
         const item=getPrepareFrameworkMeta(key);
         return `<button type="button" class="prepare-framework-btn${framework===item.key?' is-active':''}" data-prepare-framework="${item.key}">${escapeHTML(item.label)}</button>`;
     }).join('');
-    const questionSource=escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':'来自岗位信息');
+    const questionSource=escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':'来自岗位信息');
     const answerMeta=`
         <section class="prepare-card-surface prepare-answer-hero-card">
             <div class="prepare-answer-hero-copy">
@@ -5299,6 +5406,27 @@ function renderPrepare(){
         renderPrepare();
         if(session)ensurePrepareAnswer(session.id,prepareState.selectedQuestionId,prepareState.selectedFramework||'PREP');
     }));
+    $('#prepare-custom-question-input')?.addEventListener('input',function(){
+        prepareState.freeQuestionText=this.value;
+    });
+    $('#prepare-custom-question-generate')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        if(!session)return;
+        const text=normalizePrepareText(prepareState.freeQuestionText);
+        if(!text){
+            toast('先输入你想追问的问题。','error');
+            return;
+        }
+        prepareState.selectedQuestionId=null;
+        prepareState.selectedFramework='FREE';
+        prepareState.activeTab='answers';
+        renderPrepare();
+        void ensurePrepareFreeAnswer(session.id);
+    });
+    $('#prepare-custom-question-clear')?.addEventListener('click',function(){
+        prepareState.freeQuestionText='';
+        renderPrepare();
+    });
     $$('[data-prepare-framework]').forEach(button=>button.addEventListener('click',function(){
         prepareState.selectedFramework=this.dataset.prepareFramework||'PREP';
         renderPrepare();
