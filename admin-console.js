@@ -200,9 +200,38 @@
         return Math.max(0,Math.ceil((expiresAt-Date.now())/86400000));
     }
 
+    function getHasPaidAccess(account){
+        if(!account)return false;
+        if(typeof account.has_paid_access==='boolean')return account.has_paid_access;
+        const membership=String(account.membership_tier||'trial');
+        if(account.is_lifetime||membership==='lifetime'||membership==='granted'||membership==='owner'||membership==='admin'){
+            return true;
+        }
+        if(membership==='monthly'){
+            if(!account.membership_expires_at)return true;
+            const expiresAt=new Date(account.membership_expires_at).getTime();
+            return !Number.isNaN(expiresAt)&&expiresAt>Date.now();
+        }
+        return false;
+    }
+
+    function getTrialQuotaSnapshot(account){
+        const trialLimit=Math.max(0,Number(account&&account.trial_prepare_limit)||0);
+        const bonusCredits=Math.max(0,Number(account&&account.bonus_prepare_credits)||0);
+        const usedCredits=Math.max(0,Number(account&&account.used_prepare_credits)||0);
+        const total=Math.max(trialLimit+bonusCredits,0);
+        const remaining=Math.max(total-usedCredits,0);
+        return {
+            total:total,
+            remaining:remaining,
+            used:usedCredits
+        };
+    }
+
     function getAccountStatusNote(account){
         if(!account)return'';
         const membership=getMembershipKey(account);
+        const quotaSnapshot=getTrialQuotaSnapshot(account);
         if(account.status==='pending'){
             return 'pending 表示这个账号已经注册，但邮箱还没验证完成，所以还没有完全激活。';
         }
@@ -224,7 +253,7 @@
                 ? `月会员已生效，还剩 ${remainingDays} 天，到期日 ${formatDate(account.membership_expires_at)}。`
                 : `月会员已到期，到期日 ${formatDate(account.membership_expires_at)}。`;
         }
-        return `当前为试用状态，剩余 ${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||0} 次准备机会。`;
+        return `当前为试用状态，剩余 ${quotaSnapshot.remaining} / ${quotaSnapshot.total} 次准备机会。`;
     }
 
     function getActionSuccessMessage(account,action){
@@ -293,11 +322,9 @@
                     membership_tier:'trial',
                     is_admin:false,
                     is_lifetime:false,
-                    trial_prepare_limit:1,
-                    bonus_prepare_credits:0,
+                    trial_prepare_limit:(event.user_id||isRegisteredEvent)?1:1,
+                    bonus_prepare_credits:(event.user_id||isRegisteredEvent)?1:0,
                     used_prepare_credits:0,
-                    remaining_prepare_quota:0,
-                    total_prepare_quota:1,
                     has_paid_access:false,
                     status:'history',
                     source_channel:'legacy_posthog_snapshot',
@@ -318,11 +345,13 @@
             if(event.user_id){
                 existing.account.email=event.user_id;
                 existing.account.auth_mode='registered';
+                existing.account.bonus_prepare_credits=Math.max(existing.account.bonus_prepare_credits||0,1);
             }
             if(isRegisteredEvent){
                 existing.account.auth_mode='registered';
                 existing.account.auth_user_id=event.actor_id;
                 existing.account.display_name='历史注册用户 '+String(event.actor_id).slice(0,8);
+                existing.account.bonus_prepare_credits=Math.max(existing.account.bonus_prepare_credits||0,1);
             }
             if(event.at&&(!existing.account.created_at||new Date(event.at)<new Date(existing.account.created_at))){
                 existing.account.created_at=event.at;
@@ -550,7 +579,9 @@
         list.innerHTML=accounts.map(function(entry){
             const account=entry.account||{};
             const id=account.id||'';
-            const quota=account.has_paid_access?'无限制':`${account.remaining_prepare_quota||0} / ${account.total_prepare_quota||0}`;
+            const hasPaidAccess=getHasPaidAccess(account);
+            const quotaSnapshot=getTrialQuotaSnapshot(account);
+            const quota=hasPaidAccess?'无限制':`${quotaSnapshot.remaining} / ${quotaSnapshot.total}`;
             const isLegacy=account.admin_source==='legacy_snapshot';
             const isReadonly=isLegacy||!state.canManage;
             const statusToggleLabel=account.status==='paused'?'恢复活跃':'暂停账号';
@@ -577,7 +608,7 @@
                     <div class="admin-account-status-note">${escapeHTML(getAccountStatusNote(account))}</div>
                     <div class="admin-account-metrics">
                         <span>体验额度：${escapeHTML(quota)}</span>
-                        <span>已用：${escapeHTML(account.used_prepare_credits||0)}</span>
+                        <span>已用：${escapeHTML(quotaSnapshot.used)}</span>
                         <span>最后活跃：${escapeHTML(formatTime(account.last_seen_at))}</span>
                         <span>创建时间：${escapeHTML(formatTime(account.created_at))}</span>
                     </div>
