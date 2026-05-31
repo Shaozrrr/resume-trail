@@ -1845,7 +1845,7 @@ function openPrepareUpgradeModal(accessPayload){
     const billingConfig=getPrepareBillingConfig();
     if(title)title.textContent=membership==='monthly'
         ?'升级或续费会员'
-        :(quota.remaining>0?'准备次数可用':'体验次数已用完');
+        :(quota.remaining>0?'准备体验说明':'体验次数已用完');
     if(desc)desc.textContent=membership==='monthly'
         ? '月会员可继续续费或升级永久会员。'
         : `当前可用 ${quota.remaining}/${quota.total} 次。`;
@@ -5240,6 +5240,20 @@ function renderPrepareQuestionsList(session){
         </div>
     `;
 }
+function renderPrepareAnswerPageLead(meta){
+    const pageTitle=meta?.title||'回答页';
+    const pageDesc=meta?.description||'这道题已经单独展开，回答会在这个页面里生成和修改。';
+    const pageTag=meta?.tag||'问题回答';
+    return `
+        <section class="prepare-card-surface prepare-answer-page-lead">
+            <div class="prepare-answer-page-copy">
+                <div class="prepare-section-kicker">${escapeHTML(pageTag)}</div>
+                <h3>${escapeHTML(pageTitle)}</h3>
+                <p>${escapeHTML(pageDesc)}</p>
+            </div>
+        </section>
+    `;
+}
 function renderPrepareAnswers(session){
     const questionPane=prepareState.questionPane||'list';
     if(questionPane!=='answer'){
@@ -5259,7 +5273,13 @@ function renderPrepareAnswers(session){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
         const answer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
         return `
-            <div class="prepare-answer-flow">
+            <div class="prepare-answer-page">
+                ${renderPrepareAnswerPageLead({
+                    tag:'自定义问题',
+                    title:'自由回答页',
+                    description:'这里不再显示问题列表，只保留你的问题、回答骨架和可补充的经历素材。'
+                })}
+                <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
                         <div class="prepare-section-kicker">自由追问</div>
@@ -5284,12 +5304,19 @@ function renderPrepareAnswers(session){
                     ${prepareState.answerError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.answerError)}</div>`:''}
                     ${prepareState.answerLoading?renderPrepareLoadingScene('answer'):answer?renderPrepareAnswerBody(answer):'<div class="prepare-empty">先输入一个问题，再生成回答骨架。</div>'}
                 </section>
+                </div>
             </div>
         `;
     }
     if(isReverseQuestion){
         return `
-            <div class="prepare-answer-flow">
+            <div class="prepare-answer-page">
+                ${renderPrepareAnswerPageLead({
+                    tag:'反问面试官',
+                    title:'反问页',
+                    description:'这里是你带进面试现场的反问清单，不是堆在问题列表下面的附属内容。'
+                })}
+                <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
                         <div class="prepare-section-kicker">可反问面试官</div>
@@ -5335,12 +5362,19 @@ function renderPrepareAnswers(session){
                         </div>
                     </div>
                 </section>
+                </div>
             </div>
         `;
     }
     if(!questionMeta){
         return `
-            <div class="prepare-answer-flow">
+            <div class="prepare-answer-page">
+                ${renderPrepareAnswerPageLead({
+                    tag:'回答页',
+                    title:'先选一道题，再进入回答页',
+                    description:'点开问题后，这里会切成独立回答页，不会把答案塞回题目列表底部。'
+                })}
+                <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
                         <div class="prepare-section-kicker">回答页</div>
@@ -5356,6 +5390,7 @@ function renderPrepareAnswers(session){
                 <section class="prepare-card-surface prepare-answer-surface">
                     <div class="prepare-empty">先在题目列表里选一道题，再生成回答骨架。</div>
                 </section>
+                </div>
             </div>
         `;
     }
@@ -5387,31 +5422,52 @@ function renderPrepareAnswers(session){
     `;
     if(prepareState.answerLoading&&!answer){
         return `
-            <div class="prepare-answer-flow">
+            <div class="prepare-answer-page">
+                ${renderPrepareAnswerPageLead({
+                    tag:questionSource||'问题回答',
+                    title:'回答页',
+                    description:'这道题已经切到独立回答页，正在生成对应的回答骨架。'
+                })}
+                <div class="prepare-answer-flow">
                 ${answerMeta}
                 <section class="prepare-card-surface prepare-answer-surface prepare-loading-panel">
                     ${renderPrepareLoadingScene('answer')}
                 </section>
+                </div>
             </div>
         `;
     }
     if(!answer){
         return `
-            <div class="prepare-answer-flow">
+            <div class="prepare-answer-page">
+                ${renderPrepareAnswerPageLead({
+                    tag:questionSource||'问题回答',
+                    title:'回答页',
+                    description:'这里是这道题的独立回答页。先选模板或重新生成，再继续补经历和改答案。'
+                })}
+                <div class="prepare-answer-flow">
                 ${answerMeta}
                 <section class="prepare-card-surface prepare-answer-surface">
                     ${prepareState.answerError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.answerError)}</div>`:''}
                     <div class="prepare-empty">回答骨架还没生成出来。${prepareState.answerError?'修复后再点模板重新生成。':'点击模板或问题后会自动生成。'}</div>
                 </section>
+                </div>
             </div>
         `;
     }
     return `
-        <div class="prepare-answer-flow">
+        <div class="prepare-answer-page">
+            ${renderPrepareAnswerPageLead({
+                tag:questionSource||'问题回答',
+                title:'回答页',
+                description:'题目列表已经收起，现在只保留这道题的回答、模板切换和你补充的经历素材。'
+            })}
+            <div class="prepare-answer-flow">
             ${answerMeta}
             <section class="prepare-card-surface prepare-answer-surface">
                 ${renderPrepareAnswerBody(answer)}
             </section>
+            </div>
         </div>
     `;
 }
@@ -5529,6 +5585,30 @@ function renderPrepareMockVoiceResult(label,text){
             ${value?`<div class="voice-result-label">${escapeHTML(label)}</div><div>${escapeHTML(value)}</div>`:''}
         </div>
     `;
+}
+function getPrepareAnswerPageMeta(session){
+    const selectedQuestion=prepareState.selectedQuestionId?getPrepareSelectedQuestion(session,{fallback:false}):null;
+    const questionMeta=selectedQuestion?normalizePrepareQuestionRecord(selectedQuestion):null;
+    const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
+    if(prepareState.selectedFramework==='FREE'&&freeQuestion){
+        return {
+            kicker:'自定义问题回答页',
+            title:freeQuestion,
+            detail:'问题列表已收起，这里只保留这道题的回答骨架与补充经历。'
+        };
+    }
+    if(questionMeta){
+        return {
+            kicker:questionMeta.question_type==='reverse_question'?'反问页':'问题回答页',
+            title:questionMeta.question,
+            detail:'问题列表已收起，这里是单独的回答页。'
+        };
+    }
+    return {
+        kicker:'问题回答页',
+        title:'回答页',
+        detail:'这里不会再把回答挂在题目列表底部。'
+    };
 }
 function renderPrepareMockInterview(session){
     if(prepareMockState.sessionId!==session?.id){
@@ -5693,7 +5773,7 @@ function renderPrepareMockInterview(session){
     const feedbackPanel=feedback?renderPrepareMockFeedbackCard(feedback):'';
     return `
         <div class="prepare-mock-workbench">
-            <section class="prepare-card-surface prepare-section-shell prepare-mock-header">
+            <section class="prepare-card-surface prepare-section-shell prepare-mock-header prepare-mock-header-live">
                 <div class="prepare-mock-header-copy">
                     <div class="prepare-section-kicker">模拟面试</div>
                     <h3>按真实面试节奏一题一答，答完后 AI 会给点评和建议，并自动写入复盘</h3>
@@ -5724,21 +5804,24 @@ function renderPrepareMockInterview(session){
                 <div class="prepare-mock-answer-card-head">
                     <div>
                         <div class="prepare-section-kicker">你的回答</div>
-                        <p>可以直接打字，也可以用语音转文字。</p>
+                        <p>可以直接打字，也可以语音转文字。尽量把背景、动作、判断和结果都说完整。</p>
                     </div>
                     <div class="input-mode-toggle">
                         <button type="button" class="mode-btn${prepareMockState.transcriptMode==='text'?' active':''}" data-prepare-mock-mode="text">📝 文本</button>
                         <button type="button" class="mode-btn${prepareMockState.transcriptMode==='voice'?' active':''}" data-prepare-mock-mode="voice">🎙️ 语音</button>
                     </div>
                 </div>
-                <div class="prepare-answer-hero-actions">
+                <div class="prepare-mock-answer-shell">
                     <textarea id="prepare-mock-answer" rows="7" placeholder="先口述再补写都可以，尽量用你自己的表达，不要直接抄答案。">${escapeHTML(prepareMockState.currentAnswer)}</textarea>
-                    <div id="prepare-mock-voice-recorder" style="${prepareMockState.transcriptMode==='voice'?'':'display:none'}">
+                    <div id="prepare-mock-voice-recorder" class="prepare-mock-voice-card" style="${prepareMockState.transcriptMode==='voice'?'':'display:none'}">
                         <button class="record-btn" id="prepare-mock-record-btn" type="button"><span class="record-icon"></span><span id="prepare-mock-record-label">${prepareMockState.voiceActive?'正在转写...':'点击开始转写'}</span></button>
                         <div id="prepare-mock-record-timer" class="record-timer">${String(Math.floor(prepareMockState.recorderSeconds/60)).padStart(2,'0')}:${String(prepareMockState.recorderSeconds%60).padStart(2,'0')}</div>
                         ${renderPrepareMockVoiceResult('实时转写',prepareMockState.transcriptText)}
                     </div>
+                </div>
+                <div class="prepare-mock-answer-meta">
                     <div class="prepare-inline-notice">${escapeHTML(saveHint)}</div>
+                    <div class="prepare-mock-save-chip">复盘会自动带入：${escapeHTML(linkedApp?.company_name||session.company_name||'当前公司')} · ${escapeHTML(linkedApp?.position_title||session.role_name||'目标岗位')}</div>
                 </div>
                 <div class="prepare-mock-actions">
                     <button type="button" class="btn-primary" id="prepare-mock-submit" ${prepareMockState.submitLoading?'disabled':''}>提交并点评</button>
@@ -5757,36 +5840,41 @@ function renderPrepareMockFeedbackCard(feedback){
     const nextSteps=Array.isArray(feedback.next_steps)?feedback.next_steps:[];
     return `
         <section class="prepare-card-surface prepare-section-shell prepare-mock-feedback-card">
-            <div class="prepare-section-kicker">AI 点评</div>
-            <h3>${escapeHTML(feedback.overall_feedback||feedback.reflection_summary||'这轮回答的点评')}</h3>
+            <div class="prepare-mock-feedback-hero">
+                <div>
+                    <div class="prepare-section-kicker">AI 点评</div>
+                    <h3>${escapeHTML(feedback.overall_feedback||feedback.reflection_summary||'这轮回答的点评')}</h3>
+                </div>
+                ${typeof feedback.self_rating==='number'?`<div class="prepare-mock-score-pill">建议得分 ${Math.max(1,Math.min(5,feedback.self_rating))}/5</div>`:''}
+            </div>
             <div class="prepare-mock-feedback-grid">
-                <div class="prepare-answer-block">
-                    <h3>做得好的地方</h3>
+                <div class="prepare-answer-block prepare-mock-feedback-column">
+                    <strong>做得好的地方</strong>
                     <ul class="prepare-bullet-list">${strengths.map(item=>`<li>${escapeHTML(item)}</li>`).join('')||'<li>这轮还没有提炼出明显优势。</li>'}</ul>
                 </div>
-                <div class="prepare-answer-block">
-                    <h3>还需要补的地方</h3>
+                <div class="prepare-answer-block prepare-mock-feedback-column">
+                    <strong>还需要补的地方</strong>
                     <ul class="prepare-bullet-list">${gaps.map(item=>`<li>${escapeHTML(item)}</li>`).join('')||'<li>先补上更具体的动作、证据和结果。</li>'}</ul>
                 </div>
             </div>
-            <div class="prepare-answer-block">
-                <h3>下一轮怎么改</h3>
+            <div class="prepare-answer-block prepare-mock-feedback-primary">
+                <strong>下一轮怎么改</strong>
                 <ul class="prepare-bullet-list">${suggestions.map(item=>`<li>${escapeHTML(item)}</li>`).join('')||'<li>把回答重写成“问题是什么、你怎么判断、你做了什么、结果如何”。</li>'}</ul>
             </div>
             ${nextSteps.length?`
-                <div class="prepare-answer-block">
-                    <h3>下一步行动</h3>
+                <div class="prepare-answer-block prepare-mock-feedback-secondary">
+                    <strong>下一步行动</strong>
                     <ul class="prepare-bullet-list">${nextSteps.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
                 </div>
             `:''}
             ${painPoints.length?`
-                <div class="prepare-followup-block">
+                <div class="prepare-followup-block prepare-mock-feedback-pain">
                     <strong>可写入复盘的失分点</strong>
                     <ul class="prepare-bullet-list prepare-bullet-list-subtle">${painPoints.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
                 </div>
             `:''}
             ${feedback.follow_up_question?`
-                <div class="prepare-inline-notice">下一轮可以继续追问：${escapeHTML(feedback.follow_up_question)}</div>
+                <div class="prepare-inline-notice prepare-mock-followup-inline">下一轮可以继续追问：${escapeHTML(feedback.follow_up_question)}</div>
             `:''}
         </section>
     `;
@@ -5824,8 +5912,10 @@ function renderPrepareWorkbench(session){
             </ul>
         </div>
     `;
+    const isAnswerMode=activeTab==='questions'&&prepareState.questionPane==='answer';
+    const answerPageMeta=isAnswerMode?getPrepareAnswerPageMeta(session):null;
     return `
-        <div class="prepare-workbench">
+        <div class="prepare-workbench${isAnswerMode?' is-answer-mode':''}">
             <div class="prepare-workbench-head">
                 <div>
                     <h2>${escapeHTML(session.company_name||'目标公司')} · ${escapeHTML(session.role_name||'目标岗位')}</h2>
@@ -5846,13 +5936,24 @@ function renderPrepareWorkbench(session){
             </div>
             ${prepareState.sessionError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.sessionError)}</div>`:''}
             ${renderPrepareAccessBanner(account,{showRegister:true})}
-            <div class="prepare-tabs">
-                <button type="button" class="prepare-tab${prepareState.activeTab==='research'?' is-active':''}" data-prepare-tab="research">背调</button>
-                <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
-                <button type="button" class="prepare-tab${prepareState.activeTab==='questions'?' is-active':''}" data-prepare-tab="questions">问题</button>
-                <button type="button" class="prepare-tab${activeTab==='mock'?' is-active':''}" data-prepare-tab="mock">模拟面试</button>
-            </div>
-            <div class="prepare-tab-panel">
+            ${isAnswerMode?`
+                <div class="prepare-answer-shell-bar">
+                    <div class="prepare-answer-shell-copy">
+                        <div class="prepare-section-kicker">${escapeHTML(answerPageMeta.kicker)}</div>
+                        <strong>${escapeHTML(answerPageMeta.title)}</strong>
+                        <span>${escapeHTML(answerPageMeta.detail)}</span>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-shell-back-to-questions">返回题目列表</button>
+                </div>
+            `:`
+                <div class="prepare-tabs">
+                    <button type="button" class="prepare-tab${prepareState.activeTab==='research'?' is-active':''}" data-prepare-tab="research">背调</button>
+                    <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
+                    <button type="button" class="prepare-tab${prepareState.activeTab==='questions'?' is-active':''}" data-prepare-tab="questions">问题</button>
+                    <button type="button" class="prepare-tab${activeTab==='mock'?' is-active':''}" data-prepare-tab="mock">模拟面试</button>
+                </div>
+            `}
+            <div class="prepare-tab-panel${isAnswerMode?' is-answer-mode':''}">
                 ${tabContent}
             </div>
             ${renderPrepareResumePreviewOverlay(resumePreview)}
@@ -6301,6 +6402,12 @@ function renderPrepare(){
         if(session)withButtonBusy(this,async()=>{await ensurePrepareFreeAnswer(session.id);},'生成中...');
     });
     $('#prepare-answer-back')?.addEventListener('click',function(){
+        prepareState.questionPane='list';
+        prepareState.selectedQuestionId=null;
+        prepareState.selectedFramework='STAR';
+        renderPrepare();
+    });
+    $('#prepare-shell-back-to-questions')?.addEventListener('click',function(){
         prepareState.questionPane='list';
         prepareState.selectedQuestionId=null;
         prepareState.selectedFramework='STAR';
@@ -7897,6 +8004,14 @@ function openRefModal(refId=null,preAppId=null){
         option.textContent=`${a.company_name} - ${a.position_title}`;
         sel.appendChild(option);
     });
+    if(ref&&!ref.app_id&&(ref.company_name||ref.position_title)){
+        const detachedValue=`manual::${ref.company_name||''}|||${ref.position_title||''}`;
+        const detachedOption=document.createElement('option');
+        detachedOption.value=detachedValue;
+        detachedOption.selected=true;
+        detachedOption.textContent=`${ref.company_name||'未命名公司'} - ${ref.position_title||'未命名岗位'}（当前记录）`;
+        sel.appendChild(detachedOption);
+    }
     const structured=parseReflectionStructuredContent(ref);
     $('#reflection-round').value=ref?.interview_round||'ROUND_1';
     $('#reflection-question-content').value=structured.question||'';
@@ -7987,7 +8102,10 @@ $('#record-btn').addEventListener('click',async()=>{
     }
 });
 $$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
-$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,question=$('#reflection-question-content').value.trim(),answer=$('#reflection-answer-content').value.trim(),review=$('#reflection-review-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!question&&!answer&&!review){toast('请至少填写一项内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const combined=`问题：${question||'—'}\n\n回答：${answer||'—'}\n\n复盘：${review||'—'}`.trim();const app=store.getApp(aid);const d={app_id:aid,company_name:app?.company_name||'',position_title:app?.position_title||'',interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',question_text:question,answer_text:answer,reflection_text:review,raw_content:combined,cleaned_content:combined,ai_extracted:review||answer||null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
+$('#reflection-save').addEventListener('click',async ()=>{const rawAppValue=$('#reflection-application').value,round=$('#reflection-round').value,question=$('#reflection-question-content').value.trim(),answer=$('#reflection-answer-content').value.trim(),review=$('#reflection-review-content').value.trim();if(!rawAppValue||!round){toast('请选择投递和轮次','error');return;}if(!question&&!answer&&!review){toast('请至少填写一项内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const combined=`问题：${question||'—'}\n\n回答：${answer||'—'}\n\n复盘：${review||'—'}`.trim();const isDetached=rawAppValue.startsWith('manual::');const app=isDetached?null:store.getApp(rawAppValue);const detachedMeta=isDetached?rawAppValue.slice('manual::'.length).split('|||'):[];
+const companyName=app?.company_name||detachedMeta[0]||'';
+const positionTitle=app?.position_title||detachedMeta[1]||'';
+const d={app_id:app?.id||null,company_name:companyName,position_title:positionTitle,interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',question_text:question,answer_text:answer,reflection_text:review,raw_content:combined,cleaned_content:combined,ai_extracted:review||answer||null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
 $('#reflection-cancel').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 $('#reflection-modal-close').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 
