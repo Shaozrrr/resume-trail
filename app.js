@@ -5144,31 +5144,32 @@ function renderPrepareSupplementalExperienceCard(session,options){
     const compact=!!options?.compact;
     const items=getPrepareSupplementalExperiences(session);
     const draft=normalizePrepareText(prepareState.supplementalExperienceDraft);
-    const inputId=compact?'prepare-supplemental-input-answer':'prepare-supplemental-input-global';
-    const buttonId=compact?'prepare-supplemental-add-answer':'prepare-supplemental-add-global';
-    const note=prepareState.questionPane==='answer'&&prepareState.selectedQuestionId
-        ?'这段素材会优先回扣到当前题目，帮助 AI 更贴近你想讲的经历。'
-        :'这段素材会进入整套准备工作台，后面生成回答时都能调用。';
+    const note=compact
+        ?'补进去后，这道题和后面的回答都能优先调用。'
+        :'这段素材会进入整套准备工作台，后面生成题目、回答和模拟点评时都能调用。';
+    const recentItems=items.slice(0,compact?3:12);
     return `
         <section class="prepare-card-surface prepare-supplement-card${compact?' is-compact':''}">
             <div class="prepare-supplement-head">
                 <div>
                     <div class="prepare-section-kicker">补充经历库</div>
-                    <h3>${compact?'想往当前回答里再补一段经历':'随时把你想讲的经历先存进来'}</h3>
+                    <h3>${compact?'补一条你这题想讲的经历':'把你想讲的经历先收进经历库'}</h3>
                     <p>${escapeHTML(note)}</p>
                 </div>
                 <span class="prepare-supplement-count">${items.length||0} 条</span>
             </div>
-            <div class="prepare-supplement-editor">
-                <textarea id="${inputId}" rows="${compact?4:5}" placeholder="例如：做过用户访谈、梳理过漏斗、协调过研发/设计、推动过上线…">${escapeHTML(draft)}</textarea>
-                <div class="prepare-supplement-actions">
-                    <button type="button" class="btn-primary btn-sm" id="${buttonId}">添加经历</button>
-                    <span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>
+            <div class="prepare-supplement-capsule">
+                <div class="prepare-supplement-capsule-input">
+                    <textarea id="prepare-supplemental-input-global" rows="${compact?2:3}" placeholder="${compact?'例如：我访谈 20 位用户后改流程，把转化提到 31%。':'例如：我做过用户访谈、梳理过漏斗、协调过研发/设计、推动过上线，并拿到过结果变化。'}">${escapeHTML(draft)}</textarea>
+                </div>
+                <div class="prepare-supplement-capsule-actions">
+                    <button type="button" class="btn-primary btn-sm" id="prepare-supplemental-add-global">添加经历</button>
+                    ${compact?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-supplement-tab-answer">打开经历库</button>':'<span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>'}
                 </div>
             </div>
-            ${items.length?`
-                <div class="prepare-supplement-list">
-                    ${items.map(function(item){
+            ${recentItems.length?`
+                <div class="prepare-supplement-list${compact?' is-capsule-list':''}">
+                    ${recentItems.map(function(item){
                         return `
                             <div class="prepare-supplement-item">
                                 <strong>${escapeHTML(item.text)}</strong>
@@ -5181,12 +5182,20 @@ function renderPrepareSupplementalExperienceCard(session,options){
         </section>
     `;
 }
+function renderPrepareSupplementHub(session){
+    return `
+        <div class="prepare-grid">
+            <section class="prepare-card-surface prepare-section-shell">
+                ${renderPrepareSupplementalExperienceCard(session,{compact:false})}
+            </section>
+        </div>
+    `;
+}
 function renderPrepareQuestionsList(session){
     const questions=session.outputs?.questions?.question_groups||[];
     const introText='这些问题会混合 JD、简历深挖、行为面 / 宝洁八大问、场景题和反问面试官。点题后会直接进入回答页，不再把答案堆在列表下面。';
     return `
         <div class="prepare-question-page">
-            ${renderPrepareSupplementalExperienceCard(session,{compact:false})}
             <section class="prepare-card-surface prepare-question-toolbox">
                 <div class="prepare-question-toolbox-copy">
                     <div class="prepare-section-kicker">自定义问题</div>
@@ -5899,7 +5908,8 @@ function renderPrepareWorkbench(session){
         research:renderPrepareResearch(session),
         focus:renderPrepareFocus(session),
         questions:renderPrepareQuestions(session),
-        mock:renderPrepareMockInterview(session)
+        mock:renderPrepareMockInterview(session),
+        supplement:renderPrepareSupplementHub(session)
     }[activeTab]||renderPrepareResearch(session):`
         <div class="prepare-state-panel${session.error_message?' is-error':''}">
             <div class="prepare-section-kicker">${session.error_message?'生成失败':'准备中'}</div>
@@ -5951,6 +5961,7 @@ function renderPrepareWorkbench(session){
                     <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
                     <button type="button" class="prepare-tab${prepareState.activeTab==='questions'?' is-active':''}" data-prepare-tab="questions">问题</button>
                     <button type="button" class="prepare-tab${activeTab==='mock'?' is-active':''}" data-prepare-tab="mock">模拟面试</button>
+                    <button type="button" class="prepare-tab${activeTab==='supplement'?' is-active':''}" data-prepare-tab="supplement">补充经历</button>
                 </div>
             `}
             <div class="prepare-tab-panel${isAnswerMode?' is-answer-mode':''}">
@@ -6287,6 +6298,11 @@ function renderPrepare(){
         if(prepareState.activeTab==='questions')prepareState.questionPane='list';
         renderPrepare();
     }));
+    $('#prepare-open-supplement-tab-answer')?.addEventListener('click',function(){
+        prepareState.activeTab='supplement';
+        prepareState.questionPane='list';
+        renderPrepare();
+    });
     $$('[data-prepare-company-mode]').forEach(button=>button.addEventListener('click',function(){
         prepareState.companyOverviewMode=this.dataset.prepareCompanyMode==='detailed'?'detailed':'simple';
         renderPrepare();
@@ -6446,9 +6462,6 @@ function renderPrepare(){
     $('#prepare-supplemental-input-global')?.addEventListener('input',function(){
         prepareState.supplementalExperienceDraft=this.value;
     });
-    $('#prepare-supplemental-input-answer')?.addEventListener('input',function(){
-        prepareState.supplementalExperienceDraft=this.value;
-    });
     $('#prepare-supplemental-add-global')?.addEventListener('click',async function(){
         const session=getPrepareSelectedSession();
         if(!session)return;
@@ -6465,23 +6478,6 @@ function renderPrepare(){
         prepareState.supplementalExperienceDraft='';
         renderPrepare();
         toast('已加入经历库','success');
-    });
-    $('#prepare-supplemental-add-answer')?.addEventListener('click',async function(){
-        const session=getPrepareSelectedSession();
-        if(!session)return;
-        const text=normalizePrepareText(prepareState.supplementalExperienceDraft);
-        if(!text){
-            toast('先补一段经历。','error');
-            return;
-        }
-        const ok=await addPrepareSupplementalExperience(session.id,text,{
-            question_id:prepareState.selectedQuestionId||'',
-            source:'answer'
-        });
-        if(ok===false)return;
-        prepareState.supplementalExperienceDraft='';
-        renderPrepare();
-        toast('已加入当前回答','success');
     });
     $$('[data-prepare-supplement-remove]').forEach(button=>button.addEventListener('click',async function(){
         const session=getPrepareSelectedSession();
