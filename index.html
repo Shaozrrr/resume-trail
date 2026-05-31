@@ -366,7 +366,7 @@
         <div class="modal modal-lg">
             <div class="modal-header"><h2 id="reflection-modal-title">新建复盘</h2><button class="modal-close" id="reflection-modal-close">&times;</button></div>
             <div class="modal-body">
-                <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option></select></div></div>
+                <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option><option value="MOCK_INTERVIEW">模拟面试</option></select></div></div>
                 <div class="form-group"><label>面试记录</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">📝 文本</button><button class="mode-btn" data-mode="voice">🎙️ 语音</button></div><textarea id="reflection-content" rows="6" placeholder="面试官问了什么？你怎么回答的？"></textarea><div id="reflection-template" class="reflection-template"></div><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
                 <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
                 <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
@@ -586,8 +586,8 @@
         <div class="modal modal-sm prepare-upgrade-modal">
             <div class="modal-header">
                 <div>
-                    <h2 id="prepare-upgrade-title">体验次数已用完</h2>
-                    <p id="prepare-upgrade-desc">每个履迹账号默认可以完整体验 1 次准备，继续使用可开通 30 天会员或直接买断。</p>
+                    <h2 id="prepare-upgrade-title">准备次数还可用</h2>
+                    <p id="prepare-upgrade-desc">试用账号默认 1 次完整准备，注册账号额外赠送 1 次。继续使用可开通 30 天会员或直接买断。</p>
                 </div>
                 <button class="modal-close" id="prepare-upgrade-close">&times;</button>
             </div>

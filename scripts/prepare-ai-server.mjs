@@ -59,7 +59,8 @@ function safeParse(text) {
   return JSON.parse(candidate);
 }
 
-async function callDeepSeek(messages) {
+async function callDeepSeek(messages, kind = 'session') {
+  const maxTokens = kind === 'answer' ? 2600 : 5600;
   const response = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -69,6 +70,7 @@ async function callDeepSeek(messages) {
     body: JSON.stringify({
       model: MODEL,
       temperature: 0.35,
+      max_tokens: maxTokens,
       response_format: { type: 'json_object' },
       messages
     })
@@ -96,7 +98,7 @@ function buildSessionMessages(input) {
     {
       role: 'system',
         content:
-          '你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。要求：1）内容一定围绕岗位面试准备，不写百科空话；2）语言专业、克制、具体；3）所有文案为简体中文；4）优先从 JD 和简历中提炼；5）如果信息不足，明确用“建议补充”而不是编造；6）best_experiences 只能引用简历里真实出现过的经历线索，不能捏造项目、职位、数字和职责；7）如果简历和 JD 匹配度很低，best_experiences 也不要留空，要从现有背景里挑最可迁移的真实线索，并明确说明“这不是直接匹配，而是可迁移能力”；8）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；9）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；10）possible_followups 和 risk_warnings 必须给出补挖经历、补做最小项目、补学关键技能、以及如何包装表达的建议，帮助用户把已有背景翻译成岗位语言；11）所有建议都尽量回扣 JD；12）questions.question_groups 必须覆盖 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，避免所有题目都只来自岗位原文；13）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+          '你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。要求：1）内容一定围绕岗位面试准备，不写百科空话；2）语言专业、克制、具体；3）所有文案为简体中文；4）优先从 JD 和简历中提炼；5）如果信息不足，明确用“建议补充”而不是编造；6）best_experiences 只能引用简历里真实出现过的经历线索，不能捏造项目、职位、数字和职责；7）如果简历和 JD 匹配度很低，best_experiences 也不要留空，要从现有背景里挑最可迁移的真实线索，并明确说明“这不是直接匹配，而是可迁移能力”；8）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；9）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；10）possible_followups 和 risk_warnings 必须给出补挖经历、补做最小项目、补学关键技能、以及如何包装表达的建议，帮助用户把已有背景翻译成岗位语言；11）所有建议都尽量回扣 JD；12）questions.question_groups 必须覆盖 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，避免所有题目都只来自岗位原文；13）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；14）best_experiences 的 highlight_points 至少要包含“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层内容，不要只给抽象提醒。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
     },
     {
       role: 'user',
@@ -194,7 +196,7 @@ const server = http.createServer(async (req, res) => {
         json(res, 400, { ok: false, error: `JD 文本太短，请至少提供 ${MIN_JD_LENGTH} 个字的职位描述。` });
         return;
       }
-      const output = await callDeepSeek(buildSessionMessages(input));
+      const output = await callDeepSeek(buildSessionMessages(input), 'session');
       output.meta = Object.assign({}, output.meta || {}, {
         provider: 'DeepSeek',
         model: MODEL
@@ -212,14 +214,32 @@ const server = http.createServer(async (req, res) => {
         json(res, 400, { ok: false, error: '缺少问题文本，请先输入你要生成回答的问题。' });
         return;
       }
-      const output = await callDeepSeek(buildAnswerMessages(input));
+      const output = await callDeepSeek(buildAnswerMessages(input), 'answer');
       output.framework_type = input.framework_type || output.framework_type || 'STAR';
+      json(res, 200, { ok: true, output });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/prepare/custom') {
+      const input = await readBody(req);
+      const kind = String(input?.kind || 'session');
+      const messages = Array.isArray(input?.messages) ? input.messages : [];
+      if (!messages.length) {
+        json(res, 400, { ok: false, error: '缺少 messages，无法生成内容。' });
+        return;
+      }
+      const output = await callDeepSeek(messages, kind);
+      output.meta = Object.assign({}, output.meta || {}, {
+        provider: 'DeepSeek',
+        model: MODEL,
+        source: 'local_server',
+        kind
+      });
       json(res, 200, { ok: true, output });
       return;
     }
     json(res, 404, { ok: false, error: 'Not found' });
   } catch (error) {
-    json(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+    json(res, 502, { ok: false, error: error instanceof Error ? error.message : String(error) });
   }
 });
 
