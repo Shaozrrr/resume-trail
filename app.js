@@ -378,6 +378,23 @@ function buildReflectionCard(ref,showRating){
     if(footer.childNodes.length)card.appendChild(footer);
     return card;
 }
+function parseReflectionStructuredContent(ref){
+    const question=normalizePrepareText(ref?.question_text||ref?.reflection_question||'');
+    const answer=normalizePrepareText(ref?.answer_text||ref?.reflection_answer||'');
+    const review=normalizePrepareText(ref?.reflection_text||ref?.ai_extracted||'');
+    if(question||answer||review){
+        return{question,answer,review};
+    }
+    const raw=normalizePrepareText(ref?.raw_content||'');
+    const questionMatch=raw.match(/(?:问题|题目|面试官问|Q)：([\s\S]*?)(?:\n+回答：|\n+你的回答：|\n+复盘：|$)/);
+    const answerMatch=raw.match(/(?:回答|你的回答|A)：([\s\S]*?)(?:\n+复盘：|$)/);
+    const reviewMatch=raw.match(/(?:复盘|总结|点评)：([\s\S]*)$/);
+    return{
+        question:normalizePrepareText(questionMatch?.[1]||''),
+        answer:normalizePrepareText(answerMatch?.[1]||''),
+        review:normalizePrepareText(reviewMatch?.[1]||'')
+    };
+}
 
 function normalizeTableColumns(cols){
     const source=Array.isArray(cols)?cloneData(cols):[];
@@ -1452,6 +1469,7 @@ const prepareState={
     selectedSessionId:null,
     selectedApplicationId:'',
     activeTab:'research',
+    questionPane:'list',
     companyOverviewMode:'simple',
     selectedQuestionId:null,
     selectedFramework:'STAR',
@@ -1481,7 +1499,8 @@ const prepareState={
     answerError:'',
     loadingKind:'',
     loadingStartedAt:0,
-    loadingFrame:0
+    loadingFrame:0,
+    supplementalExperienceDraft:''
 };
 const prepareMockState={
     sessionId:'',
@@ -1493,6 +1512,12 @@ const prepareMockState={
     currentQuestionLoading:false,
     submitLoading:false,
     error:'',
+    stage:'setup',
+    questionMode:'generated',
+    feedbackMode:'per_question',
+    customQuestionDraft:'',
+    customQuestions:[],
+    finalFeedback:null,
     transcriptMode:'text',
     voiceActive:false,
     transcriptText:'',
@@ -1702,19 +1727,19 @@ function getPrepareQuotaSnapshot(account){
 function getAccountEntitlementText(account){
     if(!account)return'当前账号信息还没同步完成。';
     const membership=getAccountMembershipKey(account);
-    if(membership==='lifetime')return'当前已开通永久会员，可持续使用准备功能。';
+    if(membership==='lifetime')return'永久会员，准备功能不限次。';
     if(membership==='monthly'){
         const remainingDays=getMembershipRemainingDays(account);
-        const baseText=remainingDays===null?'当前已开通月会员，可继续不限次使用准备功能。':(remainingDays>0
-            ? `当前已开通月会员，还剩 ${remainingDays} 天，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`
-            : `月会员已到期，到期日 ${new Date(account.membership_expires_at).toLocaleDateString('zh-CN')}。`);
+        const baseText=remainingDays===null?'月会员，准备功能不限次。':(remainingDays>0
+            ? `月会员还剩 ${remainingDays} 天。`
+            : '月会员已到期。');
         return baseText;
     }
     const quota=getPrepareQuotaSnapshot(account);
     if(quota.authMode==='registered'){
-        return `注册账号当前可完整体验 ${quota.remaining} / ${quota.total} 次准备。试用额度为 1 次，注册后额外赠送 1 次。`;
+        return `当前可用 ${quota.remaining}/${quota.total} 次。`;
     }
-    return `试用账号当前可完整体验 ${quota.remaining} / 1 次准备。注册后额外再送 1 次，共 2 次。`;
+    return `当前可用 ${quota.remaining}/1 次。注册后再送 1 次。`;
 }
 
 function accountHasFormalAccess(account){
@@ -1737,15 +1762,13 @@ function renderPrepareAccessBanner(account,options){
     const isGuest=isGuestExperienceMode();
     const ctaText=membershipLabel==='月会员'?'续费 / 升级':(membershipLabel==='永久会员'?'':'开通会员');
     const supportingText=membershipLabel==='月会员'
-        ? '你也可以继续续 30 天会员，或者直接升级为 ¥49.9 永久会员。'
-        : (membershipLabel==='永久会员'
-            ? '当前账号已经拥有持续使用权限，可以继续创建更多准备会话。'
-            : `试用账号默认 1 次完整准备，注册后额外再送 1 次，共 ${quota.trial+1} 次。继续使用可开通 ¥9.9 / 30天 或 ¥49.9 买断。`);
+        ? '可续 30 天，或升级永久会员。'
+        : '';
     return `
         <div class="prepare-access-banner">
             <div class="prepare-access-banner-copy">
                 <strong>准备权益：${escapeHTML(membershipLabel)}</strong>
-                <p>${escapeHTML(detailText)} ${escapeHTML(supportingText)}</p>
+                <p>${escapeHTML(detailText)}${supportingText?` ${escapeHTML(supportingText)}`:''}</p>
             </div>
             <div class="prepare-access-banner-actions">
                 <span class="prepare-access-badge">${escapeHTML(membershipLabel)}</span>
@@ -1822,16 +1845,16 @@ function openPrepareUpgradeModal(accessPayload){
     const billingConfig=getPrepareBillingConfig();
     if(title)title.textContent=membership==='monthly'
         ?'升级或续费会员'
-        :(quota.remaining>0?'准备次数还可用':'体验次数已用完');
+        :(quota.remaining>0?'准备次数可用':'体验次数已用完');
     if(desc)desc.textContent=membership==='monthly'
-        ? '当前账号已是月会员。你可以续 30 天会员，或直接升级到永久会员。'
-        : `试用账号默认 1 次完整准备，注册账号额外赠送 1 次。${quota.remaining>0?`当前还剩 ${quota.remaining} 次完整准备机会。`:'你的完整准备次数已用完。'}继续使用可开通 30 天会员，或直接买断。`;
+        ? '月会员可继续续费或升级永久会员。'
+        : `当前可用 ${quota.remaining}/${quota.total} 次。`;
     if(meta)meta.textContent=membership==='monthly'
         ? getAccountEntitlementText(account)
-        : `当前总额度 ${quota.total} 次，已使用 ${quota.used} 次，还剩 ${quota.remaining} 次。`;
+        : `已用 ${quota.used} 次，还剩 ${quota.remaining} 次。`;
     if(guestHint){
         guestHint.style.display=isGuestExperienceMode()?'':'none';
-        guestHint.textContent='你现在是体验模式。先注册，随后可以自己选择是否继承刚才的体验数据，再继续开通会员。注册后会额外获得 1 次完整准备机会。';
+        guestHint.textContent='体验模式可先注册，注册后再继续。';
     }
     if(paymentNote){
         paymentNote.style.display='block';
@@ -3769,6 +3792,7 @@ function getPrepareApplicationDraft(app){
 }
 function getPrepareSessionPayload(session){
     const linkedResume=getPrepareLinkedResume(session);
+    const supplementalExperiences=getPrepareSupplementalExperiences(session);
     return{
         company_name:session.company_name||'',
         role_name:session.role_name||'',
@@ -3779,8 +3803,55 @@ function getPrepareSessionPayload(session){
         resume_text:session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'',
         resume_file_meta:session.resume_file_meta||null,
         resume_source:session.resume_source||'',
-        resume_verified:!!session.resume_verified
+        resume_verified:!!session.resume_verified,
+        supplemental_experiences:supplementalExperiences,
+        supplemental_experience_summary:getPrepareSupplementalExperienceSummary(session)
     };
+}
+function normalizePrepareSupplementalExperience(item){
+    const source=typeof item==='string'?{text:item}:Object.assign({},item||{});
+    const text=normalizePrepareText(source.text||source.content||'');
+    if(!text)return null;
+    return{
+        id:source.id||createLocalId('prepare_exp'),
+        text,
+        question_id:source.question_id||source.questionId||'',
+        source:source.source||'manual',
+        created_at:source.created_at||new Date().toISOString()
+    };
+}
+function getPrepareSupplementalExperiences(session){
+    return Array.isArray(session?.supplemental_experiences)
+        ?session.supplemental_experiences.map(normalizePrepareSupplementalExperience).filter(Boolean)
+        :[];
+}
+function getPrepareSupplementalExperienceSummary(session){
+    const items=getPrepareSupplementalExperiences(session);
+    if(!items.length)return'';
+    return items.map(function(item,index){
+        return `${index+1}. ${item.text}`;
+    }).join('\n');
+}
+async function updatePrepareSupplementalExperiences(sessionId,updater){
+    const session=store.getPrepareSession(sessionId);
+    if(!session)return false;
+    const current=getPrepareSupplementalExperiences(session);
+    const next=typeof updater==='function'?updater(current):current;
+    return store.updatePrepareSession(sessionId,{
+        supplemental_experiences:next.map(normalizePrepareSupplementalExperience).filter(Boolean)
+    });
+}
+async function addPrepareSupplementalExperience(sessionId,text,meta){
+    const item=normalizePrepareSupplementalExperience(Object.assign({},meta||{},{text}));
+    if(!item)return false;
+    return updatePrepareSupplementalExperiences(sessionId,function(current){
+        return [item,...current].slice(0,12);
+    });
+}
+async function removePrepareSupplementalExperience(sessionId,experienceId){
+    return updatePrepareSupplementalExperiences(sessionId,function(current){
+        return current.filter(function(item){return item.id!==experienceId;});
+    });
 }
 function getPrepareResumeSnapshot(session){
     const linkedResume=getPrepareLinkedResume(session);
@@ -3854,6 +3925,8 @@ function buildPrepareSessionMessagesClient(input){
         resume_text:normalizePrepareText(input.resume_text),
         resume_file_meta:input.resume_file_meta||null,
         resume_snapshot:resumeSnapshot,
+        supplemental_experiences:input.supplemental_experiences||[],
+        supplemental_experience_summary:normalizePrepareText(input.supplemental_experience_summary),
         external_term_briefs:knownTermBriefs,
         analysis_playbooks:analysisPlaybooks
     };
@@ -3882,6 +3955,8 @@ function buildPrepareAnswerMessagesClient(input){
         resume_snapshot:resumeSnapshot,
         prep_focus:input.prep_focus||[],
         prep_keywords:input.prep_keywords||[],
+        supplemental_experiences:input.supplemental_experiences||[],
+        supplemental_experience_summary:normalizePrepareText(input.supplemental_experience_summary),
         external_term_briefs:knownTermBriefs,
         analysis_playbooks:analysisPlaybooks,
         question:normalizePrepareText(input.question),
@@ -3999,6 +4074,8 @@ function buildPrepareQuestionGroupMessagesClient(session,group){
         jd_text:normalizePrepareText(session.jd_text||''),
         resume_name:normalizePrepareText(getPrepareLinkedResume(session)?.file_name||session.resume_name||''),
         resume_text:normalizePrepareText(session.resume_text||''),
+        supplemental_experiences:getPrepareSupplementalExperiences(session),
+        supplemental_experience_summary:getPrepareSupplementalExperienceSummary(session),
         prep_focus:session.outputs?.focus||{},
         question_groups:session.outputs?.questions?.question_groups||[],
         target_group:groupName,
@@ -4031,6 +4108,8 @@ function buildPrepareMockFeedbackMessagesClient(session,question,answer,history)
         jd_text:normalizePrepareText(session.jd_text||''),
         resume_name:normalizePrepareText(getPrepareLinkedResume(session)?.file_name||session.resume_name||''),
         resume_text:normalizePrepareText(session.resume_text||''),
+        supplemental_experiences:getPrepareSupplementalExperiences(session),
+        supplemental_experience_summary:getPrepareSupplementalExperienceSummary(session),
         question:{
             id:question?.id||'',
             question:normalizePrepareText(question?.question||''),
@@ -4126,6 +4205,41 @@ async function requestPrepareMockFeedbackAI(session,question,answer,history){
         answer_history:Array.isArray(history)?history:[]
     });
     return requestPrepareCustomAI(buildPrepareMockFeedbackMessagesClient(session,question,answer,history),'answer',payload);
+}
+function buildPrepareMockSummaryMessagesClient(session,history){
+    const payload={
+        company_name:normalizePrepareText(session.company_name||'目标公司'),
+        role_name:normalizePrepareText(session.role_name||'目标岗位'),
+        role_category:normalizePrepareText(session.role_category||''),
+        jd_text:normalizePrepareText(session.jd_text||''),
+        resume_name:normalizePrepareText(getPrepareLinkedResume(session)?.file_name||session.resume_name||''),
+        resume_text:normalizePrepareText(session.resume_text||''),
+        supplemental_experiences:getPrepareSupplementalExperiences(session),
+        supplemental_experience_summary:getPrepareSupplementalExperienceSummary(session),
+        answer_history:Array.isArray(history)?history.slice(-6).map(function(item){
+            return{
+                question:normalizePrepareText(item?.question||''),
+                answer:normalizePrepareText(item?.answer||''),
+                feedback:item?.feedback||null
+            };
+        }):[]
+    };
+    return[
+        {
+            role:'system',
+            content:'你是资深面试教练。现在要对一整场模拟面试做总结点评，并输出可直接写入复盘知识库的结构化 JSON。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。要求：1）所有文案简体中文；2）必须结合 JD、简历、用户补充经历和整场回答历史；3）先总结这场模拟里的共性问题，再给最优先的改法；4）如果回答里空泛，要明确指出应该补挖什么经历、补做什么最小案例、补学什么技能，以及怎么包装；5）pain_points 里只保留最影响面试结果的 3 到 5 个点；6）reflection_summary 要能直接放进复盘。输出 schema：{"overall_feedback":"string","strengths":["string"],"gaps":["string"],"suggestions":["string"],"pain_points":["string"],"self_rating":1,"reflection_summary":"string","next_steps":["string"]}'
+        },
+        {
+            role:'user',
+            content:`请基于以下整场模拟面试记录输出总结点评 JSON：\n${JSON.stringify(payload,null,2)}`
+        }
+    ];
+}
+async function requestPrepareMockSummaryAI(session,history){
+    const payload=Object.assign({},getPrepareSessionPayload(session),{
+        answer_history:Array.isArray(history)?history:[]
+    });
+    return requestPrepareCustomAI(buildPrepareMockSummaryMessagesClient(session,history),'answer',payload);
 }
 function getPrepareSummaryText(session){
     const linkedResume=getPrepareLinkedResume(session);
@@ -4388,7 +4502,8 @@ function buildPrepareOutputsFallback(session){
 function getPrepareAllQuestions(session){
     return session?.outputs?.questions?.question_groups?.flatMap(group=>group.questions||[])||[];
 }
-function getPrepareSelectedQuestion(session){
+function getPrepareSelectedQuestion(session,options){
+    const opts=Object.assign({fallback:true},options||{});
     const questions=getPrepareAllQuestions(session);
     if(!questions.length){
         prepareState.selectedQuestionId=null;
@@ -4396,6 +4511,7 @@ function getPrepareSelectedQuestion(session){
     }
     const matched=questions.find(question=>question.id===prepareState.selectedQuestionId);
     if(matched)return matched;
+    if(!opts.fallback)return null;
     prepareState.selectedQuestionId=questions[0].id;
     return questions[0];
 }
@@ -4405,12 +4521,16 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
     const jdKeyword=ctx.research.keyword_translation[0];
     const matchedBrief=findPrepareKnownTermBrief(question?.question||'',getPrepareKnownTermBriefs(session));
     const resumeEvidence=[firstExperience?.raw||firstExperience?.resume_section].filter(Boolean);
+    const supplementalSummary=getPrepareSupplementalExperienceSummary(session);
     const gapNote=firstExperience?.resume_section==='当前简历缺少直接证据'?'这题当前缺少能直接支撑的简历证据，建议先补挖一段更贴近岗位目标的经历，再把结果和个人贡献讲具体。':'';
     const commonTips=[
         `回答时记得把内容拉回 ${session.role_name||'目标岗位'} 的目标，而不是停在泛化经历描述。`,
         '尽量加入可验证的数字、结果变化或判断依据。',
         '如果面试官继续追问，优先补你的个人贡献与取舍。'
     ];
+    if(supplementalSummary){
+        commonTips.unshift('你已经补充了额外经历素材，回答时优先挑最能证明“动作 + 结果”的那一段来讲。');
+    }
     if(matchedBrief){
         commonTips.unshift(`如果提到「${matchedBrief.term}」，先用一句话把它翻译成真实业务概念，再回到你对 Agent / 工作流 / 产品落地的理解。`);
     }
@@ -4457,7 +4577,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
         FREE:{
             structure:[
                 {section:'开场',guidance:'先回答问题，不要铺垫太久。',suggested_points:['先给结论','明确你最想让面试官记住什么']},
-                {section:'主体',guidance:'用一段最相关经历或判断展开。',suggested_points:['说动作','说结果','说个人贡献']},
+                {section:'主体',guidance:'用一段最相关经历或判断展开。',suggested_points:['说动作','说结果','说个人贡献',...(supplementalSummary?['优先从你刚补充的经历素材里挑最贴题的一段。']:[])]},
                 {section:'收束',guidance:'最后把内容拉回岗位匹配。',suggested_points:[`说明这段内容为什么能证明你适合 ${session.role_name||'这个岗位'}`]}
             ],
             delivery_tips:commonTips,
@@ -4530,6 +4650,7 @@ async function createPrepareSessionFromApp(appId){
         prepareState.selectedSessionId=existing.id;
         prepareState.activeTab='research';
         prepareState.screen='workspace';
+        prepareState.questionPane='list';
         return existing;
     }
     const draft=getPrepareApplicationDraft(app);
@@ -4589,6 +4710,7 @@ async function createPrepareSessionFromApp(appId){
     prepareState.selectedSessionId=session.id;
     prepareState.activeTab='research';
     prepareState.selectedQuestionId=null;
+    prepareState.questionPane='list';
     prepareState.selectedFramework='STAR';
     prepareState.sessionLoading=true;
     prepareState.sessionError='';
@@ -4680,6 +4802,7 @@ async function createManualPrepareSession(){
     prepareState.selectedSessionId=session.id;
     prepareState.activeTab='research';
     prepareState.selectedQuestionId=null;
+    prepareState.questionPane='list';
     prepareState.selectedFramework='STAR';
     prepareState.sessionLoading=true;
     prepareState.sessionError='';
@@ -4899,63 +5022,7 @@ function renderPrepareFocus(session){
     `;
 }
 function renderPrepareQuestions(session){
-    const questions=session.outputs?.questions?.question_groups||[];
-    const introText='这些问题不只来自 JD，也会混合简历深挖、行为面 / 宝洁八大问、场景题和反问面试官的问题。点击任一题后，下面会直接展开回答面板。';
-    return `
-        <div class="prepare-question-groups">
-            <section class="prepare-card-surface prepare-question-toolbox">
-                <div class="prepare-question-toolbox-copy">
-                    <div class="prepare-section-kicker">自定义问题</div>
-                    <h3>把你觉得考官可能会问的问题交给 AI，直接生成可开讲的回答骨架</h3>
-                    <p>${escapeHTML(introText)}</p>
-                </div>
-                <div class="prepare-question-toolbox-panel">
-                    <label class="prepare-field prepare-custom-question-field">
-                        <span>你觉得面试官会问什么</span>
-                        <textarea id="prepare-custom-question-input" rows="5" placeholder="例如：如果面试官追问我为什么转产品，我应该怎么答？">${escapeHTML(prepareState.freeQuestionText)}</textarea>
-                        <em>把你担心被追问的问题写出来，AI 会直接帮你生成回答骨架，而不是替你出题。</em>
-                    </label>
-                    <div class="prepare-custom-question-actions">
-                        <button type="button" class="btn-primary" id="prepare-custom-question-generate">生成回答骨架</button>
-                        <button type="button" class="btn-secondary" id="prepare-custom-question-clear">清空</button>
-                    </div>
-                </div>
-            </section>
-            ${!questions.length?'<div class="prepare-empty prepare-question-empty">先生成一套准备工作台，再查看模拟问题。</div>':''}
-            ${questions.map((group,groupIndex)=>`
-                <section class="prepare-card-surface prepare-section-shell">
-                    <div class="prepare-question-group-head">
-                        <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
-                        <button type="button" class="btn-secondary btn-sm prepare-question-group-refresh" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''}>${prepareState.questionGroupLoadingKey===String(groupIndex)?'生成中...':'重新生成 3 个'}</button>
-                    </div>
-                    <div class="prepare-question-list">
-                        ${group.questions.map(function(rawQuestion){
-                            const question=normalizePrepareQuestionRecord(rawQuestion);
-                            const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'可反问面试官':'来自岗位信息';
-                            const actionLabel=question.question_type==='reverse_question'?'查看反问建议':'展开回答';
-                            return `
-                            <button class="prepare-question-card${prepareState.selectedQuestionId===question.id?' is-active':''}" type="button" data-prepare-question="${question.id}">
-                                <div class="prepare-question-main">
-                                    <strong>${escapeHTML(question.question)}</strong>
-                                    <span>${escapeHTML(sourceLabel)}</span>
-                                    <div class="prepare-question-frameworks">
-                                        ${question.recommended_frameworks.map(function(framework){
-                                            return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
-                                        }).join('')}
-                                    </div>
-                                </div>
-                                <em>${escapeHTML(actionLabel)}</em>
-                            </button>
-                        `;
-                        }).join('')}
-                    </div>
-                </section>
-            `).join('')}
-            <section class="prepare-card-surface prepare-section-shell prepare-question-answer-panel">
-                ${renderPrepareAnswers(session)}
-            </section>
-        </div>
-    `;
+    return renderPrepareAnswers(session);
 }
 async function ensurePrepareAnswer(sessionId,questionId,framework){
     const session=store.getPrepareSession(sessionId);
@@ -5073,16 +5140,121 @@ function renderPrepareAnswerBody(answer){
         </div>
     `;
 }
+function renderPrepareSupplementalExperienceCard(session,options){
+    const compact=!!options?.compact;
+    const items=getPrepareSupplementalExperiences(session);
+    const draft=normalizePrepareText(prepareState.supplementalExperienceDraft);
+    const inputId=compact?'prepare-supplemental-input-answer':'prepare-supplemental-input-global';
+    const buttonId=compact?'prepare-supplemental-add-answer':'prepare-supplemental-add-global';
+    const note=prepareState.questionPane==='answer'&&prepareState.selectedQuestionId
+        ?'这段素材会优先回扣到当前题目，帮助 AI 更贴近你想讲的经历。'
+        :'这段素材会进入整套准备工作台，后面生成回答时都能调用。';
+    return `
+        <section class="prepare-card-surface prepare-supplement-card${compact?' is-compact':''}">
+            <div class="prepare-supplement-head">
+                <div>
+                    <div class="prepare-section-kicker">补充经历库</div>
+                    <h3>${compact?'想往当前回答里再补一段经历':'随时把你想讲的经历先存进来'}</h3>
+                    <p>${escapeHTML(note)}</p>
+                </div>
+                <span class="prepare-supplement-count">${items.length||0} 条</span>
+            </div>
+            <div class="prepare-supplement-editor">
+                <textarea id="${inputId}" rows="${compact?4:5}" placeholder="例如：做过用户访谈、梳理过漏斗、协调过研发/设计、推动过上线…">${escapeHTML(draft)}</textarea>
+                <div class="prepare-supplement-actions">
+                    <button type="button" class="btn-primary btn-sm" id="${buttonId}">添加经历</button>
+                    <span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>
+                </div>
+            </div>
+            ${items.length?`
+                <div class="prepare-supplement-list">
+                    ${items.map(function(item){
+                        return `
+                            <div class="prepare-supplement-item">
+                                <strong>${escapeHTML(item.text)}</strong>
+                                <button type="button" class="prepare-supplement-remove" data-prepare-supplement-remove="${escapeHTML(item.id)}" aria-label="删除经历">×</button>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `:'<div class="prepare-supplement-empty">先补一条经历，后面再生成题目和回答时就能直接用。</div>'}
+        </section>
+    `;
+}
+function renderPrepareQuestionsList(session){
+    const questions=session.outputs?.questions?.question_groups||[];
+    const introText='这些问题会混合 JD、简历深挖、行为面 / 宝洁八大问、场景题和反问面试官。点题后会直接进入回答页，不再把答案堆在列表下面。';
+    return `
+        <div class="prepare-question-page">
+            ${renderPrepareSupplementalExperienceCard(session,{compact:false})}
+            <section class="prepare-card-surface prepare-question-toolbox">
+                <div class="prepare-question-toolbox-copy">
+                    <div class="prepare-section-kicker">自定义问题</div>
+                    <h3>把你担心被问到的题写出来，AI 直接帮你生成回答骨架</h3>
+                    <p>${escapeHTML(introText)}</p>
+                </div>
+                <div class="prepare-question-toolbox-panel">
+                    <label class="prepare-field prepare-custom-question-field">
+                        <span>你觉得考官会问什么</span>
+                        <textarea id="prepare-custom-question-input" rows="5" placeholder="例如：如果面试官追问我为什么转产品，我应该怎么答？">${escapeHTML(prepareState.freeQuestionText)}</textarea>
+                        <em>不是让 AI 帮你出题，而是你先把题目写出来，它再帮你起草回答。</em>
+                    </label>
+                    <div class="prepare-custom-question-actions">
+                        <button type="button" class="btn-primary" id="prepare-custom-question-generate">生成回答骨架</button>
+                        <button type="button" class="btn-secondary" id="prepare-custom-question-clear">清空</button>
+                    </div>
+                </div>
+            </section>
+            ${!questions.length?'<div class="prepare-empty prepare-question-empty">先生成一套准备工作台，再查看模拟问题。</div>':''}
+            ${questions.map(function(group,groupIndex){
+                return `
+                    <section class="prepare-card-surface prepare-section-shell">
+                        <div class="prepare-question-group-head">
+                            <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
+                            <button type="button" class="prepare-question-group-refresh-btn" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个">${prepareState.questionGroupLoadingKey===String(groupIndex)?'⟳':'↻'}</button>
+                        </div>
+                        <div class="prepare-question-list">
+                            ${group.questions.map(function(rawQuestion){
+                                const question=normalizePrepareQuestionRecord(rawQuestion);
+                                const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'可反问面试官':'来自岗位信息';
+                                const reverseLabel=question.question_type==='reverse_question'?'反问建议':'';
+                                return `
+                                    <button class="prepare-question-card${prepareState.selectedQuestionId===question.id&&prepareState.questionPane==='answer'?' is-active':''}" type="button" data-prepare-question="${question.id}">
+                                        <div class="prepare-question-main">
+                                            <strong>${escapeHTML(question.question)}</strong>
+                                            <span>${escapeHTML(sourceLabel)}</span>
+                                            <div class="prepare-question-frameworks">
+                                                ${question.recommended_frameworks.map(function(framework){
+                                                    return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
+                                                }).join('')}
+                                            </div>
+                                        </div>
+                                        <em class="prepare-question-card-action" aria-hidden="true" title="${escapeHTML(reverseLabel||'进入回答页')}">›</em>
+                                    </button>
+                                `;
+                            }).join('')}
+                        </div>
+                    </section>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
 function renderPrepareAnswers(session){
-    const selectedQuestion=session&&prepareState.selectedQuestionId?getPrepareAllQuestions(session).find(function(item){
-        return item.id===prepareState.selectedQuestionId;
-    }):null;
+    const questionPane=prepareState.questionPane||'list';
+    if(questionPane!=='answer'){
+        return renderPrepareQuestionsList(session);
+    }
+    const selectedQuestion=prepareState.selectedQuestionId?getPrepareSelectedQuestion(session,{fallback:false}):null;
     const questionMeta=selectedQuestion?normalizePrepareQuestionRecord(selectedQuestion):null;
+    const isFreeQuestion=prepareState.selectedFramework==='FREE'&&!questionMeta;
     const isReverseQuestion=!!(questionMeta&&(questionMeta.question_type==='reverse_question'||questionMeta.source==='reverse'));
     const availableFrameworks=questionMeta?questionMeta.recommended_frameworks:PREP_FRAMEWORKS.filter(function(item){return item.key!=='FREE';}).map(function(item){return item.key;});
-    const framework=frameworkMetaFromSelection(prepareState.selectedFramework,availableFrameworks);
-    if(questionMeta&&prepareState.selectedFramework!==framework)prepareState.selectedFramework=framework;
+    const framework=frameworkMetaFromSelection(prepareState.selectedFramework,isFreeQuestion?['FREE']:availableFrameworks);
+    if(!prepareState.selectedFramework||prepareState.selectedFramework!==framework)prepareState.selectedFramework=framework;
     const frameworkMeta=getPrepareFrameworkMeta(framework);
+    const questionSource=questionMeta?escapeHTML(questionMeta.source==='jd'?'来自 JD':questionMeta.source==='resume'?'来自简历':questionMeta.source==='behavioral'?'来自行为面':questionMeta.source==='custom'?'来自自定义问题':questionMeta.source==='reverse'?'可反问面试官':'来自岗位信息'):'';
+    const backButton=`<button type="button" class="btn-secondary btn-sm" id="prepare-answer-back">返回题目列表</button>`;
     if(framework==='FREE'){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
         const answer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
@@ -5096,14 +5268,16 @@ function renderPrepareAnswers(session){
                         <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
                     </div>
                     <div class="prepare-answer-hero-actions">
+                        <div class="prepare-answer-top-actions">${backButton}</div>
                         <label class="prepare-field prepare-free-field">
                             <span>你想怎么问</span>
                             <textarea id="prepare-free-question" rows="5" placeholder="例如：如果面试官追问我为什么转产品，我应该怎么答？">${escapeHTML(prepareState.freeQuestionText)}</textarea>
-                            <em>会基于当前 JD 和简历上下文生成，不会凭空补故事。</em>
+                            <em>会基于当前 JD、简历和你补充的经历素材来生成。</em>
                         </label>
                         <div class="prepare-entry-actions prepare-answer-actions">
                             <button type="button" class="btn-primary" id="prepare-generate-free-answer">生成自由回答</button>
                         </div>
+                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface${prepareState.answerLoading?' prepare-loading-panel':''}">
@@ -5124,6 +5298,7 @@ function renderPrepareAnswers(session){
                         <span>${escapeHTML(questionMeta.framework_reason||'')}</span>
                     </div>
                     <div class="prepare-answer-hero-actions">
+                        <div class="prepare-answer-top-actions">${backButton}</div>
                         <div class="prepare-answer-intro">
                             <div class="prepare-section-kicker">提问方式</div>
                             <h3>可以直接这么问</h3>
@@ -5136,10 +5311,11 @@ function renderPrepareAnswers(session){
                             <p>先确认这份岗位前 30 天最重要的交付、团队最看重的结果和你最需要补强的能力，再决定自己要不要补学或补做什么。</p>
                             <span>这类题没有标准答案，关键是问得具体、问得有信息量。</span>
                         </div>
+                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface">
-                    <div class="prepare-inline-notice">你可以把这几个问题复制进面试现场，面试官回答后，再把关键信息记到复盘里。</div>
+                    <div class="prepare-inline-notice">你可以把这些问题带进面试现场，面试官回答后再把关键信息记到复盘里。</div>
                     <div class="prepare-answer-structure">
                         <div class="prepare-answer-block">
                             <h3>推荐版本</h3>
@@ -5162,23 +5338,42 @@ function renderPrepareAnswers(session){
             </div>
         `;
     }
-    const question=questionMeta||getPrepareSelectedQuestion(session);
-    if(!question)return'<div class="prepare-empty">先在问题列表里选一道题，再生成回答骨架。</div>';
-    const answer=session.outputs?.answer_cache?.[question.id]?.[framework];
+    if(!questionMeta){
+        return `
+            <div class="prepare-answer-flow">
+                <section class="prepare-card-surface prepare-answer-hero-card">
+                    <div class="prepare-answer-hero-copy">
+                        <div class="prepare-section-kicker">回答页</div>
+                        <h3>先从题目列表里点一道题</h3>
+                        <p>回答页会单独展开，不再跟着题目列表挤在一起。</p>
+                        <span>你也可以先去补一段经历，再回来生成答案。</span>
+                    </div>
+                    <div class="prepare-answer-hero-actions">
+                        <div class="prepare-answer-top-actions">${backButton}</div>
+                        ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
+                    </div>
+                </section>
+                <section class="prepare-card-surface prepare-answer-surface">
+                    <div class="prepare-empty">先在题目列表里选一道题，再生成回答骨架。</div>
+                </section>
+            </div>
+        `;
+    }
+    const answer=session.outputs?.answer_cache?.[questionMeta.id]?.[framework];
     const frameworkPills=availableFrameworks.map(function(key){
         const item=getPrepareFrameworkMeta(key);
         return `<button type="button" class="prepare-framework-btn${framework===item.key?' is-active':''}" data-prepare-framework="${item.key}">${escapeHTML(item.label)}</button>`;
     }).join('');
-    const questionSource=escapeHTML(question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'可反问面试官':'来自岗位信息');
     const answerMeta=`
         <section class="prepare-card-surface prepare-answer-hero-card">
             <div class="prepare-answer-hero-copy">
                 <div class="prepare-section-kicker">回答策略</div>
-                <h3>${escapeHTML(question.question)}</h3>
-                <p>${escapeHTML(question.framework_reason||'')}</p>
+                <h3>${escapeHTML(questionMeta.question)}</h3>
+                <p>${escapeHTML(questionMeta.framework_reason||'')}</p>
                 <span>${questionSource}</span>
             </div>
             <div class="prepare-answer-hero-actions">
+                <div class="prepare-answer-top-actions">${backButton}</div>
                 <div class="prepare-answer-intro">
                     <div class="prepare-section-kicker">当前模板</div>
                     <h3>${escapeHTML(frameworkMeta.label)}</h3>
@@ -5186,6 +5381,7 @@ function renderPrepareAnswers(session){
                     <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
                 </div>
                 <div class="prepare-framework-switch" role="tablist">${frameworkPills}</div>
+                ${renderPrepareSupplementalExperienceCard(session,{compact:true})}
             </div>
         </section>
     `;
@@ -5219,7 +5415,7 @@ function renderPrepareAnswers(session){
         </div>
     `;
 }
-function buildPrepareMockInterviewQuestions(session){
+function buildPrepareGeneratedMockInterviewQuestions(session){
     const allQuestions=getPrepareAllQuestions(session).filter(function(question){
         const meta=normalizePrepareQuestionRecord(question);
         return meta.question_type!=='reverse_question';
@@ -5250,7 +5446,55 @@ function buildPrepareMockInterviewQuestions(session){
     });
     return unique.slice(0,4);
 }
+function buildPrepareMockInterviewQuestions(session){
+    if(prepareMockState.questionMode==='custom'){
+        const customQuestions=(prepareMockState.customQuestions||[]).map(function(item,index){
+            const text=normalizePrepareText(item?.question||item||'');
+            if(!text)return null;
+            return normalizePrepareQuestionRecord({
+                id:item?.id||createLocalId('custom_mock'),
+                question:text,
+                question_type:item?.question_type||'behavioral',
+                source:'custom',
+                importance:item?.importance||'high',
+                recommended_frameworks:item?.recommended_frameworks||[],
+                default_framework:item?.default_framework||'PREP',
+                framework_reason:item?.framework_reason||'这是你自己定义的问题，建议先亮结论，再举例或给结构化回答。'
+            });
+        }).filter(Boolean);
+        return customQuestions.length?customQuestions:[];
+    }
+    return buildPrepareGeneratedMockInterviewQuestions(session);
+}
 function resetPrepareMockInterviewState(session){
+    prepareMockState.sessionId=session?.id||'';
+    prepareMockState.questions=buildPrepareGeneratedMockInterviewQuestions(session);
+    prepareMockState.currentIndex=0;
+    prepareMockState.currentAnswer='';
+    prepareMockState.currentFeedback=null;
+    prepareMockState.history=[];
+    prepareMockState.currentQuestionLoading=false;
+    prepareMockState.submitLoading=false;
+    prepareMockState.error='';
+    prepareMockState.stage='setup';
+    prepareMockState.finalFeedback=null;
+    prepareMockState.questionMode='generated';
+    prepareMockState.feedbackMode='per_question';
+    prepareMockState.customQuestionDraft='';
+    prepareMockState.customQuestions=[];
+    prepareMockState.transcriptMode='text';
+    prepareMockState.voiceActive=false;
+    prepareMockState.transcriptText='';
+    prepareMockState.recorderSeconds=0;
+    if(prepareMockState.recorderTimer){
+        clearInterval(prepareMockState.recorderTimer);
+        prepareMockState.recorderTimer=null;
+    }
+    if(prepareMockState.recognition){
+        try{prepareMockState.recognition.stop();}catch(error){}
+    }
+}
+function startPrepareMockInterview(session){
     const questions=buildPrepareMockInterviewQuestions(session);
     prepareMockState.sessionId=session?.id||'';
     prepareMockState.questions=questions;
@@ -5261,6 +5505,8 @@ function resetPrepareMockInterviewState(session){
     prepareMockState.currentQuestionLoading=false;
     prepareMockState.submitLoading=false;
     prepareMockState.error='';
+    prepareMockState.stage='interview';
+    prepareMockState.finalFeedback=null;
     prepareMockState.transcriptMode='text';
     prepareMockState.voiceActive=false;
     prepareMockState.transcriptText='';
@@ -5288,19 +5534,143 @@ function renderPrepareMockInterview(session){
     if(prepareMockState.sessionId!==session?.id){
         resetPrepareMockInterviewState(session);
     }
-    const questions=prepareMockState.questions||[];
+    const linkedApp=session.application_id?store.getApp(session.application_id):null;
+    const companyLabel=linkedApp?`${linkedApp.company_name} · ${linkedApp.position_title}`:`${session.company_name||'当前准备会话'} · ${session.role_name||'目标岗位'}`;
+    const generatedQuestions=buildPrepareGeneratedMockInterviewQuestions(session);
+    const questions=buildPrepareMockInterviewQuestions(session);
     const total=questions.length;
     const currentQuestion=getCurrentPrepareMockQuestion();
     const finished=total>0&&prepareMockState.currentIndex>=total;
     const feedback=prepareMockState.currentFeedback;
-    const linkedApp=session.application_id?store.getApp(session.application_id):null;
-    const saveHint=linkedApp?'提交后会自动写入对应投递的复盘记录。':'当前会话没有绑定投递，但提交后也会先写入复盘里，只是会暂时落到“未知”分组，后续最好关联一条投递再整理。';
+    const feedbackModeLabel=prepareMockState.feedbackMode==='end'?'全部结束再点评':'每题都点评';
+    const questionModeLabel=prepareMockState.questionMode==='custom'?'自己出题':'生成题目';
+    if(prepareMockState.stage==='setup'){
+        const canStart=prepareMockState.questionMode==='custom'?questions.length>0:generatedQuestions.length>0;
+        return `
+            <div class="prepare-mock-workbench prepare-mock-setup">
+                <section class="prepare-card-surface prepare-section-shell prepare-mock-header prepare-mock-header-setup">
+                    <div class="prepare-mock-header-copy">
+                        <div class="prepare-section-kicker">模拟面试</div>
+                        <h3>先选题目模式和点评方式，再开始练习</h3>
+                        <p>${escapeHTML(companyLabel)}</p>
+                    </div>
+                    <div class="prepare-mock-header-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="prepare-mock-restart">重置设置</button>
+                    </div>
+                </section>
+                <section class="prepare-card-surface prepare-section-shell prepare-mock-setup-panel">
+                    <div class="prepare-mock-setup-grid">
+                        <div class="prepare-mock-choice-card">
+                            <div class="prepare-section-kicker">题目来源</div>
+                            <div class="prepare-choice-group" role="tablist">
+                                <button type="button" class="prepare-choice-btn${prepareMockState.questionMode==='generated'?' is-active':''}" data-prepare-mock-mode-choice="generated">生成模拟面试题目</button>
+                                <button type="button" class="prepare-choice-btn${prepareMockState.questionMode==='custom'?' is-active':''}" data-prepare-mock-mode-choice="custom">自己想问题自己回答</button>
+                            </div>
+                            <p>生成题目会围绕岗位、简历和行为面来出题；自己出题适合你已经知道面试官可能会怎么问。</p>
+                        </div>
+                        <div class="prepare-mock-choice-card">
+                            <div class="prepare-section-kicker">点评方式</div>
+                            <div class="prepare-choice-group" role="tablist">
+                                <button type="button" class="prepare-choice-btn${prepareMockState.feedbackMode==='per_question'?' is-active':''}" data-prepare-mock-feedback-mode="per_question">一个问题一个点评</button>
+                                <button type="button" class="prepare-choice-btn${prepareMockState.feedbackMode==='end'?' is-active':''}" data-prepare-mock-feedback-mode="end">全部结束再点评</button>
+                            </div>
+                            <p>前者会边答边点评，后者会等你整场答完后给一次总评。</p>
+                        </div>
+                    </div>
+                    ${prepareMockState.questionMode==='custom'?`
+                        <div class="prepare-mock-custom-box">
+                            <label class="prepare-field">
+                                <span>你来出题</span>
+                                <textarea id="prepare-mock-custom-question-input" rows="4" placeholder="例如：请讲一个你推动跨团队协作的经历。">${escapeHTML(prepareMockState.customQuestionDraft)}</textarea>
+                                <em>把你想自己回答的问题先写下来，再点“添加题目”。</em>
+                            </label>
+                            <div class="prepare-mock-actions prepare-mock-actions-left">
+                                <button type="button" class="btn-primary" id="prepare-mock-add-custom-question">添加题目</button>
+                            </div>
+                            <div class="prepare-mock-custom-list">
+                                ${prepareMockState.customQuestions.length?prepareMockState.customQuestions.map(function(item,index){
+                                    const text=normalizePrepareText(item?.question||item||'');
+                                    const itemId=item?.id||`mock_custom_${index}`;
+                                    return `
+                                        <div class="prepare-mock-custom-item">
+                                            <strong>${escapeHTML(text)}</strong>
+                                            <button type="button" class="prepare-mock-custom-remove" data-prepare-mock-custom-remove="${escapeHTML(itemId)}" aria-label="删除题目">×</button>
+                                        </div>
+                                    `;
+                                }).join(''):'<div class="prepare-empty prepare-mock-custom-empty">先添加 1 到 3 个你想自己回答的问题。</div>'}
+                            </div>
+                        </div>
+                    `:`
+                        <div class="prepare-mock-preview">
+                            <div class="prepare-mock-preview-head">
+                                <div class="prepare-section-kicker">题目预览</div>
+                                <span>${generatedQuestions.length} 题</span>
+                            </div>
+                            <div class="prepare-mock-preview-list">
+                                ${generatedQuestions.slice(0,4).map(function(question,index){
+                                    const meta=normalizePrepareQuestionRecord(question);
+                                    return `
+                                        <article class="prepare-mock-preview-card">
+                                            <span>Q${index+1}</span>
+                                            <strong>${escapeHTML(meta.question)}</strong>
+                                            <em>${escapeHTML(meta.framework_reason||'')}</em>
+                                        </article>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `}
+                </section>
+                <div class="prepare-mock-setup-footer">
+                    <div class="prepare-inline-notice">${escapeHTML(prepareMockState.questionMode==='custom'?'你自己写的问题会直接进入模拟流程，AI 只负责点评。':'AI 会先帮你生成一套更接近真实面试的题目。')} ${escapeHTML(feedbackModeLabel)}。</div>
+                    <div class="prepare-mock-actions">
+                        <button type="button" class="btn-primary" id="prepare-mock-start" ${canStart?'':'disabled'}>${canStart?'开始模拟面试':'先补齐题目'}</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    if(prepareMockState.stage==='summary'){
+        const finalFeedback=prepareMockState.finalFeedback||feedback;
+        return `
+            <div class="prepare-mock-workbench">
+                <section class="prepare-card-surface prepare-section-shell prepare-mock-finished">
+                    <div class="prepare-section-kicker">模拟面试完成</div>
+                    <h3>这场模拟已经结束</h3>
+                    <p>${escapeHTML(companyLabel)} · ${escapeHTML(feedbackModeLabel)}。</p>
+                    <div class="prepare-mock-progress">
+                        <span>已完成 ${total} / ${total}</span>
+                    </div>
+                    <div class="prepare-mock-actions">
+                        <button type="button" class="btn-secondary" id="prepare-mock-back-setup">重新设置</button>
+                        <button type="button" class="btn-primary" id="prepare-mock-restart">再来一轮</button>
+                    </div>
+                </section>
+                ${finalFeedback?renderPrepareMockFeedbackCard(finalFeedback):'<div class="prepare-empty">总结点评还在生成中。</div>'}
+            </div>
+        `;
+    }
+    const saveHint=linkedApp?'提交后会写入这条投递的复盘。':'提交后会按公司和岗位写入复盘，不会落到未知分组。';
     if(!total){
         return `
             <div class="prepare-empty">这套工作台里还没有可用的题目，先回到“问题”页重新生成一次。</div>
         `;
     }
     if(finished){
+        if(prepareMockState.feedbackMode==='end'&&!prepareMockState.finalFeedback){
+            return `
+                <div class="prepare-mock-workbench">
+                    <section class="prepare-card-surface prepare-section-shell prepare-mock-finished">
+                        <div class="prepare-section-kicker">模拟面试完成</div>
+                        <h3>已完成全部回答，正在生成总评</h3>
+                        <p>这次会一次性点评整场表现，并写入复盘。</p>
+                        <div class="prepare-mock-progress">
+                            <span>已完成 ${total} / ${total}</span>
+                        </div>
+                    </section>
+                </div>
+            `;
+        }
         return `
             <div class="prepare-mock-workbench">
                 <section class="prepare-card-surface prepare-section-shell prepare-mock-finished">
@@ -5311,6 +5681,7 @@ function renderPrepareMockInterview(session){
                         <span>已完成 ${total} / ${total}</span>
                     </div>
                     <div class="prepare-mock-actions">
+                        <button type="button" class="btn-secondary" id="prepare-mock-back-setup">重新设置</button>
                         <button type="button" class="btn-primary" id="prepare-mock-restart">重新开始</button>
                     </div>
                 </section>
@@ -5329,6 +5700,7 @@ function renderPrepareMockInterview(session){
                     <p>${escapeHTML(linkedApp?`${linkedApp.company_name} · ${linkedApp.position_title}`:session.company_name||'当前准备会话')}</p>
                 </div>
                 <div class="prepare-mock-header-actions">
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-mock-back-setup">重新设置</button>
                     <button type="button" class="btn-secondary btn-sm" id="prepare-mock-restart">重新开始</button>
                     <button type="button" class="btn-secondary btn-sm" id="prepare-mock-next" ${prepareMockState.currentIndex>=questions.length?'disabled':''}>下一题</button>
                 </div>
@@ -5349,11 +5721,17 @@ function renderPrepareMockInterview(session){
                 </div>
             </section>
             <section class="prepare-card-surface prepare-section-shell prepare-mock-answer-card">
-                <div class="prepare-answer-hero-actions">
+                <div class="prepare-mock-answer-card-head">
+                    <div>
+                        <div class="prepare-section-kicker">你的回答</div>
+                        <p>可以直接打字，也可以用语音转文字。</p>
+                    </div>
                     <div class="input-mode-toggle">
                         <button type="button" class="mode-btn${prepareMockState.transcriptMode==='text'?' active':''}" data-prepare-mock-mode="text">📝 文本</button>
                         <button type="button" class="mode-btn${prepareMockState.transcriptMode==='voice'?' active':''}" data-prepare-mock-mode="voice">🎙️ 语音</button>
                     </div>
+                </div>
+                <div class="prepare-answer-hero-actions">
                     <textarea id="prepare-mock-answer" rows="7" placeholder="先口述再补写都可以，尽量用你自己的表达，不要直接抄答案。">${escapeHTML(prepareMockState.currentAnswer)}</textarea>
                     <div id="prepare-mock-voice-recorder" style="${prepareMockState.transcriptMode==='voice'?'':'display:none'}">
                         <button class="record-btn" id="prepare-mock-record-btn" type="button"><span class="record-icon"></span><span id="prepare-mock-record-label">${prepareMockState.voiceActive?'正在转写...':'点击开始转写'}</span></button>
@@ -5376,6 +5754,7 @@ function renderPrepareMockFeedbackCard(feedback){
     const gaps=Array.isArray(feedback.gaps)?feedback.gaps:[];
     const suggestions=Array.isArray(feedback.suggestions)?feedback.suggestions:[];
     const painPoints=Array.isArray(feedback.pain_points)?feedback.pain_points:[];
+    const nextSteps=Array.isArray(feedback.next_steps)?feedback.next_steps:[];
     return `
         <section class="prepare-card-surface prepare-section-shell prepare-mock-feedback-card">
             <div class="prepare-section-kicker">AI 点评</div>
@@ -5394,6 +5773,12 @@ function renderPrepareMockFeedbackCard(feedback){
                 <h3>下一轮怎么改</h3>
                 <ul class="prepare-bullet-list">${suggestions.map(item=>`<li>${escapeHTML(item)}</li>`).join('')||'<li>把回答重写成“问题是什么、你怎么判断、你做了什么、结果如何”。</li>'}</ul>
             </div>
+            ${nextSteps.length?`
+                <div class="prepare-answer-block">
+                    <h3>下一步行动</h3>
+                    <ul class="prepare-bullet-list">${nextSteps.map(item=>`<li>${escapeHTML(item)}</li>`).join('')}</ul>
+                </div>
+            `:''}
             ${painPoints.length?`
                 <div class="prepare-followup-block">
                     <strong>可写入复盘的失分点</strong>
@@ -5762,6 +6147,7 @@ function renderPrepare(){
         prepareState.sessionError=store.getPrepareSession(this.dataset.prepareSession)?.error_message||'';
         prepareState.activeTab='research';
         prepareState.selectedQuestionId=null;
+        prepareState.questionPane='list';
         prepareState.questionGroupLoadingKey='';
         prepareState.screen='workspace';
         renderPrepare();
@@ -5775,6 +6161,7 @@ function renderPrepare(){
         prepareState.screen='compose';
         prepareState.selectedSessionId=null;
         prepareState.selectedQuestionId=null;
+        prepareState.questionPane='list';
         prepareState.questionGroupLoadingKey='';
         prepareState.activeTab='research';
         prepareState.showResumePreview=false;
@@ -5796,6 +6183,7 @@ function renderPrepare(){
     });
     $$('[data-prepare-tab]').forEach(button=>button.addEventListener('click',function(){
         prepareState.activeTab=this.dataset.prepareTab||'research';
+        if(prepareState.activeTab==='questions')prepareState.questionPane='list';
         renderPrepare();
     }));
     $$('[data-prepare-company-mode]').forEach(button=>button.addEventListener('click',function(){
@@ -5808,6 +6196,7 @@ function renderPrepare(){
         const question=session?getPrepareAllQuestions(session).find(item=>item.id===this.dataset.prepareQuestion):null;
         prepareState.selectedFramework=getPrepareQuestionDefaultFramework(question);
         prepareState.activeTab='questions';
+        prepareState.questionPane='answer';
         renderPrepare();
         if(session&&question&&normalizePrepareQuestionRecord(question).question_type!=='reverse_question'){
             ensurePrepareAnswer(session.id,prepareState.selectedQuestionId,prepareState.selectedFramework||'PREP');
@@ -5853,6 +6242,7 @@ function renderPrepare(){
                 const refreshed=store.getPrepareSession(session.id);
                 prepareState.questionGroupLoadingKey='';
                 prepareState.selectedQuestionId=normalizedOutputQuestions[0]?.id||null;
+                prepareState.questionPane='answer';
                 prepareState.activeTab='questions';
                 prepareState.selectedFramework=getPrepareQuestionDefaultFramework(normalizedOutputQuestions[0]);
                 renderPrepare();
@@ -5878,11 +6268,14 @@ function renderPrepare(){
             toast('先输入你想追问的问题。','error');
             return;
         }
-        prepareState.selectedQuestionId=null;
-        prepareState.selectedFramework='FREE';
-        prepareState.activeTab='questions';
-        renderPrepare();
-        void ensurePrepareFreeAnswer(session.id);
+        withButtonBusy(this,async function(){
+            prepareState.selectedQuestionId=null;
+            prepareState.selectedFramework='FREE';
+            prepareState.questionPane='answer';
+            prepareState.activeTab='questions';
+            renderPrepare();
+            await ensurePrepareFreeAnswer(session.id);
+        },'生成中...');
     });
     $('#prepare-custom-question-clear')?.addEventListener('click',function(){
         prepareState.freeQuestionText='';
@@ -5907,9 +6300,15 @@ function renderPrepare(){
         const session=getPrepareSelectedSession();
         if(session)withButtonBusy(this,async()=>{await ensurePrepareFreeAnswer(session.id);},'生成中...');
     });
+    $('#prepare-answer-back')?.addEventListener('click',function(){
+        prepareState.questionPane='list';
+        prepareState.selectedQuestionId=null;
+        prepareState.selectedFramework='STAR';
+        renderPrepare();
+    });
     $('#prepare-regenerate')?.addEventListener('click',function(){
         const session=getPrepareSelectedSession();
-        if(session)withButtonBusy(this,async()=>{await regeneratePrepareSession(session.id);},'生成中...');
+        if(session)withButtonBusy(this,async()=>{prepareState.questionPane='list';await regeneratePrepareSession(session.id);},'生成中...');
     });
     $('#prepare-open-app')?.addEventListener('click',function(){
         const session=getPrepareSelectedSession();
@@ -5923,7 +6322,7 @@ function renderPrepare(){
         const session=getPrepareSelectedSession();
         if(!session)return;
         const framework=prepareState.selectedFramework||'STAR';
-        const question=framework==='FREE'?null:getPrepareSelectedQuestion(session);
+        const question=framework==='FREE'?null:getPrepareSelectedQuestion(session,{fallback:false});
         const cacheKey=framework==='FREE'?getPrepareFreeQuestionKey(prepareState.freeQuestionText):question?.id;
         const answer=cacheKey?session.outputs?.answer_cache?.[cacheKey]?.[framework]:null;
         if(!answer){
@@ -5937,13 +6336,120 @@ function renderPrepare(){
             toast('复制失败，请手动复制','error');
         }
     });
+    $('#prepare-supplemental-input-global')?.addEventListener('input',function(){
+        prepareState.supplementalExperienceDraft=this.value;
+    });
+    $('#prepare-supplemental-input-answer')?.addEventListener('input',function(){
+        prepareState.supplementalExperienceDraft=this.value;
+    });
+    $('#prepare-supplemental-add-global')?.addEventListener('click',async function(){
+        const session=getPrepareSelectedSession();
+        if(!session)return;
+        const text=normalizePrepareText(prepareState.supplementalExperienceDraft);
+        if(!text){
+            toast('先补一段经历。','error');
+            return;
+        }
+        const ok=await addPrepareSupplementalExperience(session.id,text,{
+            question_id:prepareState.selectedQuestionId||'',
+            source:'manual'
+        });
+        if(ok===false)return;
+        prepareState.supplementalExperienceDraft='';
+        renderPrepare();
+        toast('已加入经历库','success');
+    });
+    $('#prepare-supplemental-add-answer')?.addEventListener('click',async function(){
+        const session=getPrepareSelectedSession();
+        if(!session)return;
+        const text=normalizePrepareText(prepareState.supplementalExperienceDraft);
+        if(!text){
+            toast('先补一段经历。','error');
+            return;
+        }
+        const ok=await addPrepareSupplementalExperience(session.id,text,{
+            question_id:prepareState.selectedQuestionId||'',
+            source:'answer'
+        });
+        if(ok===false)return;
+        prepareState.supplementalExperienceDraft='';
+        renderPrepare();
+        toast('已加入当前回答','success');
+    });
+    $$('[data-prepare-supplement-remove]').forEach(button=>button.addEventListener('click',async function(){
+        const session=getPrepareSelectedSession();
+        if(!session)return;
+        const experienceId=this.dataset.prepareSupplementRemove;
+        if(!experienceId)return;
+        const ok=await removePrepareSupplementalExperience(session.id,experienceId);
+        if(ok===false)return;
+        renderPrepare();
+    }));
     const mockSession=getPrepareSelectedSession();
     if(mockSession&&prepareState.activeTab==='mock'){
         const mockQuestion=getCurrentPrepareMockQuestion();
+        const linkedApp=mockSession.application_id?store.getApp(mockSession.application_id):null;
+        const resolvedAppId=linkedApp?.id||mockSession.application_id||null;
         $('#prepare-mock-restart')?.addEventListener('click',function(){
-            resetPrepareMockInterviewState(mockSession);
+            if(prepareMockState.stage==='setup'){
+                resetPrepareMockInterviewState(mockSession);
+            }else{
+                startPrepareMockInterview(mockSession);
+            }
             renderPrepare();
         });
+        $('#prepare-mock-back-setup')?.addEventListener('click',function(){
+            prepareMockState.stage='setup';
+            prepareMockState.currentIndex=0;
+            prepareMockState.currentAnswer='';
+            prepareMockState.currentFeedback=null;
+            prepareMockState.finalFeedback=null;
+            prepareMockState.error='';
+            renderPrepare();
+        });
+        $('#prepare-mock-start')?.addEventListener('click',function(){
+            if(prepareMockState.questionMode==='custom'&&!prepareMockState.customQuestions.length){
+                toast('先添加至少 1 个问题。','error');
+                return;
+            }
+            startPrepareMockInterview(mockSession);
+            renderPrepare();
+        });
+        $$('[data-prepare-mock-mode-choice]').forEach(button=>button.addEventListener('click',function(){
+            prepareMockState.questionMode=this.dataset.prepareMockModeChoice==='custom'?'custom':'generated';
+            if(prepareMockState.questionMode!=='custom'){
+                prepareMockState.customQuestions=[];
+                prepareMockState.customQuestionDraft='';
+            }
+            renderPrepare();
+        }));
+        $$('[data-prepare-mock-feedback-mode]').forEach(button=>button.addEventListener('click',function(){
+            prepareMockState.feedbackMode=this.dataset.prepareMockFeedbackMode==='end'?'end':'per_question';
+            renderPrepare();
+        }));
+        $('#prepare-mock-custom-question-input')?.addEventListener('input',function(){
+            prepareMockState.customQuestionDraft=this.value;
+        });
+        $('#prepare-mock-add-custom-question')?.addEventListener('click',function(){
+            const text=normalizePrepareText(prepareMockState.customQuestionDraft);
+            if(!text){
+                toast('先输入一个问题。','error');
+                return;
+            }
+            prepareMockState.customQuestions=[...prepareMockState.customQuestions,{id:createLocalId('mock_custom'),question:text}].slice(0,3);
+            prepareMockState.customQuestionDraft='';
+            prepareMockState.questions=buildPrepareMockInterviewQuestions(mockSession);
+            renderPrepare();
+        });
+        $$('[data-prepare-mock-custom-remove]').forEach(button=>button.addEventListener('click',function(){
+            const removeId=this.dataset.prepareMockCustomRemove||'';
+            if(!removeId)return;
+            prepareMockState.customQuestions=prepareMockState.customQuestions.filter(function(item){
+                return item?.id!==removeId;
+            });
+            prepareMockState.questions=buildPrepareMockInterviewQuestions(mockSession);
+            renderPrepare();
+        }));
         $('#prepare-mock-next')?.addEventListener('click',function(){
             if(prepareMockState.currentIndex<prepareMockState.questions.length){
                 prepareMockState.currentIndex++;
@@ -5992,18 +6498,78 @@ function renderPrepare(){
             prepareMockState.error='';
             renderPrepare();
             try{
+                const historyEntry={question:question.question,answer:answerText,feedback:null};
+                const nextHistory=prepareMockState.history.concat(historyEntry);
+                if(prepareMockState.feedbackMode==='end'){
+                    prepareMockState.history=nextHistory;
+                    if(prepareMockState.currentIndex>=prepareMockState.questions.length-1){
+                        const summary=await requestPrepareMockSummaryAI(mockSession,nextHistory);
+                        const summaryQuestionText=`模拟面试总评（${prepareMockState.questions.length} 题）`;
+                        const summaryAnswerText=nextHistory.map(function(item,index){
+                            return `Q${index+1}：${item.question}\nA${index+1}：${item.answer}`;
+                        }).join('\n\n');
+                        const summaryReviewText=summary.reflection_summary||summary.overall_feedback||'';
+                        const current=store.getPrepareSession(mockSession.id);
+                        if(current){
+                            const savedRef={
+                                app_id:resolvedAppId,
+                                company_name:linkedApp?.company_name||mockSession.company_name||'',
+                                position_title:linkedApp?.position_title||mockSession.role_name||'',
+                                interview_round:'MOCK_INTERVIEW',
+                                input_type:prepareMockState.transcriptMode==='voice'?'VOICE':'TEXT',
+                                question_text:summaryQuestionText,
+                                answer_text:summaryAnswerText,
+                                reflection_text:summaryReviewText,
+                                raw_content:`问题：${summaryQuestionText}\n\n回答：${summaryAnswerText}\n\n复盘：${summaryReviewText}`,
+                                cleaned_content:`问题：${summaryQuestionText}\n\n回答：${summaryAnswerText}\n\n复盘：${summaryReviewText}`,
+                                ai_extracted:summary.overall_feedback||summary.reflection_summary||'',
+                                pain_points:Array.isArray(summary.pain_points)?summary.pain_points:[],
+                                self_rating:typeof summary.self_rating==='number'?summary.self_rating:null
+                            };
+                            await store.addRef(savedRef);
+                        }
+                        prepareMockState.finalFeedback=summary;
+                        prepareMockState.stage='summary';
+                        prepareMockState.submitLoading=false;
+                        prepareMockState.currentAnswer='';
+                        prepareMockState.transcriptText='';
+                        if(prepareMockState.recognition){
+                            try{prepareMockState.recognition.stop();}catch(error){}
+                            prepareMockState.voiceActive=false;
+                        }
+                        renderPrepare();
+                        toast('整场点评已生成，并已记录到复盘','success');
+                        return;
+                    }
+                    prepareMockState.currentIndex=Math.min(prepareMockState.currentIndex+1,prepareMockState.questions.length);
+                    prepareMockState.currentAnswer='';
+                    prepareMockState.currentFeedback=null;
+                    prepareMockState.transcriptText='';
+                    prepareMockState.submitLoading=false;
+                    if(prepareMockState.recognition){
+                        try{prepareMockState.recognition.stop();}catch(error){}
+                        prepareMockState.voiceActive=false;
+                    }
+                    renderPrepare();
+                    toast('答案已记录，继续下一题','success');
+                    return;
+                }
                 const feedback=await requestPrepareMockFeedbackAI(mockSession,question,answerText,prepareMockState.history);
                 const current=store.getPrepareSession(mockSession.id);
                 if(current){
-                    const painPoints=Array.isArray(feedback.pain_points)?feedback.pain_points:[];
                     const savedRef={
-                        app_id:mockSession.application_id||`mock:${mockSession.id}`,
+                        app_id:resolvedAppId,
+                        company_name:linkedApp?.company_name||mockSession.company_name||'',
+                        position_title:linkedApp?.position_title||mockSession.role_name||'',
                         interview_round:'MOCK_INTERVIEW',
                         input_type:prepareMockState.transcriptMode==='voice'?'VOICE':'TEXT',
-                        raw_content:`题目：${question.question}\n\n回答：${answerText}`,
-                        cleaned_content:`题目：${question.question}\n\n回答：${answerText}`,
+                        question_text:question.question,
+                        answer_text:answerText,
+                        reflection_text:feedback.reflection_summary||feedback.overall_feedback||'',
+                        raw_content:`问题：${question.question}\n\n回答：${answerText}\n\n复盘：${feedback.reflection_summary||feedback.overall_feedback||''}`,
+                        cleaned_content:`问题：${question.question}\n\n回答：${answerText}\n\n复盘：${feedback.reflection_summary||feedback.overall_feedback||''}`,
                         ai_extracted:feedback.overall_feedback||feedback.reflection_summary||'',
-                        pain_points:painPoints,
+                        pain_points:Array.isArray(feedback.pain_points)?feedback.pain_points:[],
                         self_rating:typeof feedback.self_rating==='number'?feedback.self_rating:null
                     };
                     await store.addRef(savedRef);
@@ -7237,17 +7803,19 @@ function renderRefs(){
     const groups={};
     [...store.refs].sort((a,b)=>new Date(b.at)-new Date(a.at)).forEach(ref=>{
         const app=store.getApp(ref.app_id);
-        const key=app?`${app.company_name}|||${app.position_title}`:'未知|||未知';
-        if(!groups[key])groups[key]={app,refs:[]};
+        const companyName=app?.company_name||ref.company_name||'';
+        const positionTitle=app?.position_title||ref.position_title||'';
+        const key=companyName||positionTitle?`${companyName}|||${positionTitle}`:'未知|||未知';
+        if(!groups[key])groups[key]={app,companyName,positionTitle,refs:[]};
         groups[key].refs.push(ref);
     });
     Object.values(groups).forEach(g=>{
         const header=document.createElement('div');
         header.style.cssText='font-size:13px;font-weight:600;color:var(--text-primary);padding:10px 0 6px;border-bottom:1px solid var(--border-light);margin-bottom:8px;display:flex;align-items:center;gap:8px';
-        const badge=createEl('span','',ini(g.app?.company_name||'?'));
+        const badge=createEl('span','',ini(g.companyName||g.app?.company_name||'?'));
         badge.style.cssText='width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-tertiary);border:1px solid var(--border);flex-shrink:0';
         header.appendChild(badge);
-        header.appendChild(document.createTextNode(g.app?`${g.app.company_name} · ${g.app.position_title}`:'未知'));
+        header.appendChild(document.createTextNode(`${g.companyName||g.app?.company_name||'未知'} · ${g.positionTitle||g.app?.position_title||'未知'}`));
         const count=createEl('span','',`${g.refs.length}条`);
         count.style.cssText='font-size:11px;color:var(--text-muted);font-weight:400';
         header.appendChild(count);
@@ -7295,9 +7863,9 @@ function renderReflectionTemplate(round){
     const box=$('#reflection-template');
     if(!box)return;
     const qs=REFLECTION_TEMPLATES[round]||REFLECTION_TEMPLATES.ROUND_1;
-    box.innerHTML=`<div class="reflection-template-head"><span>复盘模板</span><button type="button" id="reflection-template-apply">套用</button></div><div class="reflection-template-list">${qs.map(q=>`<span>${q}</span>`).join('')}</div>`;
+    box.innerHTML=`<div class="reflection-template-head"><span>复盘模板</span><button type="button" id="reflection-template-apply">套用到复盘</button></div><div class="reflection-template-list">${qs.map(q=>`<span>${q}</span>`).join('')}</div>`;
     $('#reflection-template-apply').addEventListener('click',function(){
-        const target=$('#reflection-content');
+        const target=$('#reflection-review-content');
         const template=qs.map(q=>`${q}：`).join('\n');
         target.value=target.value.trim()?`${target.value.trim()}\n\n${template}`:template;
         target.focus();
@@ -7325,25 +7893,29 @@ function openRefModal(refId=null,preAppId=null){
     store.apps.filter(a=>a.status!=='WATCHING').forEach(function(a){
         const option=document.createElement('option');
         option.value=a.id;
-        option.selected=ref?.app_id===a.id||preAppId===a.id;
+        option.selected=ref?.app_id===a.id||preAppId===a.id||(!ref?.app_id&&ref?.company_name===a.company_name&&ref?.position_title===a.position_title);
         option.textContent=`${a.company_name} - ${a.position_title}`;
         sel.appendChild(option);
     });
-    $('#reflection-round').value=ref?.interview_round||'ROUND_1';$('#reflection-content').value=ref?.raw_content||'';
+    const structured=parseReflectionStructuredContent(ref);
+    $('#reflection-round').value=ref?.interview_round||'ROUND_1';
+    $('#reflection-question-content').value=structured.question||'';
+    $('#reflection-answer-content').value=structured.answer||'';
+    $('#reflection-review-content').value=structured.review||'';
     renderReflectionTemplate($('#reflection-round').value);
     renderPPTags(ref?.pain_points||[]);
     $$('.star-rating .star').forEach(s=>s.classList.toggle('active',parseInt(s.dataset.val)<=(ref?.self_rating||0)));
-    currentReflectionMode='text';
+    currentReflectionMode=ref?.input_type==='VOICE'?'voice':'text';
     if(voiceRecognition)voiceRecognition.stop();
     clearInterval(recTimer);recSec=0;voiceTranscriptFinal='';
     resetVoiceUI();
-    $('#voice-recorder').style.display='none';$('#reflection-content').style.display='';$$('.mode-btn').forEach(b=>b.classList.remove('active'));$('.mode-btn[data-mode="text"]').classList.add('active');
+    $('#voice-recorder').style.display=currentReflectionMode==='voice'?'':'none';$('#reflection-answer-content').style.display=currentReflectionMode==='text'?'':'none';$$('.mode-btn').forEach(b=>b.classList.remove('active'));$(`.mode-btn[data-mode="${currentReflectionMode}"]`)?.classList.add('active');
     $('#reflection-modal-overlay').classList.add('active');
 }
 $('#reflection-round').addEventListener('change',function(){renderReflectionTemplate(this.value);});
 $('#add-pain-point-btn').addEventListener('click',async ()=>{const inp=$('#new-pain-point-input'),v=inp.value.trim();if(!v)return;const added=await store.addPP(v);if(!added)return;inp.value='';const cur=[];$$('#pain-points-selector input:checked').forEach(i=>cur.push(i.value));cur.push(v);renderPPTags(cur);});
 $('#new-pain-point-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('#add-pain-point-btn').click();}});
-$$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentReflectionMode=b.dataset.mode||'text';$('#reflection-content').style.display=currentReflectionMode==='text'?'':'none';$('#voice-recorder').style.display=currentReflectionMode==='voice'?'':'none';if(currentReflectionMode!=='voice'&&voiceRecognition)voiceRecognition.stop();});});
+$$('.mode-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.mode-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentReflectionMode=b.dataset.mode||'text';$('#reflection-answer-content').style.display=currentReflectionMode==='text'?'':'none';$('#voice-recorder').style.display=currentReflectionMode==='voice'?'':'none';if(currentReflectionMode!=='voice'&&voiceRecognition)voiceRecognition.stop();});});
 let recTimer=null,recSec=0,voiceRecognition=null,voiceTranscriptFinal='',voiceRecognitionActive=false;
 const SpeechRecognitionCtor=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 if(SpeechRecognitionCtor){
@@ -7359,7 +7931,7 @@ if(SpeechRecognitionCtor){
             else interim+=transcript;
         }
         const combined=(voiceTranscriptFinal+interim).trim();
-        $('#reflection-content').value=combined;
+        $('#reflection-answer-content').value=combined;
         renderVoiceResult('实时转写',combined);
     };
     voiceRecognition.onend=function(){
@@ -7370,7 +7942,7 @@ if(SpeechRecognitionCtor){
         if(btn)btn.classList.remove('recording');
         $('#record-label').textContent=voiceTranscriptFinal.trim()?'重新转写':'点击开始转写';
         if($('#voice-result').textContent.trim()){
-            renderVoiceResult('转写完成',$('#reflection-content').value||'');
+            renderVoiceResult('转写完成',$('#reflection-answer-content').value||'');
         }
     };
     voiceRecognition.onerror=function(event){
@@ -7396,7 +7968,7 @@ $('#record-btn').addEventListener('click',async()=>{
     }
     try{
         voiceTranscriptFinal='';
-        $('#reflection-content').value='';
+        $('#reflection-answer-content').value='';
         $('#voice-result').style.display='none';
         $('#voice-result').textContent='';
         recSec=0;
@@ -7415,7 +7987,7 @@ $('#record-btn').addEventListener('click',async()=>{
     }
 });
 $$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
-$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,content=$('#reflection-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!content){toast('请输入内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const d={app_id:aid,interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',raw_content:content,cleaned_content:content,ai_extracted:null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
+$('#reflection-save').addEventListener('click',async ()=>{const aid=$('#reflection-application').value,round=$('#reflection-round').value,question=$('#reflection-question-content').value.trim(),answer=$('#reflection-answer-content').value.trim(),review=$('#reflection-review-content').value.trim();if(!aid||!round){toast('请选择投递和轮次','error');return;}if(!question&&!answer&&!review){toast('请至少填写一项内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const combined=`问题：${question||'—'}\n\n回答：${answer||'—'}\n\n复盘：${review||'—'}`.trim();const app=store.getApp(aid);const d={app_id:aid,company_name:app?.company_name||'',position_title:app?.position_title||'',interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',question_text:question,answer_text:answer,reflection_text:review,raw_content:combined,cleaned_content:combined,ai_extracted:review||answer||null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
 $('#reflection-cancel').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 $('#reflection-modal-close').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 
