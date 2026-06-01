@@ -6812,7 +6812,6 @@ function renderPrepareWorkbench(session){
         }
     }
     const isAnswerMode=activeTab==='questions'&&prepareState.questionPane==='answer';
-    const answerPageMeta=isAnswerMode?getPrepareAnswerPageMeta(session):null;
     return `
         <div class="prepare-workbench${isAnswerMode?' is-answer-mode':''}">
             <div class="prepare-workbench-head">
@@ -6836,16 +6835,7 @@ function renderPrepareWorkbench(session){
             </div>
             ${prepareState.sessionError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.sessionError)}</div>`:''}
             ${renderPrepareAccessBanner(account,{showRegister:true})}
-            ${isAnswerMode?`
-                <div class="prepare-answer-shell-bar">
-                    <div class="prepare-answer-shell-copy">
-                        <div class="prepare-section-kicker">${escapeHTML(answerPageMeta.kicker)}</div>
-                        <strong>${escapeHTML(answerPageMeta.title)}</strong>
-                        <span>${escapeHTML(answerPageMeta.detail)}</span>
-                    </div>
-                    <button type="button" class="prepare-back-btn" id="prepare-shell-back-to-questions">← 返回题目列表</button>
-                </div>
-            `:`
+            ${isAnswerMode?'':`
                 <div class="prepare-tabs">
                     <button type="button" class="prepare-tab${prepareState.activeTab==='research'?' is-active':''}" data-prepare-tab="research">背调</button>
                     <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
