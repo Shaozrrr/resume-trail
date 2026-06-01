@@ -4022,7 +4022,7 @@ function buildPrepareAnswerMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，不是完整标准答案。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 可以使用占位符，比如 [结果数字]、[项目背景]，不能假装用户已经做过。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
+            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，但这版骨架必须足够接近现场可直接开口，不要只给空泛提纲。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 不能写成 Point/Reason/Example 这种模板标题，必须是一段 120 到 220 字、用户可以直接说出口的中文回答；10）如果题目像“如何定义 Skill 的质量标准 / 如何保证可复用性”这种业务判断题，必须直接给出你的判断维度和落地做法，不要只写“先讲背景、再讲动作”。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
         },
         {
             role:'user',
@@ -4624,6 +4624,17 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
     if(matchedBrief){
         commonTips.unshift(`如果提到「${matchedBrief.term}」，先用一句话把它翻译成真实业务概念，再回到你对 Agent / 工作流 / 产品落地的理解。`);
     }
+    const directDraft=(function(){
+        const roleName=normalizePrepareText(session.role_name||'这个岗位');
+        const experienceLabel=normalizePrepareText(firstExperience?.resume_section||'最接近的一段经历');
+        if(/质量标准|可复用|复用性|quality/.test(question?.question||'')){
+            return `如果让我定义 Skill 的质量标准，我会看三层。第一层是任务结果，能不能稳定把具体问题解决掉，比如在 ${experienceLabel} 里对应的场景里，输出是否准确、流程是否跑通。第二层是可复用性，输入输出接口、规则和提示词是不是标准化，能不能迁移到相邻场景，而不是每次重写一套。第三层是运行表现，比如调用成功率、人工接管率和用户反馈。我会先把共性的判断逻辑抽出来做成固定流程，再用真实 case 回测，最后根据调用数据持续迭代，这样既保证质量，也能让后续新场景复用成本更低。`;
+        }
+        if(/openclaw|agent|skill|tool/.test((question?.question||'').toLowerCase())){
+            return `我的理解是 Agent 更像负责任务编排和决策的大脑，Skill 是可复用的能力模块，Tool 是被调用的底层工具。真正落地时，先把高频场景拆成稳定步骤，再把像 ${jdKeyword?.jd_keyword||'关键信息提取、规则判断、结果回写'} 这样的通用动作沉淀成 Skill，最后让 Agent 按场景去调用不同 Skill 和 Tool。结合我在 ${experienceLabel} 里的经历，我会重点强调自己做过的 ${firstExperience?.why_match||'问题拆解、方案设计和结果验证'}，这就是我理解可复用能力沉淀的基础。`;
+        }
+        return `如果让我回答这题，我会先直接给结论：我最能对应 ${roleName} 的，不是单一做过某个名词，而是我在 ${experienceLabel} 里真正做过 ${firstExperience?.why_match||'问题拆解、推进落地和结果验证'}。当时我面对的问题是 [具体问题]，我先 [关键判断]，再 [关键动作]，最后拿到 [结果]。这也是为什么我觉得自己能把这段能力迁移到当前岗位。`;
+    })();
     const map={
         STAR:{
             structure:[
@@ -4633,7 +4644,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
                 {section:'Result',guidance:'最后一定要回到结果和复盘。',suggested_points:['补充数字或明确变化','说明这段经历为什么适合当前岗位']},
             ],
             delivery_tips:commonTips,
-            copyable_outline:`Situation：先交代背景和目标。\nTask：说明你要负责解决什么问题。\nAction：重点讲你的判断、动作和推进。\nResult：用结果和复盘收尾，并拉回当前岗位。`
+            copyable_outline:directDraft
         },
         PREP:{
             structure:[
@@ -4643,7 +4654,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
                 {section:'Point',guidance:'最后收回结论。',suggested_points:['把经历和岗位需要的能力再次连接起来']}
             ],
             delivery_tips:commonTips,
-            copyable_outline:`Point：先给结论。\nReason：解释为什么。\nExample：用一段经历证明。\nPoint：最后再收回到岗位匹配。`
+            copyable_outline:directDraft
         },
         PAR:{
             structure:[
@@ -4652,7 +4663,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
                 {section:'Result',guidance:'讲结果和影响。',suggested_points:['结果数字','后续影响','为什么说明你适合这个岗位']}
             ],
             delivery_tips:commonTips,
-            copyable_outline:`Problem：问题是什么。\nAction：你做了什么。\nResult：结果如何，以及它为什么有价值。`
+            copyable_outline:directDraft
         },
         SCQA:{
             structure:[
@@ -4662,7 +4673,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
                 {section:'Answer',guidance:'给你的拆解和答案。',suggested_points:[`结合 ${session.role_name||'岗位'} 视角给出清晰结构`,'用两到三层逻辑回答']}
             ],
             delivery_tips:commonTips,
-            copyable_outline:`Situation：背景。\nComplication：冲突或复杂性。\nQuestion：真正的问题是什么。\nAnswer：你的结构化回答。`
+            copyable_outline:directDraft
         },
         FREE:{
             structure:[
@@ -4671,7 +4682,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
                 {section:'收束',guidance:'最后把内容拉回岗位匹配。',suggested_points:[`说明这段内容为什么能证明你适合 ${session.role_name||'这个岗位'}`]}
             ],
             delivery_tips:commonTips,
-            copyable_outline:`先回答问题，再用最相关的经历或判断展开，最后收回到岗位匹配。`
+            copyable_outline:directDraft
         }
     };
     const current=map[framework]||map.STAR;
@@ -4686,6 +4697,35 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
         copyable_outline:current.copyable_outline,
         resume_evidence_used:resumeEvidence,
         gap_note:gapNote
+    };
+}
+function shouldReplacePrepareOutlineWithDraft(outline){
+    const text=normalizePrepareText(outline);
+    if(!text)return true;
+    return /^(Situation|Task|Action|Result|Point|Reason|Example|Problem|Complication|Question|Answer)[:：]/.test(text)
+        || /^先回答问题/.test(text)
+        || text.length<50;
+}
+function normalizePrepareAnswerOutput(answer,session,question,framework){
+    const fallback=buildPrepareAnswerFrameworkFallback(session,question,framework);
+    const directDraft=fallback.copyable_outline;
+    const structure=(Array.isArray(answer?.structure)&&answer.structure.length?answer.structure:fallback.structure).map(function(part,index){
+        const fallbackPart=fallback.structure[index]||fallback.structure[0]||{section:`部分 ${index+1}`,guidance:'',suggested_points:[]};
+        return{
+            section:normalizePrepareText(part?.section||fallbackPart.section||`部分 ${index+1}`),
+            guidance:normalizePrepareText(part?.guidance||fallbackPart.guidance||''),
+            suggested_points:sanitizePrepareTextList(part?.suggested_points,fallbackPart.suggested_points,4)
+        };
+    });
+    return{
+        question_id:question.id,
+        framework_type:framework,
+        structure:structure,
+        delivery_tips:sanitizePrepareTextList(answer?.delivery_tips,fallback.delivery_tips,4),
+        copyable_outline:shouldReplacePrepareOutlineWithDraft(answer?.copyable_outline)?directDraft:normalizePrepareText(answer?.copyable_outline||directDraft),
+        resume_evidence_used:sanitizePrepareTextList(answer?.resume_evidence_used,fallback.resume_evidence_used,4),
+        gap_note:normalizePrepareText(answer?.gap_note||fallback.gap_note),
+        source:answer?.source||'ai'
     };
 }
 async function generatePrepareOutputs(session){
@@ -4703,10 +4743,7 @@ async function generatePrepareAnswerFramework(session,question,framework){
     const cached=session?.outputs?.answer_cache?.[question.id]?.[framework];
     if(cached)return cached;
     const aiAnswer=await requestPrepareAnswerAI(session,question,framework);
-    return Object.assign({},aiAnswer,{
-        framework_type:framework,
-        source:'ai'
-    });
+    return normalizePrepareAnswerOutput(Object.assign({},aiAnswer,{source:'ai'}),session,question,framework);
 }
 async function hydratePrepareSessionResumeContext(session){
     if(!session)return session;
@@ -5144,6 +5181,39 @@ function breakdownPrepareExperienceHighlights(points){
     });
     return buckets;
 }
+function inferPrepareExperienceActionSummary(item,session){
+    const source=[item?.resume_section,item?.why_match].concat(item?.highlight_points||[]).join(' ');
+    const text=normalizePrepareText(source).toLowerCase();
+    const jdAngles=getPrepareJdFocusAngles(session?.jd_text||'');
+    if(/skill|agent|workflow|工作流|智能体|tool/.test(text))return'Skill / Agent 方案设计与落地';
+    if(/访谈|调研|痛点|洞察|需求/.test(text))return'用户访谈、需求挖掘和问题定义';
+    if(/prd|需求文档|方案|原型|文档/.test(text))return'PRD / 方案梳理和表达';
+    if(/漏斗|留存|转化|指标|埋点|a\/b|ab|数据/.test(text))return'漏斗分析、指标判断和优化推进';
+    if(/竞品|行业|矩阵|研究|分析/.test(text))return'竞品分析和业务判断';
+    if(/风控|合规|财务|对账|报销/.test(text))return'业务规则梳理与风险判断';
+    return jdAngles[0]||'问题拆解和推进落地';
+}
+function buildPrepareExperienceDisplayDetails(item,session){
+    const details=breakdownPrepareExperienceHighlights(item?.highlight_points||[]);
+    const jdAngles=getPrepareJdFocusAngles(session?.jd_text||'');
+    const focusLabel=getPrepareJdFocusLabel(jdAngles,session?.role_name||'岗位要求');
+    const section=normalizePrepareText(item?.resume_section||'这段经历');
+    const actionSummary=inferPrepareExperienceActionSummary(item,session);
+    const roleName=normalizePrepareText(session?.role_name||'这个岗位');
+    const synthesized={
+        jd:[`这段经历最适合对应 JD 里的 ${focusLabel}，尤其是你在「${section}」里做过的 ${actionSummary}。`],
+        expand:[`展开时别只报岗位名，直接按「在 ${section} 里，问题是什么、你怎么判断、你做了什么、结果如何」来讲，把 ${actionSummary} 串成一条线。`],
+        gap:[`这段还要补两类细节：一是你亲自负责到哪一步，二是结果有没有数字、反馈、采纳记录或效率变化来证明。`],
+        example:[`可以直接讲：「在 ${section} 这段经历里，我主要负责 ${actionSummary}。当时面对的核心问题是 [具体问题]，我先 [关键判断/动作]，再 [推进/落地]，最后带来了 [结果]。这段经历和 ${roleName} 看重的 ${focusLabel} 是直接对应的。」`]
+    };
+    return{
+        jd:details.jd.length?details.jd:synthesized.jd,
+        expand:details.expand.length?details.expand:synthesized.expand,
+        gap:details.gap.length?details.gap:synthesized.gap,
+        example:details.example.length?details.example:synthesized.example,
+        extra:details.extra
+    };
+}
 
 function renderPrepareExperienceDetailBlock(title,items,fallbacks){
     const resolvedItems=(items&&items.length?items:fallbacks||[]).filter(Boolean);
@@ -5186,16 +5256,16 @@ function renderPrepareFocus(session){
                             </div>
                             <div class="prepare-stack-list">
                                 ${group.items.map(function(item){
-                                    const details=breakdownPrepareExperienceHighlights(item.highlight_points||[]);
+                                    const details=buildPrepareExperienceDisplayDetails(item,session);
                                     return `
                                         <section class="prepare-experience">
                                             <h3>${escapeHTML(item.resume_section)}</h3>
                                             <p>${escapeHTML(item.why_match)}</p>
                                             <div class="prepare-experience-detail-grid">
-                                                ${renderPrepareExperienceDetailBlock('对应 JD',details.jd,['先说这段经历对应 JD 的哪一项职责或能力。'])}
-                                                ${renderPrepareExperienceDetailBlock('怎么展开',details.expand,['按“场景 / 判断 / 动作 / 结果”来讲，别只报任务名。'])}
-                                                ${renderPrepareExperienceDetailBlock('还要补清楚',details.gap,['补数字、证据、关键判断和你自己的角色边界。'])}
-                                                ${renderPrepareExperienceDetailBlock('可以直接开讲',details.example,['先亮一句结论，再补一段最能证明你的动作和结果。'])}
+                                                ${renderPrepareExperienceDetailBlock('对应 JD',details.jd,[])}
+                                                ${renderPrepareExperienceDetailBlock('怎么展开',details.expand,[])}
+                                                ${renderPrepareExperienceDetailBlock('还要补清楚',details.gap,[])}
+                                                ${renderPrepareExperienceDetailBlock('可以直接开讲',details.example,[])}
                                                 ${details.extra.length?renderPrepareExperienceDetailBlock('还能再补',details.extra,[]):''}
                                             </div>
                                             ${item.possible_followups?.length?`
@@ -5336,8 +5406,8 @@ function renderPrepareAnswerBody(answer){
             </div>
             <div class="prepare-answer-panel prepare-answer-outline-card">
                 <div class="prepare-answer-panel-head">
-                    <div class="prepare-section-kicker">可复制骨架</div>
-                    <button type="button" class="btn-secondary btn-sm" id="prepare-copy-outline">复制骨架</button>
+                    <div class="prepare-section-kicker">可直接回答</div>
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-copy-outline">复制回答</button>
                 </div>
                 <div class="prepare-answer-outline">
                     <pre>${escapeHTML(answer.copyable_outline)}</pre>
@@ -5531,7 +5601,13 @@ function renderPrepareAnswers(session){
     const backButton=`<button type="button" class="prepare-back-btn" id="prepare-answer-back">← 返回题目列表</button>`;
     if(framework==='FREE'){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
-        const answer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
+        const rawAnswer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
+        const answer=rawAnswer&&freeQuestion?normalizePrepareAnswerOutput(rawAnswer,session,{
+            id:getPrepareFreeQuestionKey(freeQuestion),
+            question:freeQuestion,
+            question_type:'free',
+            source:'custom'
+        },'FREE'):rawAnswer;
         return `
             <div class="prepare-answer-page">
                 ${renderPrepareAnswerPageLead({
@@ -5646,7 +5722,8 @@ function renderPrepareAnswers(session){
             </div>
         `;
     }
-    const answer=session.outputs?.answer_cache?.[questionMeta.id]?.[framework];
+    const rawAnswer=session.outputs?.answer_cache?.[questionMeta.id]?.[framework];
+    const answer=rawAnswer?normalizePrepareAnswerOutput(rawAnswer,session,questionMeta,framework):rawAnswer;
     const frameworkPills=availableFrameworks.map(function(key){
         const item=getPrepareFrameworkMeta(key);
         return `<button type="button" class="prepare-framework-btn${framework===item.key?' is-active':''}" data-prepare-framework="${item.key}">${escapeHTML(item.label)}</button>`;
@@ -6746,7 +6823,7 @@ function renderPrepare(){
         }
         try{
             await navigator.clipboard.writeText(answer.copyable_outline);
-            toast('已复制回答骨架','success');
+            toast('已复制回答','success');
         }catch(err){
             toast('复制失败，请手动复制','error');
         }
