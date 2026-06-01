@@ -4189,6 +4189,33 @@ function buildPrepareMockFeedbackMessagesClient(session,question,answer,history)
         }
     ];
 }
+function isPrepareReverseQuestionGroup(group){
+    const questions=Array.isArray(group?.questions)?group.questions:[];
+    return !!questions.length&&questions.every(function(item){
+        const question=normalizePrepareQuestionRecord(item);
+        return question.question_type==='reverse_question'||question.source==='reverse';
+    });
+}
+function arePrepareQuestionSetsEquivalent(currentQuestions,nextQuestions){
+    const currentKeys=(Array.isArray(currentQuestions)?currentQuestions:[]).map(function(item){
+        return normalizePrepareCompareKey(item?.question||'');
+    }).filter(Boolean);
+    const nextKeys=(Array.isArray(nextQuestions)?nextQuestions:[]).map(function(item){
+        return normalizePrepareCompareKey(item?.question||'');
+    }).filter(Boolean);
+    if(!currentKeys.length||!nextKeys.length||currentKeys.length!==nextKeys.length)return false;
+    return currentKeys.every(function(key,index){
+        return key===nextKeys[index];
+    });
+}
+function hasPrepareQuestionOverlap(currentQuestions,nextQuestions){
+    const currentKeys=new Set((Array.isArray(currentQuestions)?currentQuestions:[]).map(function(item){
+        return normalizePrepareCompareKey(item?.question||'');
+    }).filter(Boolean));
+    return (Array.isArray(nextQuestions)?nextQuestions:[]).some(function(item){
+        return currentKeys.has(normalizePrepareCompareKey(item?.question||''));
+    });
+}
 async function requestPrepareSessionAI(session){
     const payload=getPrepareSessionPayload(session);
     if(getPrepareConfig().mode==='supabase_edge'){
@@ -4249,7 +4276,17 @@ async function requestPrepareQuestionGroupAI(session,group){
         prep_focus:sanitizePrepareFocus(session.outputs||{},session),
         question_groups:session.outputs?.questions?.question_groups||[]
     });
-    return requestPrepareCustomAI(buildPrepareQuestionGroupMessagesClient(session,group),'session',payload);
+    let output=await requestPrepareCustomAI(buildPrepareQuestionGroupMessagesClient(session,group),'question_group',payload);
+    if(arePrepareQuestionSetsEquivalent(group?.questions,output?.questions)||hasPrepareQuestionOverlap(group?.questions,output?.questions)){
+        const retryMessages=buildPrepareQuestionGroupMessagesClient(session,group).concat([
+            {
+                role:'user',
+                content:'上一版生成结果和现有题目重复了。请彻底换掉这 3 道题，禁止沿用原题句式、核心问法、关键词顺序和场景描述；3 道题都必须是全新的。'
+            }
+        ]);
+        output=await requestPrepareCustomAI(retryMessages,'question_group',payload);
+    }
+    return output;
 }
 async function requestPrepareMockFeedbackAI(session,question,answer,history){
     const payload=Object.assign({},getPrepareSessionPayload(session),{
@@ -5418,6 +5455,7 @@ function renderPrepareQuestionsList(session){
             </section>
             ${!questions.length?'<div class="prepare-empty prepare-question-empty">先生成一套准备工作台，再查看模拟问题。</div>':''}
             ${questions.map(function(group,groupIndex){
+                const isReverseGroup=isPrepareReverseQuestionGroup(group);
                 return `
                     <section class="prepare-card-surface prepare-section-shell">
                         <div class="prepare-question-group-head">
@@ -5428,7 +5466,16 @@ function renderPrepareQuestionsList(session){
                             ${group.questions.map(function(rawQuestion){
                                 const question=normalizePrepareQuestionRecord(rawQuestion);
                                 const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'反问环节':'来自岗位信息';
-                                const reverseLabel=question.question_type==='reverse_question'?'查看反问清单':'';
+                                if(isReverseGroup){
+                                    return `
+                                        <div class="prepare-question-card prepare-question-card-static prepare-question-card-reverse" aria-label="${escapeHTML(question.question)}">
+                                            <div class="prepare-question-main">
+                                                <strong>${escapeHTML(question.question)}</strong>
+                                                <span>${escapeHTML(sourceLabel)}</span>
+                                            </div>
+                                        </div>
+                                    `;
+                                }
                                 return `
                                     <button class="prepare-question-card${prepareState.selectedQuestionId===question.id&&prepareState.questionPane==='answer'?' is-active':''}" type="button" data-prepare-question="${question.id}">
                                         <div class="prepare-question-main">
@@ -5442,7 +5489,7 @@ function renderPrepareQuestionsList(session){
                                                 </div>
                                             `}
                                         </div>
-                                        <em class="prepare-question-card-action" aria-hidden="true" title="${escapeHTML(reverseLabel||'进入回答页')}">›</em>
+                                        <em class="prepare-question-card-action" aria-hidden="true" title="进入回答页">›</em>
                                     </button>
                                 `;
                             }).join('')}

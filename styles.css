@@ -1506,6 +1506,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-question-card{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;text-align:left;cursor:pointer;transition:transform .22s var(--ease),border-color .22s var(--ease),background .22s var(--ease),box-shadow .22s var(--ease)}
 .prepare-question-card:hover,.prepare-question-card.is-active{transform:translateY(-1px);border-color:rgba(243,204,138,.22);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.04));box-shadow:0 12px 26px rgba(0,0,0,.14)}
 :root[data-theme=light] .prepare-question-card:hover,:root[data-theme=light] .prepare-question-card.is-active{border-color:rgba(176,133,79,.28);background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,241,232,.94));box-shadow:0 14px 28px rgba(90,70,46,.08)}
+.prepare-question-card-static{cursor:default}
+.prepare-question-card-static:hover{transform:none;border-color:rgba(255,255,255,.08);background:transparent;box-shadow:none}
+.prepare-question-card-reverse{padding-right:18px}
+:root[data-theme=light] .prepare-question-card-static:hover{border-color:rgba(255,255,255,.08);background:transparent;box-shadow:none}
 .prepare-question-main span{display:inline-flex;align-items:center;margin-top:10px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.07);font-size:10px;color:var(--text-secondary);border:1px solid rgba(255,255,255,.08)}
 .prepare-question-frameworks{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .prepare-question-frameworks i{display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;border:1px solid rgba(243,204,138,.18);background:rgba(243,204,138,.08);font-size:10px;font-style:normal;font-weight:600;letter-spacing:.03em;color:#f3dcc0}
