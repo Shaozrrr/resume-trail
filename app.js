@@ -4360,10 +4360,14 @@ function buildPrepareMockFeedbackMessagesClient(session,question,answer,history)
     ];
 }
 function isPrepareReverseQuestionGroup(group){
+    const groupName=normalizePrepareText(group?.group_name||'');
+    if(/反问/.test(groupName))return true;
     const questions=Array.isArray(group?.questions)?group.questions:[];
     return !!questions.length&&questions.every(function(item){
         const question=normalizePrepareQuestionRecord(item);
-        return question.question_type==='reverse_question'||question.source==='reverse';
+        return question.question_type==='reverse_question'
+            ||question.source==='reverse'
+            ||/反问|问面试官|你可以问|要问面试官/.test(normalizePrepareText(question.question||''));
     });
 }
 function getPrepareQuestionSourceLabel(question){
