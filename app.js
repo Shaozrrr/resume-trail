@@ -2788,28 +2788,27 @@ async function executePrepareToolCall(toolCall){
 function extractPrepareLookupQueries(input){
     const queries=[];
     const seen=new Set();
+    const knownBriefs=getPrepareKnownTermBriefs(input)||[];
     function pushQuery(value){
         const text=normalizePrepareLookupQuery(value);
         const key=text.toLowerCase();
         if(!text||seen.has(key))return;
+        if(findPrepareKnownTermBrief(text,knownBriefs))return;
         seen.add(key);
         queries.push(text);
     }
     pushQuery(input?.company_name);
     if(input?.company_name&&input?.role_name)pushQuery(`${input.company_name} ${input.role_name}`);
-    (getPrepareKnownTermBriefs(input)||[]).forEach(function(brief){
-        pushQuery(brief.term);
-    });
     const jdText=String(input?.jd_text||'');
     const englishTerms=[...new Set((jdText.match(/\b[A-Za-z][A-Za-z0-9_-]{3,}\b/g)||[]))]
         .filter(function(term){
             return !/^(with|from|that|this|have|will|must|need|good|team|work|data|user|role|goal|product|growth|market|business|model|deepseek)$/i.test(term);
         })
-        .slice(0,4);
+        .slice(0,3);
     englishTerms.forEach(pushQuery);
-    const chineseTerms=[...new Set((jdText.match(/[\u4e00-\u9fa5A-Za-z]{2,12}(?:平台|系统|产品|项目|助手|达人|智能体|工作流|引擎|中台|机器人)/g)||[]))].slice(0,4);
+    const chineseTerms=[...new Set((jdText.match(/[\u4e00-\u9fa5A-Za-z]{2,12}(?:平台|系统|产品|项目|助手|达人|智能体|工作流|引擎|中台|机器人)/g)||[]))].slice(0,2);
     chineseTerms.forEach(pushQuery);
-    return queries.slice(0,6);
+    return queries.slice(0,4);
 }
 function summarizePrepareLookupPayload(payload){
     const results=(payload?.results||[]).slice(0,3).map(function(item){
@@ -2828,22 +2827,20 @@ function summarizePrepareLookupPayload(payload){
     };
 }
 async function buildPrepareExternalResearchDigest(input,kind){
-    const queries=extractPrepareLookupQueries(input);
-    const digest=[];
-    for(const query of queries){
-        try{
-            const raw=await runPrepareWebLookup({
-                query,
-                intent:kind==='answer'?'补足回答里的术语、平台与业务背景':'补足岗位、公司、平台、术语与业务背景',
-                language:'zh'
-            });
-            const parsed=JSON.parse(raw||'{}');
-            if(parsed?.results?.length){
-                digest.push(summarizePrepareLookupPayload(parsed));
-            }
-        }catch(error){}
-    }
-    return digest.slice(0,4);
+    const allQueries=extractPrepareLookupQueries(input);
+    const queries=allQueries.slice(0,kind==='answer'?2:3);
+    const results=await Promise.allSettled(queries.map(async function(query){
+        const raw=await runPrepareWebLookup({
+            query,
+            intent:kind==='answer'?'补足回答里的术语、平台与业务背景':'补足岗位、公司、平台、术语与业务背景',
+            language:'zh'
+        });
+        const parsed=JSON.parse(raw||'{}');
+        return parsed?.results?.length?summarizePrepareLookupPayload(parsed):null;
+    }));
+    return results.map(function(result){
+        return result.status==='fulfilled'?result.value:null;
+    }).filter(Boolean).slice(0,3);
 }
 function buildPrepareLookupAugmentedMessages(messages,lookupDigest){
     if(!lookupDigest?.length)return cloneData(messages||[]);
@@ -5091,9 +5088,12 @@ function renderPrepareResearch(session){
     const research=session.outputs?.research;
     if(!research)return'<div class="prepare-empty">先生成一套准备工作台，再查看背调。</div>';
     const companyOverview=research.company_overview||{};
+    const roleAnalysis=research.role_analysis||{};
+    const keywordTranslation=Array.isArray(research.keyword_translation)?research.keyword_translation.filter(Boolean):[];
     const businessLines=Array.isArray(companyOverview.business_lines)?companyOverview.business_lines:[];
     const productsServices=Array.isArray(companyOverview.products_services)?companyOverview.products_services:[];
     const recentFocus=Array.isArray(companyOverview.recent_focus)?companyOverview.recent_focus:[];
+    const targetCapabilities=Array.isArray(roleAnalysis.target_capabilities)?roleAnalysis.target_capabilities.filter(Boolean):[];
     const isDetailed=prepareState.companyOverviewMode==='detailed';
     return `
         <div class="prepare-grid prepare-grid-two">
@@ -5150,25 +5150,25 @@ function renderPrepareResearch(session){
                 ${isDetailed?`
                     <div class="prepare-role-analysis-copy">
                         <div class="prepare-section-kicker">岗位视角拆解</div>
-                        <h3>${escapeHTML(research.role_analysis.role_type)}</h3>
-                        <p>${escapeHTML(research.role_analysis.business_context)}</p>
+                        <h3>${escapeHTML(roleAnalysis.role_type||session.role_name||'岗位拆解')}</h3>
+                        <p>${escapeHTML(roleAnalysis.business_context||'这套会话生成得比较早，岗位拆解信息不完整。建议重新生成一次拿到最新版分析。')}</p>
                     </div>
                     <div class="prepare-role-analysis-skills">
                         <strong>面试官重点验证</strong>
-                        <div class="prepare-token-row">${research.role_analysis.target_capabilities.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+                        <div class="prepare-token-row">${(targetCapabilities.length?targetCapabilities:['岗位理解','表达清晰','结果导向']).map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
                     </div>
                 `:`
                     <div class="prepare-section-kicker">岗位视角拆解</div>
-                    <h3>${escapeHTML(research.role_analysis.role_type)}</h3>
-                    <p>${escapeHTML(research.role_analysis.business_context)}</p>
-                    <div class="prepare-token-row">${research.role_analysis.target_capabilities.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+                    <h3>${escapeHTML(roleAnalysis.role_type||session.role_name||'岗位拆解')}</h3>
+                    <p>${escapeHTML(roleAnalysis.business_context||'这套会话生成得比较早，岗位拆解信息不完整。建议重新生成一次拿到最新版分析。')}</p>
+                    <div class="prepare-token-row">${(targetCapabilities.length?targetCapabilities:['岗位理解','表达清晰','结果导向']).map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
                 `}
             </article>
         </div>
         <article class="prepare-card-surface prepare-section-shell">
             <div class="prepare-section-kicker">JD 关键词翻译</div>
             <div class="prepare-translation-list">
-                ${research.keyword_translation.map(item=>`
+                ${(keywordTranslation.length?keywordTranslation:[{jd_keyword:'建议重新生成',meaning:'这套旧会话缺少完整的 JD 关键词拆解。',prep_direction:'点一次重新生成，拿到最新版背调和关键词翻译。'}]).map(item=>`
                     <div class="prepare-translation-item">
                         <div class="prepare-translation-key">${escapeHTML(item.jd_keyword)}</div>
                         <div class="prepare-translation-body">
