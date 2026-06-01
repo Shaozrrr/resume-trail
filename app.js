@@ -5844,28 +5844,32 @@ async function regeneratePrepareFreeAnswer(sessionId){
     }
 }
 function renderPrepareAnswerBody(answer){
+    const structure=Array.isArray(answer?.structure)?answer.structure.filter(Boolean):[];
+    const resumeEvidence=Array.isArray(answer?.resume_evidence_used)?answer.resume_evidence_used.filter(Boolean):[];
+    const deliveryTips=Array.isArray(answer?.delivery_tips)?answer.delivery_tips.filter(Boolean):[];
+    const outline=normalizePrepareText(answer?.copyable_outline||'');
     return `
         <div class="prepare-section-kicker">回答骨架</div>
-        ${answer.resume_evidence_used?.length?`
+        ${resumeEvidence.length?`
             <div class="prepare-answer-evidence">
                 <div class="prepare-section-kicker">简历依据</div>
-                <div class="prepare-token-row">${answer.resume_evidence_used.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
+                <div class="prepare-token-row">${resumeEvidence.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
             </div>
         `:''}
         ${answer.gap_note?`<div class="prepare-inline-notice prepare-answer-gap-note">${escapeHTML(answer.gap_note)}</div>`:''}
         <div class="prepare-answer-structure">
-            ${answer.structure.map(part=>`
+            ${structure.map(part=>`
                 <div class="prepare-answer-block">
                     <h3>${escapeHTML(part.section)}</h3>
                     <p>${escapeHTML(part.guidance)}</p>
-                    <ul class="prepare-bullet-list">${part.suggested_points.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
+                    <ul class="prepare-bullet-list">${(Array.isArray(part.suggested_points)?part.suggested_points:[]).map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
                 </div>
             `).join('')}
         </div>
         <div class="prepare-answer-footer">
             <div class="prepare-answer-panel prepare-answer-tips-card">
                 <div class="prepare-section-kicker">表达提醒</div>
-                <ul class="prepare-bullet-list">${answer.delivery_tips.map(tip=>`<li>${escapeHTML(tip)}</li>`).join('')}</ul>
+                <ul class="prepare-bullet-list">${deliveryTips.map(tip=>`<li>${escapeHTML(tip)}</li>`).join('')}</ul>
             </div>
             <div class="prepare-answer-panel prepare-answer-outline-card">
                 <div class="prepare-answer-panel-head">
@@ -5873,7 +5877,7 @@ function renderPrepareAnswerBody(answer){
                     <button type="button" class="btn-secondary btn-sm" id="prepare-copy-outline">复制回答</button>
                 </div>
                 <div class="prepare-answer-outline">
-                    <pre>${escapeHTML(answer.copyable_outline)}</pre>
+                    <pre>${escapeHTML(outline)}</pre>
                 </div>
             </div>
         </div>
@@ -6065,12 +6069,13 @@ function renderPrepareAnswers(session){
     if(framework==='FREE'){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
         const rawAnswer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
-        const answer=rawAnswer&&freeQuestion?normalizePrepareAnswerOutput(rawAnswer,session,{
-            id:getPrepareFreeQuestionKey(freeQuestion),
-            question:freeQuestion,
+        const freeQuestionMeta={
+            id:getPrepareFreeQuestionKey(freeQuestion||'free_question'),
+            question:freeQuestion||'自定义问题',
             question_type:'free',
             source:'custom'
-        },'FREE'):rawAnswer;
+        };
+        const answer=rawAnswer?normalizePrepareAnswerOutput(rawAnswer,session,freeQuestionMeta,'FREE'):rawAnswer;
         return `
             <div class="prepare-answer-page">
                 ${renderPrepareAnswerPageLead({
@@ -6530,6 +6535,11 @@ function renderPrepareMockInterview(session){
     if(!total){
         return `
             <div class="prepare-empty">这套工作台里还没有可用的题目，先回到“问题”页重新生成一次。</div>
+        `;
+    }
+    if(!currentQuestion){
+        return `
+            <div class="prepare-empty">当前这轮模拟的题目状态有点乱了。点一次“重新设置”或“重新开始”，我们会立刻把题面重建好。</div>
         `;
     }
     if(finished){
