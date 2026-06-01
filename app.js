@@ -5594,6 +5594,71 @@ function rewritePrepareFollowupPrompt(point){
     }
     return normalized;
 }
+function buildPrepareFollowupAnswer(point,item,session){
+    const normalized=normalizePrepareText(point).replace(/[？?]+$/,'');
+    if(!normalized)return'';
+    const section=normalizePrepareText(item?.resume_section||'这段经历');
+    const concreteBullets=getPrepareConcreteExperienceBullets(item);
+    const firstBullet=concreteBullets[0]||'你当时最核心的一次判断和推进';
+    const secondBullet=concreteBullets[1]||'后续的落地动作';
+    const jdMatches=getPrepareExperienceSpecificJdMatch(item,session);
+    const leadMatch=jdMatches[0]||'岗位要求';
+    if(/功能优先级|需求优先级|优先级/.test(normalized)){
+        return `可以这样答：我当时不是按“谁声音大”排，而是先看用户痛点是不是高频、它影响的是不是核心路径、以及我能不能在当前资源下尽快验证。以「${firstBullet}」为例，我会先把它放到最前，因为它同时满足影响主流程、能快速验证、并且能为后续 ${leadMatch} 提供直接证据。`;
+    }
+    if(/算法工程师|算法同学|模型同学|协作.*冲突|冲突.*解决/.test(normalized)){
+        return `可以这样答：和算法同学最常见的冲突不是“关系不好”，而是目标函数不一样。产品更关心用户是否真用起来，算法更关心准确率、稳定性和开发成本。我一般会先把冲突改写成共同指标，再把方案拆成最小可验证版本。比如先用「${firstBullet}」确认需求成立，再用「${secondBullet}」把准确率门槛、上线节奏和回滚条件说死，这样争论会从“谁对”变成“先验证什么”。`;
+    }
+    if(/漏斗分析|哪些指标|验证假设|如何验证/.test(normalized)){
+        return `可以这样答：我不会只看一个留存数，而是先把链路拆成“进入 -> 首次完成关键动作 -> 继续使用 -> 次日/阶段留存”。如果对应你这段经历，我会重点看触达率、关键动作完成率、流失节点和次日留存，再把假设写成“是哪个环节出了问题，为什么”。像「${firstBullet}」这种场景，我会先改一个最可能影响转化的点，再对比改前改后数据，避免一次改太多导致没法判断到底什么起作用。`;
+    }
+    if(/重新设计|做什么改进|怎么改进|重做/.test(normalized)){
+        return `可以这样答：如果让我重来一次，我不会先堆功能，而是优先补“可复用和可验证”这两层。第一层，把「${firstBullet}」抽成更标准的输入、规则和输出，减少以后换场景时重做；第二层，在「${secondBullet}」对应的流程里提前埋好指标和反馈回路，这样每轮迭代都知道问题出在哪。这样改完后，它会更像一个能持续迭代的产品，而不只是一次性的方案。`;
+    }
+    if(/质量标准|可复用/.test(normalized)){
+        return '可以这样答：我会把 Skill 的质量标准分成三层。第一层是结果对不对，比如输出是否稳定、错误率是否可控；第二层是过程稳不稳，比如输入异常时会不会崩、是否有兜底；第三层才是可复用性，也就是哪些规则、流程和接口可以迁到别的场景，而不是每次从头重写。';
+    }
+    if(/留存.*计算|指标变化|样本量|口径/.test(normalized)){
+        return '可以这样答：我会先把口径说清楚，比如比较的是哪两个时间窗口、样本范围是什么、用的是次日还是阶段留存，再补一句有没有同步观察激活率、关键动作完成率或后续转化。这样面试官会觉得你不只是记住了一个数字，而是真的理解这个数字怎么来的。';
+    }
+    if(/迁移到财务场景|财务场景/.test(normalized)){
+        return `可以这样答：如果把这套能力迁到财务场景，我不会空讲“都可以做”，而是先挑一个具体流程，比如报销审核或异常对账，再把输入、规则判断和输出动作讲清楚。你这段经历里已经有「${firstBullet}」这种能力，所以迁移时重点是把原来的用户问题换成财务规则和风控要求。`;
+    }
+    if(/量化体验优化|客诉率|体验优化效果/.test(normalized)){
+        return '可以这样答：体验优化不能只说“用户反馈更好了”，至少要补一个主指标和一个辅助指标。主指标可以是关键步骤成功率、完成时长或转化率，辅助指标可以是客诉率、人工介入率或重复咨询量，这样你的优化才像真实上线后的结果。';
+    }
+    if(/风控规则|平衡安全与用户体验/.test(normalized)){
+        return '可以这样答：我会先把必须拦截的高风险场景划出来，再设计分层拦截策略，而不是一刀切。真正的平衡点不在于“放宽还是收紧”，而在于哪些风险自动拦、哪些进入人工复核、哪些可以通过补充材料放行。';
+    }
+    if(/异常交易预警/.test(normalized)){
+        return '可以这样答：异常交易预警不要泛讲模型，我会先讲监控哪些信号，比如金额异常、频次异常、账户关系异常，再讲触发阈值、分级响应和谁来处理。这样听起来才像真的做过业务流程设计。';
+    }
+    if(/上线后用户反馈|迭代了哪些功能/.test(normalized)){
+        return `可以这样答：上线后我最先看的不是“大家夸不夸”，而是用户在哪一步还卡住、哪些功能没被真正用起来。围绕「${firstBullet}」这种主线，我会优先迭代直接影响主路径的问题，而不是先做好看但不影响结果的小优化。`;
+    }
+    return `可以这样答：不要抽象讲能力，直接拿「${firstBullet}」这件事起手，再补上你自己的判断、推进动作和结果变化。面试官真正想听的是，你怎么把这段经历迁到 ${leadMatch} 相关的问题里。`;
+}
+function renderPrepareFollowupAdvice(item,session){
+    const prompts=sanitizePrepareTextList(item?.possible_followups,[],6);
+    if(!prompts.length)return'';
+    return `
+        <div class="prepare-followup-block">
+            <strong>补挖 / 补做 / 包装建议</strong>
+            <div class="prepare-followup-qa-list">
+                ${prompts.map(function(point){
+                    const question=normalizePrepareText(point);
+                    const answer=buildPrepareFollowupAnswer(question,item,session);
+                    return `
+                        <section class="prepare-followup-qa-item">
+                            <h4>${escapeHTML(question)}</h4>
+                            <p>${escapeHTML(answer)}</p>
+                        </section>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
 function resolvePrepareExperienceSection(preferred,fallback){
     const cleaned=sanitizePrepareTextList(preferred,[],6).filter(function(point){
         return !isPrepareExperienceTemplateLine(point);
@@ -5684,6 +5749,20 @@ function renderPrepareFocus(session){
                         </section>
                     `).join('')}
                 </div>
+                ${focus.risk_warnings.length?`
+                    <div class="prepare-focus-risk-block">
+                        <div class="prepare-section-kicker">风险提示</div>
+                        <div class="prepare-warning-grid">
+                            ${focus.risk_warnings.map(item=>`
+                                <section class="prepare-warning-card">
+                                    <h3>${escapeHTML(item.title)}</h3>
+                                    <p>${escapeHTML(item.description)}</p>
+                                    <span>${escapeHTML(item.avoidance_tip)}</span>
+                                </section>
+                            `).join('')}
+                        </div>
+                    </div>
+                `:''}
             </article>
             <article class="prepare-card-surface prepare-section-shell">
                 <div class="prepare-section-kicker">最该讲的经历</div>
@@ -5709,12 +5788,7 @@ function renderPrepareFocus(session){
                                                 ${renderPrepareExperienceDetailBlock('开口版本',details.example,[])}
                                                 ${details.extra.length?renderPrepareExperienceDetailBlock('还能再补',details.extra,[]):''}
                                             </div>
-                                            ${item.possible_followups?.length?`
-                                                <div class="prepare-followup-block">
-                                                    <strong>补挖 / 补做 / 包装建议</strong>
-                                                    <ul class="prepare-bullet-list prepare-bullet-list-subtle">${item.possible_followups.map(point=>`<li>${escapeHTML(point)}</li>`).join('')}</ul>
-                                                </div>
-                                            `:''}
+                                            ${renderPrepareFollowupAdvice(item,session)}
                                         </section>
                                     `;
                                 }).join('')}
@@ -5724,18 +5798,6 @@ function renderPrepareFocus(session){
                 </div>
             </article>
         </div>
-        <article class="prepare-card-surface prepare-section-shell">
-            <div class="prepare-section-kicker">风险提示</div>
-            <div class="prepare-warning-grid">
-                ${focus.risk_warnings.map(item=>`
-                    <section class="prepare-warning-card">
-                        <h3>${escapeHTML(item.title)}</h3>
-                        <p>${escapeHTML(item.description)}</p>
-                        <span>${escapeHTML(item.avoidance_tip)}</span>
-                    </section>
-                `).join('')}
-            </div>
-        </article>
     `;
 }
 function renderPrepareQuestions(session){
@@ -5932,13 +5994,14 @@ function renderPrepareAnswerBody(answer){
 }
 function renderPrepareSupplementalExperienceCard(session,options){
     const compact=!!options?.compact;
+    const bare=!!options?.bare;
     const items=getPrepareSupplementalExperiences(session);
     const draft=normalizePrepareText(prepareState.supplementalExperienceDraft);
     const note=compact
         ?'补进去后，这道题和后面的回答都能优先调用。'
         :'这段素材会进入整套准备工作台，后面生成题目、回答和模拟点评时都能调用。';
     const recentItems=items.slice(0,compact?3:12);
-    return `
+    const content=`
         <section class="prepare-card-surface prepare-supplement-card${compact?' is-compact':''}">
             <div class="prepare-supplement-head">
                 <div>
@@ -5948,7 +6011,7 @@ function renderPrepareSupplementalExperienceCard(session,options){
                 </div>
                 <span class="prepare-supplement-count">${items.length||0} 条</span>
             </div>
-            <div class="prepare-supplement-capsule">
+            <div class="prepare-supplement-capsule${compact?'':' prepare-supplement-capsule-simple'}">
                 <div class="prepare-supplement-capsule-input">
                     <textarea id="prepare-supplemental-input-global" rows="${compact?2:3}" placeholder="${compact?'例如：我访谈 20 位用户后改流程，把转化提到 31%。':'例如：我做过用户访谈、梳理过漏斗、协调过研发/设计、推动过上线，并拿到过结果变化。'}">${escapeHTML(draft)}</textarea>
                 </div>
@@ -5971,6 +6034,7 @@ function renderPrepareSupplementalExperienceCard(session,options){
             `:'<div class="prepare-supplement-empty">先补一条经历，后面再生成题目和回答时就能直接用。</div>'}
         </section>
     `;
+    return bare?content.replace(/^<section class="prepare-card-surface prepare-supplement-card[^"]*">/,'<section class="prepare-supplement-card prepare-supplement-card-bare">'):content;
 }
 function renderPrepareSupplementHub(session){
     return `
@@ -6004,7 +6068,7 @@ function renderPrepareSupplementModal(session){
                     <button class="modal-close" id="prepare-supplement-close">&times;</button>
                 </div>
                 <div class="modal-body">
-                    ${renderPrepareSupplementalExperienceCard(session,{compact:false})}
+                    ${renderPrepareSupplementalExperienceCard(session,{compact:false,bare:true})}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="prepare-supplement-done">我补好了</button>
@@ -6045,7 +6109,7 @@ function renderPrepareQuestionsList(session){
                     <section class="prepare-card-surface prepare-section-shell">
                         <div class="prepare-question-group-head">
                             <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
-                            ${isReverseGroup?'':`<button type="button" class="prepare-question-group-refresh-btn${prepareState.questionGroupLoadingKey===String(groupIndex)?' is-loading':''}" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个"><span aria-hidden="true">${prepareState.questionGroupLoadingKey===String(groupIndex)?'⟳':'↻'}</span></button>`}
+                            ${isReverseGroup?'':`<button type="button" class="prepare-question-group-refresh-btn${prepareState.questionGroupLoadingKey===String(groupIndex)?' is-loading':''}" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个"><svg class="prepare-refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg></button>`}
                         </div>
                         <div class="prepare-question-list${isReverseGroup?' is-static':''}">
                             ${group.questions.map(function(rawQuestion){
@@ -6167,34 +6231,20 @@ function renderPrepareAnswers(session){
                 ${renderPrepareAnswerPageLead({
                     tag:'反问环节',
                     title:'反问环节',
-                    description:'这里不是让你回答，而是帮你带几句真正值得问面试官的问题进场。'
+                    description:'这里只列你可以直接问面试官的问题，不做回答解析。'
                 })}
                 <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
                         <div class="prepare-section-kicker">面试尾声可直接发问</div>
-                        <h3>把这几句问题记住就够了</h3>
-                        <p>反问环节的目标不是展示分析能力，而是快速问清楚上手目标、评估标准、失败风险和团队期待。</p>
-                        <span>优先挑 1 到 2 个最有信息量的问题去问，不要一口气全问完。</span>
+                        <h3>挑 1 到 2 句最有信息量的就够了</h3>
+                        <p>这里不分析、不拆框架，只保留能直接问出口的问题。</p>
                     </div>
                     <div class="prepare-answer-hero-actions">
                         <div class="prepare-answer-top-actions">${backButton}</div>
-                        <div class="prepare-answer-intro">
-                            <div class="prepare-section-kicker">使用建议</div>
-                            <h3>问 1 到 2 个就够</h3>
-                            <p>优先选能帮你判断岗位真实工作方式的问题，例如前 30 天交付、团队最常见失败点、以及你还要补强什么。</p>
-                            <span>如果现场时间很短，就先问最关键的那一句。</span>
-                        </div>
-                        <div class="prepare-answer-intro prepare-answer-intro-secondary">
-                            <div class="prepare-section-kicker">别这样问</div>
-                            <h3>避免空泛客套</h3>
-                            <p>少问官网上就能看到的信息，也不要把反问讲成自我介绍。问具体、问落地，信息量才高。</p>
-                            <span>例如少问“团队氛围怎么样”，多问“这个岗位最常见的失败点是什么”。</span>
-                        </div>
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface">
-                    <div class="prepare-inline-notice prepare-answer-gap-note">你只需要挑最适合现场的一句去问。问完后，把面试官的回答记到复盘里即可。</div>
                     <div class="prepare-reverse-list">
                         ${(reverseQuestions.length?reverseQuestions:[questionMeta]).map(function(item,index){
                             return `
