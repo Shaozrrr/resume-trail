@@ -3822,8 +3822,20 @@ function sanitizePrepareFocus(output,session){
         risk_warnings:riskWarnings
     };
 }
+function normalizePrepareOutputsPayload(output){
+    if(!output)return{};
+    if(typeof output==='string'){
+        try{
+            const parsed=JSON.parse(output);
+            return parsed&&typeof parsed==='object'?parsed:{};
+        }catch(error){
+            return{};
+        }
+    }
+    return output&&typeof output==='object'?output:{};
+}
 function sanitizePrepareOutputs(output,session){
-    const next=cloneData(output||{});
+    const next=cloneData(normalizePrepareOutputsPayload(output));
     const knownBriefs=getPrepareKnownTermBriefs(session||{});
     const keywordTranslation=(next?.research?.keyword_translation||[]).map(function(item){
         const brief=findPrepareKnownTermBrief(item?.jd_keyword,knownBriefs);
@@ -6631,7 +6643,8 @@ function renderPrepareMockFeedbackCard(feedback){
     `;
 }
 function renderPrepareWorkbench(session){
-    const renderSession=session?.outputs?Object.assign({},session,{outputs:sanitizePrepareOutputs(session.outputs,session)}):session;
+    const normalizedOutputs=normalizePrepareOutputsPayload(session?.outputs);
+    const renderSession=session?.outputs?Object.assign({},session,{outputs:sanitizePrepareOutputs(normalizedOutputs,session)}):session;
     const linkedApp=getPrepareLinkedApp(session);
     const linkedResume=getPrepareLinkedResume(session);
     const account=window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
@@ -6648,13 +6661,7 @@ function renderPrepareWorkbench(session){
     const summaryText=generationMeta.summary||'围绕当前岗位整理一套背调、重点、问题与回答骨架。';
     const jdPreviewText=normalizePrepareText(session.jd_text||'');
     const activeTab=prepareState.activeTab==='answers'?'questions':prepareState.activeTab;
-    const tabContent=renderSession.outputs?{
-        research:renderPrepareResearch(renderSession),
-        focus:renderPrepareFocus(renderSession),
-        questions:renderPrepareQuestions(renderSession),
-        mock:renderPrepareMockInterview(renderSession),
-        supplement:renderPrepareSupplementHub(renderSession)
-    }[activeTab]||renderPrepareResearch(renderSession):`
+    let tabContent=`
         <div class="prepare-state-panel${session.error_message?' is-error':''}">
             <div class="prepare-section-kicker">${session.error_message?'生成失败':'准备中'}</div>
             <h3>${session.error_message?'这套准备暂时没生成出来':'这套准备会话还在等待生成'}</h3>
@@ -6666,6 +6673,31 @@ function renderPrepareWorkbench(session){
             </ul>
         </div>
     `;
+    if(renderSession.outputs){
+        try{
+            tabContent={
+                research:renderPrepareResearch(renderSession),
+                focus:renderPrepareFocus(renderSession),
+                questions:renderPrepareQuestions(renderSession),
+                mock:renderPrepareMockInterview(renderSession),
+                supplement:renderPrepareSupplementHub(renderSession)
+            }[activeTab]||renderPrepareResearch(renderSession);
+        }catch(error){
+            console.warn('prepare workbench tab render failed',error);
+            tabContent=`
+                <div class="prepare-state-panel is-error">
+                    <div class="prepare-section-kicker">会话兼容中</div>
+                    <h3>这套旧准备会话有一部分历史数据格式不兼容</h3>
+                    <p>我已经先把会话保住了。你可以直接点右上角“重新生成”，把它升级到最新版本的准备工作台。</p>
+                    <ul class="prepare-bullet-list">
+                        <li>原会话不会丢。</li>
+                        <li>重新生成后会用当前 JD、简历和补充经历重新整理。</li>
+                        <li>如果这套会话本身字段不完整，重新生成后通常就能恢复正常打开。</li>
+                    </ul>
+                </div>
+            `;
+        }
+    }
     const isAnswerMode=activeTab==='questions'&&prepareState.questionPane==='answer';
     const answerPageMeta=isAnswerMode?getPrepareAnswerPageMeta(session):null;
     return `
@@ -6749,6 +6781,7 @@ function renderPrepare(){
         appDraft.requiresResume?'补一份简历上下文（绑定简历、临时文件或摘要）':null
     ].filter(Boolean):[];
     const showWorkspace=Boolean(selectedSession)&&prepareState.screen==='workspace';
+    try{
     root.innerHTML=showWorkspace?`
         <div class="prepare-shell prepare-shell-workspace-view">
             <section class="prepare-workspace-screen">
@@ -6921,6 +6954,24 @@ function renderPrepare(){
             </section>
         </div>
     `;
+    }catch(error){
+        console.warn('prepare root render failed',error);
+        root.innerHTML=`
+            <div class="prepare-shell prepare-shell-workspace-view">
+                <section class="prepare-workspace-screen">
+                    <div class="prepare-state-panel is-error">
+                        <div class="prepare-section-kicker">最近会话暂时打不开</div>
+                        <h3>这条准备会话的历史数据和当前页面版本不完全兼容</h3>
+                        <p>我已经加了兜底，但这次渲染仍然失败。你可以先点“新建分析”重新生成，旧会话不会被删除。</p>
+                        <ul class="prepare-bullet-list">
+                            <li>如果是旧会话，最稳的做法是点一次重新生成。</li>
+                            <li>如果你愿意，也可以把公司名和岗位名发我，我继续按这条数据排。</li>
+                        </ul>
+                    </div>
+                </section>
+            </div>
+        `;
+    }
     syncPrepareLoadingTicker();
     $('#prepare-banner-upgrade')?.addEventListener('click',function(){
         openPrepareUpgradeModal({account:window.rtReadCachedAccount&&window.rtReadCachedAccount()||null});
