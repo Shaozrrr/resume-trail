@@ -5299,6 +5299,23 @@ function getPrepareExperienceSpecificJdMatch(item,session){
     }
     return matches.slice(0,4);
 }
+function getPrepareSemanticTags(text){
+    const normalized=normalizePrepareText(text).toLowerCase();
+    const tags=[];
+    const push=function(label,pattern){
+        if(tags.includes(label))return;
+        if(pattern.test(normalized))tags.push(label);
+    };
+    push('user_research',/访谈|调研|问卷|痛点|洞察|用户声音|用户反馈/);
+    push('problem_definition',/需求|问题定义|核心价值|场景定义|拆解/);
+    push('prd',/prd|方案|原型|需求文档|改进文档|方案撰写/);
+    push('skill_agent',/skill|agent|workflow|工作流|智能体|tool/);
+    push('delivery',/上线|落地|交付|推动|推进|产研|协同|开发/);
+    push('metrics',/漏斗|留存|转化|指标|埋点|提升\d+|回升|调用超|3000/);
+    push('finance_risk',/财务|风控|报销|对账|入金|合规|异常交易|稳定币/);
+    push('operations',/运营|体验优化|客诉|闭环|规则|阈值/);
+    return tags;
+}
 function getPrepareExperienceAnglesFromText(text,session){
     const normalized=normalizePrepareText(text).toLowerCase();
     const angles=[];
@@ -5319,23 +5336,116 @@ function isPrepareExperienceTemplateLine(text){
     if(!normalized)return true;
     return /这段经历最值得拿来对 JD 的|这段经历最适合对应 JD 里的|建议按这个顺序讲|展开时别只报岗位名|可以直接讲|先说这段经历对应 JD|按[“"'「]?[场情]景\s*\/\s*判断\s*\/\s*动作\s*\/\s*结果|别只报任务名|先亮一句结论|高概率会被追问/.test(normalized);
 }
-function buildPrepareExperienceJdBullets(concreteBullets,session){
-    const templates=[
-        function(point,angles){
-            return `${point}。这一句最适合拿来打 ${angles.join('、')}。`;
-        },
-        function(point,angles){
-            return `把 ${point} 讲透，面试官基本就能听到你在 ${angles.join('、')} 上不是纸上谈兵。`;
-        },
-        function(point,angles){
-            return `${point} 更像收尾证据，用来把 ${angles.join('、')} 这几项能力坐实。`;
+function getPrepareJdRequirementCatalog(session){
+    const catalog=[];
+    const seen=new Set();
+    const add=function(label,source){
+        const normalized=normalizePrepareText(label);
+        if(!normalized)return;
+        const key=normalizePrepareCompareKey(normalized);
+        if(!key||seen.has(key))return;
+        seen.add(key);
+        catalog.push({
+            label:normalized,
+            source,
+            tags:getPrepareSemanticTags(normalized),
+            angles:getPrepareExperienceAnglesFromText(normalized,session)
+        });
+    };
+    const research=session?.outputs?.research||{};
+    (research?.role_analysis?.target_capabilities||[]).forEach(function(item){
+        add(item,'capability');
+    });
+    (research?.keyword_translation||[]).forEach(function(item){
+        add(item?.jd_keyword,'keyword');
+    });
+    normalizePrepareText(session?.jd_text||'')
+        .split(/[\n。；;]/)
+        .map(function(part){ return normalizePrepareText(part); })
+        .filter(function(part){
+            return part&&part.length>=6&&part.length<=36&&/负责|要求|需要|熟悉|能力|经验|优化|设计|分析|协同|风控|财务|技能|skill|agent/i.test(part);
+        })
+        .slice(0,8)
+        .forEach(function(item){
+            add(item,'jd_text');
+        });
+    return catalog.slice(0,10);
+}
+function analyzePrepareExperienceAgainstJd(item,session,concreteBullets){
+    const requirements=getPrepareJdRequirementCatalog(session);
+    const matches=[];
+    concreteBullets.slice(0,4).forEach(function(point){
+        const bulletTags=getPrepareSemanticTags(point);
+        const bulletAngles=getPrepareExperienceAnglesFromText(point,session);
+        requirements.forEach(function(req){
+            const sharedTags=req.tags.filter(function(tag){ return bulletTags.includes(tag); });
+            const sharedAngles=req.angles.filter(function(angle){ return bulletAngles.includes(angle); });
+            const exactTermBonus=sharedTags.length?2:0;
+            const score=sharedTags.length*4+sharedAngles.length*2+exactTermBonus;
+            if(score<=0)return;
+            matches.push({
+                requirement:req.label,
+                bullet:point,
+                score,
+                direct:sharedTags.length>0,
+                sharedTags,
+                sharedAngles
+            });
+        });
+    });
+    const bestByRequirement=new Map();
+    matches.forEach(function(match){
+        const existing=bestByRequirement.get(match.requirement);
+        if(!existing||match.score>existing.score){
+            bestByRequirement.set(match.requirement,match);
         }
-    ];
+    });
+    const ranked=[...bestByRequirement.values()].sort(function(a,b){
+        return b.score-a.score;
+    });
+    return ranked.slice(0,3);
+}
+function buildPrepareExperienceJdBullets(item,session,concreteBullets){
+    const mappings=analyzePrepareExperienceAgainstJd(item,session,concreteBullets);
+    if(mappings.length){
+        return mappings.map(function(match){
+            if(match.direct){
+                return `JD 提到「${match.requirement}」时，最该拿出来的是「${match.bullet}」。这条是直接命中，因为它已经能听出你做过 ${match.sharedAngles.join('、')||'相关判断和落地'}。`;
+            }
+            return `JD 里有「${match.requirement}」这一项时，这段更适合作为可迁移证据来讲：先用「${match.bullet}」证明你做过相近的判断和推进，再补一句它怎么迁到当前岗位场景。`;
+        });
+    }
     return concreteBullets.slice(0,3).map(function(point,index){
         const angles=getPrepareExperienceAnglesFromText(point,session).slice(0,2);
-        const formatter=templates[Math.min(index,templates.length-1)];
-        return formatter(point,angles.length?angles:['岗位匹配点']);
+        if(index===0){
+            return `这条最适合当第一张牌：「${point}」。先把它讲透，面试官才能迅速听到你在 ${angles.join('、')||'岗位关键能力'} 上的底子。`;
+        }
+        if(index===1){
+            return `第二张牌可以放「${point}」，它更适合证明你不是只会判断，也真的把事情往下推进过。`;
+        }
+        return `最后用「${point}」收结果，把前面讲的能力落到可验证的变化上。`;
     });
+}
+function buildPrepareExperienceSummary(item,session,concreteBullets){
+    const existing=normalizePrepareText(item?.why_match||'');
+    if(existing&&!isPrepareExperienceTemplateLine(existing))return existing;
+    const mappings=analyzePrepareExperienceAgainstJd(item,session,concreteBullets);
+    if(mappings.length>=2){
+        const first=mappings[0];
+        const second=mappings[1];
+        return `${first.requirement} 这类题，优先用「${first.bullet}」起手；如果面试官继续往下追，再接「${second.bullet}」把落地动作或结果补全。`;
+    }
+    if(mappings.length===1){
+        const only=mappings[0];
+        return `这段最适合拿来回答「${only.requirement}」相关的问题，核心证据就是「${only.bullet}」。`;
+    }
+    if(concreteBullets.length>=2){
+        return `别整段平铺，优先抓「${concreteBullets[0]}」和「${concreteBullets[1]}」这两句，它们更容易撑起一段有说服力的面试回答。`;
+    }
+    if(concreteBullets.length===1){
+        return `这段真正值得讲的是「${concreteBullets[0]}」，把这句背后的判断和结果讲深比泛泛讲职责有用得多。`;
+    }
+    return '这段不要按岗位职责复述，挑一件最能说明你判断和推进能力的具体事来讲。';
 }
 function buildPrepareExperienceExpandBullets(item,session,concreteBullets,actionSummary){
     const section=normalizePrepareText(item?.resume_section||'这段经历');
@@ -5495,10 +5605,11 @@ function renderPrepareFocus(session){
                             <div class="prepare-stack-list">
                                 ${group.items.map(function(item){
                                     const details=buildPrepareExperienceDisplayDetails(item,session);
+                                    const summary=buildPrepareExperienceSummary(item,session,getPrepareConcreteExperienceBullets(item));
                                     return `
                                         <section class="prepare-experience">
                                             <h3>${escapeHTML(item.resume_section)}</h3>
-                                            <p>${escapeHTML(item.why_match)}</p>
+                                            <p>${escapeHTML(summary)}</p>
                                             <div class="prepare-experience-detail-grid">
                                                 ${renderPrepareExperienceDetailBlock('对应 JD',details.jd,[])}
                                                 ${renderPrepareExperienceDetailBlock('怎么展开',details.expand,[])}
