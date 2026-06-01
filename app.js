@@ -1552,6 +1552,7 @@ const PREPARE_RUNTIME_CONFIG_KEY='rt_prepare_runtime_config';
 const PREPARE_WEB_LOOKUP_CACHE_KEY='rt_prepare_web_lookup_cache';
 const PREPARE_DIRECT_TOOL_ROUNDS=3;
 const PREPARE_DIRECT_TOOL_MAX_CALLS=3;
+const PREPARE_WEB_LOOKUP_TIMEOUT_MS=1800;
 const PREPARE_MEMBERSHIP_PLANS=[
     {key:'monthly',label:'9.9 / 30天',price:'¥9.9 / 30天',summary:'适合持续刷题和阶段性冲刺准备',membershipTier:'monthly'},
     {key:'lifetime',label:'49.9 买断',price:'¥49.9 买断',summary:'一次开通，长期使用',membershipTier:'lifetime'}
@@ -2661,10 +2662,19 @@ function writePrepareLookupCache(query,payload){
 }
 async function fetchPrepareLookupJson(url,label){
     let response;
+    const controller=typeof AbortController!=='undefined'?new AbortController():null;
+    const timeoutId=controller?setTimeout(function(){
+        try{controller.abort();}catch(error){}
+    },PREPARE_WEB_LOOKUP_TIMEOUT_MS):null;
     try{
-        response=await fetch(url,{headers:{Accept:'application/json'}});
+        response=await fetch(url,{
+            headers:{Accept:'application/json'},
+            signal:controller?controller.signal:undefined
+        });
     }catch(error){
         throw new Error(`${label} 请求失败`);
+    }finally{
+        if(timeoutId)clearTimeout(timeoutId);
     }
     const data=await response.json().catch(function(){return{};});
     if(!response.ok){
@@ -2706,8 +2716,8 @@ async function fetchPrepareDuckDuckGoResults(query){
     return results.slice(0,4);
 }
 async function fetchPrepareWikipediaResults(query,language){
-    const searchData=await fetchPrepareLookupJson(`https://${language}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`,`Wikipedia(${language})`);
-    const hits=(searchData?.query?.search||[]).slice(0,3);
+    const searchData=await fetchPrepareLookupJson(`https://${language}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=2`,`Wikipedia(${language})`);
+    const hits=(searchData?.query?.search||[]).slice(0,2);
     const results=[];
     for(const hit of hits){
         const title=normalizePrepareText(hit?.title||'');
@@ -2861,7 +2871,7 @@ function summarizePrepareLookupPayload(payload){
 }
 async function buildPrepareExternalResearchDigest(input,kind){
     const allQueries=extractPrepareLookupQueries(input);
-    const queries=allQueries.slice(0,kind==='answer'?2:3);
+    const queries=allQueries.slice(0,kind==='answer'?1:2);
     const results=await Promise.allSettled(queries.map(async function(query){
         const raw=await runPrepareWebLookup({
             query,
@@ -3914,6 +3924,26 @@ function sanitizePrepareOutputs(output,session){
 function getPrepareQuestionGroups(session){
     const normalizedOutputs=session?.outputs?sanitizePrepareOutputs(session.outputs,session):null;
     return normalizedOutputs?.questions?.question_groups||[];
+}
+function buildPrepareFallbackRenderSession(session){
+    return Object.assign({},session,{
+        outputs:sanitizePrepareOutputs(buildPrepareOutputsFallback(session),session)
+    });
+}
+function renderPrepareTabByKey(activeTab,session){
+    switch(activeTab){
+        case 'focus':
+            return renderPrepareFocus(session);
+        case 'questions':
+            return renderPrepareQuestions(session);
+        case 'mock':
+            return renderPrepareMockInterview(session);
+        case 'supplement':
+            return renderPrepareSupplementHub(session);
+        case 'research':
+        default:
+            return renderPrepareResearch(session);
+    }
 }
 function syncPrepareApplicationDraft(appId){
     prepareState.selectedApplicationId=appId||'';
@@ -6718,38 +6748,21 @@ function renderPrepareWorkbench(session){
     `;
     if(renderSession.outputs){
         try{
-            switch(activeTab){
-                case 'focus':
-                    tabContent=renderPrepareFocus(renderSession);
-                    break;
-                case 'questions':
-                    tabContent=renderPrepareQuestions(renderSession);
-                    break;
-                case 'mock':
-                    tabContent=renderPrepareMockInterview(renderSession);
-                    break;
-                case 'supplement':
-                    tabContent=renderPrepareSupplementHub(renderSession);
-                    break;
-                case 'research':
-                default:
-                    tabContent=renderPrepareResearch(renderSession);
-                    break;
-            }
+            tabContent=renderPrepareTabByKey(activeTab,renderSession);
         }catch(error){
             console.warn('prepare workbench tab render failed',error);
-            tabContent=`
-                <div class="prepare-state-panel is-error">
-                    <div class="prepare-section-kicker">会话兼容中</div>
-                    <h3>这套旧准备会话有一部分历史数据格式不兼容</h3>
-                    <p>我已经先把会话保住了。你可以直接点右上角“重新生成”，把它升级到最新版本的准备工作台。</p>
-                    <ul class="prepare-bullet-list">
-                        <li>原会话不会丢。</li>
-                        <li>重新生成后会用当前 JD、简历和补充经历重新整理。</li>
-                        <li>如果这套会话本身字段不完整，重新生成后通常就能恢复正常打开。</li>
-                    </ul>
-                </div>
-            `;
+            try{
+                tabContent=renderPrepareTabByKey(activeTab,buildPrepareFallbackRenderSession(session));
+            }catch(fallbackError){
+                console.warn('prepare fallback tab render failed',fallbackError);
+                tabContent=`
+                    <div class="prepare-state-panel is-error">
+                        <div class="prepare-section-kicker">当前会话打开失败</div>
+                        <h3>这条准备会话还有一部分历史数据没有自动修好</h3>
+                        <p>先点右上角“重新生成”，我会用现有 JD、简历和补充经历把它重建成新版工作台。</p>
+                    </div>
+                `;
+            }
         }
     }
     const isAnswerMode=activeTab==='questions'&&prepareState.questionPane==='answer';
