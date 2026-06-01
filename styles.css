@@ -1354,9 +1354,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-recent-item>div{min-width:0}
 .prepare-recent-item strong{display:block;font-size:13px;font-weight:600;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
 .prepare-recent-item span{display:block;margin-top:4px;font-size:11px;color:var(--text-muted);line-height:1.55;white-space:normal;overflow-wrap:anywhere}
-.prepare-recent-item em{display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:11px;font-style:normal;color:var(--text-secondary);white-space:nowrap}
+.prepare-recent-item em{display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:11px;font-style:normal;color:var(--text-secondary);white-space:nowrap}
 .prepare-recent-item:hover,.prepare-recent-item.is-active{transform:translateY(-1px);border-color:rgba(255,255,255,.14);background:rgba(255,255,255,.06)}
 :root[data-theme=light] .prepare-recent-item{background:rgba(255,255,255,.5);border-color:rgba(176,154,127,.14)}
+:root[data-theme=light] .prepare-recent-item em{background:rgba(255,255,255,.82);border-color:rgba(176,154,127,.16);color:#6f5a45}
 :root[data-theme=light] .prepare-recent-item:hover,:root[data-theme=light] .prepare-recent-item.is-active{border-color:rgba(164,124,78,.28);background:rgba(255,255,255,.8)}
 :root[data-theme=light] .prepare-recent-card .prepare-section-kicker{padding-left:2px}
 .prepare-empty{padding:20px 22px;border-radius:18px;border:1px dashed rgba(255,255,255,.12);color:var(--text-secondary);background:rgba(255,255,255,.02);line-height:1.8;overflow-wrap:anywhere;word-break:break-word}
@@ -1485,6 +1486,9 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-supplement-modal .modal-body{padding:22px}
 .prepare-supplement-modal .prepare-supplement-card{padding:0}
 .prepare-supplement-modal .prepare-supplement-card-bare{background:transparent;border:none;box-shadow:none}
+.prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-list{margin-top:16px}
+.prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-empty{margin-top:16px;color:var(--text-primary);background:rgba(255,255,255,.02)}
+.prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-hint{font-size:12px;line-height:1.65;color:var(--text-secondary)}
 .prepare-supplement-modal .prepare-supplement-head h3{font-size:24px}
 .prepare-question-groups h3{font-size:15px}
 .prepare-question-list{display:flex;flex-direction:column;gap:10px;margin-top:14px}

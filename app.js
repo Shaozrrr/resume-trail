@@ -5999,12 +5999,40 @@ function renderPrepareAnswerBody(answer){
 function renderPrepareSupplementalExperienceCard(session,options){
     const compact=!!options?.compact;
     const bare=!!options?.bare;
+    const modalSimple=!!options?.modalSimple;
     const items=getPrepareSupplementalExperiences(session);
     const draft=normalizePrepareText(prepareState.supplementalExperienceDraft);
     const note=compact
         ?'补进去后，这道题和后面的回答都能优先调用。'
         :'这段素材会进入整套准备工作台，后面生成题目、回答和模拟点评时都能调用。';
     const recentItems=items.slice(0,compact?3:12);
+    if(modalSimple){
+        return `
+            <section class="prepare-supplement-card prepare-supplement-card-bare prepare-supplement-card-modal-simple">
+                <div class="prepare-supplement-capsule prepare-supplement-capsule-simple">
+                    <div class="prepare-supplement-capsule-input">
+                        <textarea id="prepare-supplemental-input-global" rows="4" placeholder="例如：我做过用户访谈、梳理过漏斗、协调过研发/设计、推动过上线，并拿到过结果变化。">${escapeHTML(draft)}</textarea>
+                    </div>
+                    <div class="prepare-supplement-capsule-actions">
+                        <button type="button" class="btn-primary btn-sm" id="prepare-supplemental-add-global">添加经历</button>
+                        <span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>
+                    </div>
+                </div>
+                ${recentItems.length?`
+                    <div class="prepare-supplement-list">
+                        ${recentItems.map(function(item){
+                            return `
+                                <div class="prepare-supplement-item">
+                                    <strong>${escapeHTML(item.text)}</strong>
+                                    <button type="button" class="prepare-supplement-remove" data-prepare-supplement-remove="${escapeHTML(item.id)}" aria-label="删除经历">×</button>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `:`<div class="prepare-supplement-empty">先补一条经历，后面生成题目和回答时就能直接用。</div>`}
+            </section>
+        `;
+    }
     const content=`
         <section class="prepare-card-surface prepare-supplement-card${compact?' is-compact':''}">
             <div class="prepare-supplement-head">
@@ -6067,12 +6095,12 @@ function renderPrepareSupplementModal(session){
                 <div class="modal-header">
                     <div>
                         <h2>补充经历</h2>
-                        <p>先把这道题想提到的经历补进来，后面生成回答和模拟点评都会优先调用。</p>
+                        <p>把这道题想提到的经历补进来，后面生成回答和模拟点评会优先调用。</p>
                     </div>
                     <button class="modal-close" id="prepare-supplement-close">&times;</button>
                 </div>
                 <div class="modal-body">
-                    ${renderPrepareSupplementalExperienceCard(session,{compact:false,bare:true})}
+                    ${renderPrepareSupplementalExperienceCard(session,{compact:false,bare:true,modalSimple:true})}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="prepare-supplement-done">我补好了</button>
