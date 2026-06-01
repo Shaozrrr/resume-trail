@@ -81,10 +81,27 @@ const RT_PENDING_GUEST_MIGRATION_KEY='rt_pending_guest_migration';
 const RT_THEME_MODE_KEY='rt_theme_mode';
 const RT_THEME_DIRTY_KEY='rt_theme_dirty';
 const HIDDEN_VISA_VALUE='UNKNOWN';
+const PREPARE_SESSION_HISTORY_LIMIT=5;
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
     return JSON.parse(JSON.stringify(value));
+}
+function normalizePrepareSessionCollection(list){
+    return (Array.isArray(list)?list:[])
+        .filter(function(item){
+            return item&&typeof item==='object'&&item.id;
+        })
+        .sort(function(a,b){
+            return new Date(b.updated_at||b.created_at||0).getTime()-new Date(a.updated_at||a.created_at||0).getTime();
+        })
+        .slice(0,PREPARE_SESSION_HISTORY_LIMIT)
+        .map(function(item){
+            return Object.assign({},item,{
+                outputs:normalizePrepareOutputsPayload(item.outputs),
+                updated_at:item.updated_at||item.created_at||new Date().toISOString()
+            });
+        });
 }
 
 function escapeHTML(value){
@@ -521,7 +538,7 @@ class Store{
     restore(snapshot){
         this.apps=snapshot.apps;
         this.resumes=snapshot.resumes;
-        this.prepareSessions=snapshot.prepareSessions||[];
+        this.prepareSessions=normalizePrepareSessionCollection(snapshot.prepareSessions||[]);
         this.refs=snapshot.refs;
         this.logs=snapshot.logs;
         this.settings=Object.assign(getDefaultSettings(),snapshot.settings||{});
@@ -637,9 +654,9 @@ class Store{
             const maxOrder=draft.resumes.reduce(function(max,resume){
                 return Math.max(max,Number.isFinite(resume.sort_order)?resume.sort_order:-1);
             },-1);
-            const resume=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:now,updated_at:now,sort_order:maxOrder+1});
-            draft.resumes.push(resume);
-            return resume;
+                const resume=Object.assign({},cloneData(r),{id:crypto.randomUUID(),at:now,updated_at:now,sort_order:maxOrder+1});
+                draft.resumes.push(resume);
+                return resume;
         });
         if(result&&result!==false&&window.rtTrackEvent){
             window.rtTrackEvent('rt_resume_created',{
@@ -756,6 +773,7 @@ class Store{
                 updated_at:now
             },cloneData(session||{}));
             draft.prepareSessions.unshift(next);
+            draft.prepareSessions=normalizePrepareSessionCollection(draft.prepareSessions);
             return next;
         });
     }
@@ -764,7 +782,8 @@ class Store{
             const idx=draft.prepareSessions.findIndex(s=>s.id===id);
             if(idx<0)return null;
             draft.prepareSessions[idx]=Object.assign({},draft.prepareSessions[idx],cloneData(patch||{}),{updated_at:new Date().toISOString()});
-            return draft.prepareSessions[idx];
+            draft.prepareSessions=normalizePrepareSessionCollection(draft.prepareSessions);
+            return draft.prepareSessions.find(function(item){return item.id===id;})||null;
         });
     }
     async delPrepareSession(id){
@@ -845,7 +864,7 @@ class Store{
             if(starter){
                 this.apps=(starter.apps||[]).map(normalizeAppRecord);
                 this.resumes=cloneData(starter.resumes||[]);
-                this.prepareSessions=cloneData(starter.prepare_sessions||[]);
+                this.prepareSessions=normalizePrepareSessionCollection(starter.prepare_sessions||[]);
                 this.refs=cloneData(starter.refs||[]);
                 this.logs=cloneData(starter.logs||[]);
                 this.settings=Object.assign(getDefaultSettings(),starter.settings||{});
@@ -2240,11 +2259,25 @@ function initSidebarBrand(){
     },true);
 }
 function getPrepareSessionsSorted(){
-    return store.prepareSessions.slice().sort(function(a,b){
-        return new Date(b.updated_at||b.created_at||0).getTime()-new Date(a.updated_at||a.created_at||0).getTime();
+    return normalizePrepareSessionCollection(store.prepareSessions);
+}
+let prepareHistoryTrimmedOnce=false;
+function ensurePrepareSessionHistoryLimit(){
+    const normalized=normalizePrepareSessionCollection(store.prepareSessions);
+    if(normalized.length===store.prepareSessions.length&&prepareHistoryTrimmedOnce)return;
+    const changed=normalized.length!==store.prepareSessions.length||normalized.some(function(item,index){
+        return store.prepareSessions[index]?.id!==item.id;
     });
+    if(!changed){
+        prepareHistoryTrimmedOnce=true;
+        return;
+    }
+    store.prepareSessions=normalized;
+    prepareHistoryTrimmedOnce=true;
+    void store.save('prepare.trimHistory');
 }
 function getPrepareSelectedSession(){
+    ensurePrepareSessionHistoryLimit();
     const sessions=getPrepareSessionsSorted();
     if(!sessions.length){
         prepareState.selectedSessionId=null;
@@ -6933,7 +6966,7 @@ function renderPrepare(){
                         <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
                             <div class="prepare-section-kicker">最近会话</div>
                             <div class="prepare-recent-list prepare-recent-list-compact">
-                                ${sessions.length?sessions.slice(0,6).map(session=>`
+                                ${sessions.length?sessions.slice(0,PREPARE_SESSION_HISTORY_LIMIT).map(session=>`
                                     <button type="button" class="prepare-recent-item${prepareState.selectedSessionId===session.id?' is-active':''}" data-prepare-session="${session.id}">
                                         <div>
                                             <strong>${escapeHTML(session.company_name||'目标公司')} · ${escapeHTML(session.role_name||'目标岗位')}</strong>

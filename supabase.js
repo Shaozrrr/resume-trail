@@ -469,7 +469,9 @@ const cloudStore={
       return typeof normalizeAppRecord==='function'?normalizeAppRecord(app):app;
     }):[];
     store.resumes=data.resumes;
-    store.prepareSessions=data.prepare_sessions||[];
+    store.prepareSessions=typeof normalizePrepareSessionCollection==='function'
+      ?normalizePrepareSessionCollection(data.prepare_sessions||[])
+      :(data.prepare_sessions||[]);
     store.refs=data.refs;
     store.logs=data.logs;
     store.categories=data.categories;
