@@ -1475,6 +1475,7 @@ const prepareState={
     selectedFramework:'STAR',
     questionGroupLoadingKey:'',
     showResumePreview:false,
+    showJdPreview:false,
     manualResumeFile:null,
     appSupplementFile:null,
     manualResumeParse:{status:'idle',text:'',message:''},
@@ -2340,6 +2341,12 @@ function inferPrepareQuestionFrameworks(question){
         default_framework:defaultFramework,
         framework_reason:reason
     };
+}
+function getPrepareReverseQuestions(session){
+    return getPrepareAllQuestions(session).filter(function(question){
+        const meta=normalizePrepareQuestionRecord(question);
+        return meta.question_type==='reverse_question'||meta.source==='reverse';
+    }).map(normalizePrepareQuestionRecord);
 }
 function normalizePrepareQuestionRecord(question){
     const base=Object.assign({},question||{});
@@ -3518,6 +3525,27 @@ function renderPrepareResumePreviewOverlay(preview){
         </div>
     `;
 }
+function renderPrepareJdPreviewOverlay(session){
+    const jdText=normalizePrepareText(session?.jd_text||'');
+    if(!prepareState.showJdPreview||!jdText)return'';
+    return `
+        <div class="prepare-resume-overlay" id="prepare-jd-overlay">
+            <div class="prepare-resume-sheet">
+                <div class="prepare-resume-sheet-head">
+                    <div>
+                        <div class="prepare-section-kicker">JD Context</div>
+                        <h3>本次分析实际使用的 JD 原文</h3>
+                        <p>${escapeHTML(session?.company_name||'目标公司')} · ${escapeHTML(session?.role_name||'目标岗位')} · ${jdText.length} 字</p>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" id="prepare-close-jd-preview">收起</button>
+                </div>
+                <div class="prepare-resume-sheet-body">
+                    <pre>${escapeHTML(jdText)}</pre>
+                </div>
+            </div>
+        </div>
+    `;
+}
 function isPrepareLikelyInternalTerm(keyword){
     const text=normalizePrepareText(keyword);
     if(!text)return false;
@@ -3706,12 +3734,14 @@ function sanitizePrepareFocus(output,session){
         seenExperienceKeys.add(compareKey);
         bestExperiences.push(item);
     });
-    (fallbackFocus.best_experiences||[]).forEach(function(item){
-        const compareKey=normalizePrepareCompareKey(`${item.resume_section} ${item.why_match}`);
-        if(!compareKey||seenExperienceKeys.has(compareKey))return;
-        seenExperienceKeys.add(compareKey);
-        bestExperiences.push(item);
-    });
+    if(!bestExperiences.length){
+        (fallbackFocus.best_experiences||[]).forEach(function(item){
+            const compareKey=normalizePrepareCompareKey(`${item.resume_section} ${item.why_match}`);
+            if(!compareKey||seenExperienceKeys.has(compareKey))return;
+            seenExperienceKeys.add(compareKey);
+            bestExperiences.push(item);
+        });
+    }
     const riskWarnings=((currentFocus.risk_warnings||[]).length?currentFocus.risk_warnings:fallbackFocus.risk_warnings||[]).map(function(item,index){
         const fallbackItem=(fallbackFocus.risk_warnings||[])[index]||{};
         return{
@@ -3757,7 +3787,9 @@ function sanitizePrepareOutputs(output,session){
     next.research=Object.assign({},next.research||{},{keyword_translation:keywordTranslation});
     next.focus=sanitizePrepareFocus(next,session);
     const questionGroups=(next?.questions?.question_groups||[]).map(function(group){
+        const groupName=normalizePrepareText(group?.group_name||'');
         return Object.assign({},group,{
+            group_name:/反问/.test(groupName)?'反问环节':groupName,
             questions:(group?.questions||[]).map(function(question){
                 return normalizePrepareQuestionRecord(question);
             })
@@ -3950,7 +3982,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问确认，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -4498,7 +4530,7 @@ function buildPrepareOutputsFallback(session){
             ]
         },
         {
-            group_name:'你可以反问面试官',
+            group_name:'反问环节',
             questions:[
                 {id:'reverse-1',question:'如果我入职，前 30 天最希望我先交付什么，团队最看重的第一个结果是什么？',question_type:'reverse_question',source:'reverse',importance:'medium'},
                 {id:'reverse-2',question:'这个岗位最常见的失败点是什么，你们通常怎么判断候选人能不能提前避开？',question_type:'reverse_question',source:'reverse',importance:'medium'},
@@ -5018,18 +5050,32 @@ function getPrepareExperienceGroupMeta(section){
 }
 
 function groupPrepareFocusExperiences(experiences){
-    const order=['internship','project','campus','other'];
+    const order=['internship','project','campus'];
     const groups=new Map();
+    const otherItems=[];
     (experiences||[]).forEach(function(item){
         const meta=getPrepareExperienceGroupMeta(item.resume_section||'');
+        if(meta.key==='other'){
+            otherItems.push(item);
+            return;
+        }
         if(!groups.has(meta.key)){
             groups.set(meta.key,Object.assign({},meta,{items:[]}));
         }
         groups.get(meta.key).items.push(item);
     });
-    return order.map(function(key){
+    const ordered=order.map(function(key){
         return groups.get(key)||null;
     }).filter(Boolean);
+    if(!ordered.length&&otherItems.length){
+        ordered.push({
+            key:'other',
+            label:'其他可迁移经历',
+            description:'当前只能先从这些线索里挑最接近岗位要求的经历来讲。',
+            items:otherItems
+        });
+    }
+    return ordered;
 }
 
 function breakdownPrepareExperienceHighlights(points){
@@ -5377,18 +5423,20 @@ function renderPrepareQuestionsList(session){
                         <div class="prepare-question-list">
                             ${group.questions.map(function(rawQuestion){
                                 const question=normalizePrepareQuestionRecord(rawQuestion);
-                                const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'可反问面试官':'来自岗位信息';
-                                const reverseLabel=question.question_type==='reverse_question'?'反问建议':'';
+                                const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'反问环节':'来自岗位信息';
+                                const reverseLabel=question.question_type==='reverse_question'?'查看反问清单':'';
                                 return `
                                     <button class="prepare-question-card${prepareState.selectedQuestionId===question.id&&prepareState.questionPane==='answer'?' is-active':''}" type="button" data-prepare-question="${question.id}">
                                         <div class="prepare-question-main">
                                             <strong>${escapeHTML(question.question)}</strong>
                                             <span>${escapeHTML(sourceLabel)}</span>
-                                            <div class="prepare-question-frameworks">
-                                                ${question.recommended_frameworks.map(function(framework){
-                                                    return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
-                                                }).join('')}
-                                            </div>
+                                            ${question.question_type==='reverse_question'?'':`
+                                                <div class="prepare-question-frameworks">
+                                                    ${question.recommended_frameworks.map(function(framework){
+                                                        return `<i>${escapeHTML(getPrepareFrameworkMeta(framework).label)}</i>`;
+                                                    }).join('')}
+                                                </div>
+                                            `}
                                         </div>
                                         <em class="prepare-question-card-action" aria-hidden="true" title="${escapeHTML(reverseLabel||'进入回答页')}">›</em>
                                     </button>
@@ -5428,7 +5476,7 @@ function renderPrepareAnswers(session){
     const framework=frameworkMetaFromSelection(prepareState.selectedFramework,isFreeQuestion?['FREE']:availableFrameworks);
     if(!prepareState.selectedFramework||prepareState.selectedFramework!==framework)prepareState.selectedFramework=framework;
     const frameworkMeta=getPrepareFrameworkMeta(framework);
-    const questionSource=questionMeta?escapeHTML(questionMeta.source==='jd'?'来自 JD':questionMeta.source==='resume'?'来自简历':questionMeta.source==='behavioral'?'来自行为面':questionMeta.source==='custom'?'来自自定义问题':questionMeta.source==='reverse'?'可反问面试官':'来自岗位信息'):'';
+    const questionSource=questionMeta?escapeHTML(questionMeta.source==='jd'?'来自 JD':questionMeta.source==='resume'?'来自简历':questionMeta.source==='behavioral'?'来自行为面':questionMeta.source==='custom'?'来自自定义问题':questionMeta.source==='reverse'?'反问环节':'来自岗位信息'):'';
     const backButton=`<button type="button" class="btn-secondary btn-sm" id="prepare-answer-back">返回题目列表</button>`;
     if(framework==='FREE'){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
@@ -5470,57 +5518,49 @@ function renderPrepareAnswers(session){
         `;
     }
     if(isReverseQuestion){
+        const reverseQuestions=getPrepareReverseQuestions(session);
         return `
             <div class="prepare-answer-page">
                 ${renderPrepareAnswerPageLead({
-                    tag:'反问面试官',
-                    title:'反问页',
-                    description:'这里是你带进面试现场的反问清单，不是堆在问题列表下面的附属内容。'
+                    tag:'反问环节',
+                    title:'反问环节',
+                    description:'这里不是让你回答，而是帮你带几句真正值得问面试官的问题进场。'
                 })}
                 <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
-                        <div class="prepare-section-kicker">可反问面试官</div>
-                        <h3>${escapeHTML(questionMeta.question)}</h3>
-                        <p>这不是让你回答的问题，而是你可以直接拿去问面试官的问题。重点是问清楚上手目标、衡量标准、失败风险和团队期待。</p>
-                        <span>${escapeHTML(questionMeta.framework_reason||'')}</span>
+                        <div class="prepare-section-kicker">面试尾声可直接发问</div>
+                        <h3>把这几句问题记住就够了</h3>
+                        <p>反问环节的目标不是展示分析能力，而是快速问清楚上手目标、评估标准、失败风险和团队期待。</p>
+                        <span>优先挑 1 到 2 个最有信息量的问题去问，不要一口气全问完。</span>
                     </div>
                     <div class="prepare-answer-hero-actions">
                         <div class="prepare-answer-top-actions">${backButton}</div>
                         <div class="prepare-answer-intro">
-                            <div class="prepare-section-kicker">提问方式</div>
-                            <h3>可以直接这么问</h3>
-                            <p>${escapeHTML(questionMeta.question)}</p>
-                            <span>如果你想更稳一点，可以在末尾加一句“我这样理解对吗”。</span>
+                            <div class="prepare-section-kicker">使用建议</div>
+                            <h3>问 1 到 2 个就够</h3>
+                            <p>优先选能帮你判断岗位真实工作方式的问题，例如前 30 天交付、团队最常见失败点、以及你还要补强什么。</p>
+                            <span>如果现场时间很短，就先问最关键的那一句。</span>
                         </div>
                         <div class="prepare-answer-intro prepare-answer-intro-secondary">
-                            <div class="prepare-section-kicker">提问目标</div>
-                            <h3>想确认什么</h3>
-                            <p>先确认这份岗位前 30 天最重要的交付、团队最看重的结果和你最需要补强的能力，再决定自己要不要补学或补做什么。</p>
-                            <span>这类题没有标准答案，关键是问得具体、问得有信息量。</span>
+                            <div class="prepare-section-kicker">别这样问</div>
+                            <h3>避免空泛客套</h3>
+                            <p>少问官网上就能看到的信息，也不要把反问讲成自我介绍。问具体、问落地，信息量才高。</p>
+                            <span>例如少问“团队氛围怎么样”，多问“这个岗位最常见的失败点是什么”。</span>
                         </div>
-                        ${renderPrepareSupplementTrigger(session)}
                     </div>
                 </section>
                 <section class="prepare-card-surface prepare-answer-surface">
-                    <div class="prepare-inline-notice">你可以把这些问题带进面试现场，面试官回答后再把关键信息记到复盘里。</div>
-                    <div class="prepare-answer-structure">
-                        <div class="prepare-answer-block">
-                            <h3>推荐版本</h3>
-                            <p>这是一道可直接反问的面试题。</p>
-                            <ul class="prepare-bullet-list">
-                                <li>${escapeHTML(questionMeta.question)}</li>
-                                <li>追问方向：交付目标、衡量指标、团队期待、最常见失败点。</li>
-                            </ul>
-                        </div>
-                        <div class="prepare-answer-block">
-                            <h3>注意点</h3>
-                            <p>不要把它讲成自我介绍，也不要问得太泛。</p>
-                            <ul class="prepare-bullet-list">
-                                <li>问题里尽量带上时间窗口或衡量方式。</li>
-                                <li>问完后记得顺手确认对方最在意的优先级。</li>
-                            </ul>
-                        </div>
+                    <div class="prepare-inline-notice prepare-answer-gap-note">你只需要挑最适合现场的一句去问。问完后，把面试官的回答记到复盘里即可。</div>
+                    <div class="prepare-reverse-list">
+                        ${(reverseQuestions.length?reverseQuestions:[questionMeta]).map(function(item,index){
+                            return `
+                                <section class="prepare-reverse-item">
+                                    <strong>问题 ${index+1}</strong>
+                                    <p>${escapeHTML(item.question)}</p>
+                                </section>
+                            `;
+                        }).join('')}
                     </div>
                 </section>
                 </div>
@@ -5760,8 +5800,8 @@ function getPrepareAnswerPageMeta(session){
     }
     if(questionMeta){
         return {
-            kicker:questionMeta.question_type==='reverse_question'?'反问页':'问题回答页',
-            title:questionMeta.question,
+            kicker:questionMeta.question_type==='reverse_question'?'反问环节':'问题回答页',
+            title:questionMeta.question_type==='reverse_question'?'反问环节':questionMeta.question,
             detail:'问题列表已收起，这里是单独的回答页。'
         };
     }
@@ -6055,6 +6095,7 @@ function renderPrepareWorkbench(session){
     const modelOptions=getPrepareModelOptions();
     const activeModel=modelOptions.find(option=>option.key===(generationMeta.model||prepareConfig.model))||modelOptions[0];
     const summaryText=generationMeta.summary||'围绕当前岗位整理一套背调、重点、问题与回答骨架。';
+    const jdPreviewText=normalizePrepareText(session.jd_text||'');
     const activeTab=prepareState.activeTab==='answers'?'questions':prepareState.activeTab;
     const tabContent=session.outputs?{
         research:renderPrepareResearch(session),
@@ -6092,6 +6133,7 @@ function renderPrepareWorkbench(session){
                 </div>
                 <div class="prepare-workbench-actions">
                     ${resumePreview.text?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-resume-preview">查看简历正文</button>':''}
+                    ${jdPreviewText?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-jd-preview">查看JD正文</button>':''}
                     <button type="button" class="btn-secondary btn-sm" id="prepare-regenerate">重新生成</button>
                     ${linkedApp?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-app">查看投递</button>':''}
                 </div>
@@ -6120,6 +6162,7 @@ function renderPrepareWorkbench(session){
                 ${tabContent}
             </div>
             ${renderPrepareResumePreviewOverlay(resumePreview)}
+            ${renderPrepareJdPreviewOverlay(session)}
             ${renderPrepareSupplementModal(session)}
         </div>
     `;
@@ -6415,12 +6458,15 @@ function renderPrepare(){
         prepareState.questionPane='list';
         prepareState.questionGroupLoadingKey='';
         prepareState.showSupplementModal=false;
+        prepareState.showJdPreview=false;
+        prepareState.showResumePreview=false;
         prepareState.screen='workspace';
         renderPrepare();
     }));
     $('#prepare-back-compose')?.addEventListener('click',function(){
         prepareState.screen='compose';
         prepareState.showResumePreview=false;
+        prepareState.showJdPreview=false;
         prepareState.showSupplementModal=false;
         renderPrepare();
     });
@@ -6432,11 +6478,13 @@ function renderPrepare(){
         prepareState.questionGroupLoadingKey='';
         prepareState.activeTab='research';
         prepareState.showResumePreview=false;
+        prepareState.showJdPreview=false;
         prepareState.showSupplementModal=false;
         renderPrepare();
     });
     $('#prepare-open-resume-preview')?.addEventListener('click',function(){
         prepareState.showResumePreview=true;
+        prepareState.showJdPreview=false;
         renderPrepare();
     });
     $('#prepare-close-resume-preview')?.addEventListener('click',function(){
@@ -6449,10 +6497,26 @@ function renderPrepare(){
             renderPrepare();
         }
     });
+    $('#prepare-open-jd-preview')?.addEventListener('click',function(){
+        prepareState.showJdPreview=true;
+        prepareState.showResumePreview=false;
+        renderPrepare();
+    });
+    $('#prepare-close-jd-preview')?.addEventListener('click',function(){
+        prepareState.showJdPreview=false;
+        renderPrepare();
+    });
+    $('#prepare-jd-overlay')?.addEventListener('click',function(event){
+        if(event.target===this){
+            prepareState.showJdPreview=false;
+            renderPrepare();
+        }
+    });
     $$('[data-prepare-tab]').forEach(button=>button.addEventListener('click',function(){
         prepareState.activeTab=this.dataset.prepareTab||'research';
         if(prepareState.activeTab==='questions')prepareState.questionPane='list';
         prepareState.showSupplementModal=false;
+        prepareState.showJdPreview=false;
         renderPrepare();
     }));
     $('#prepare-open-supplement-tab-answer')?.addEventListener('click',function(){
@@ -6598,6 +6662,7 @@ function renderPrepare(){
         prepareState.selectedQuestionId=null;
         prepareState.selectedFramework='STAR';
         prepareState.showSupplementModal=false;
+        prepareState.showJdPreview=false;
         renderPrepare();
     });
     $('#prepare-shell-back-to-questions')?.addEventListener('click',function(){
@@ -6605,6 +6670,7 @@ function renderPrepare(){
         prepareState.selectedQuestionId=null;
         prepareState.selectedFramework='STAR';
         prepareState.showSupplementModal=false;
+        prepareState.showJdPreview=false;
         renderPrepare();
     });
     $('#prepare-regenerate')?.addEventListener('click',function(){
