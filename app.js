@@ -2317,7 +2317,7 @@ function inferPrepareQuestionFrameworks(question){
     if(type==='reverse_question'||/反问|问面试官|你可以问|要问面试官/.test(text)){
         recommended=['PREP','SCQA'];
         defaultFramework='PREP';
-        reason='这类题是给你反问面试官的，重点不是回答，而是先把问题问清楚、问到位。';
+        reason='这类题属于反问环节，重点不是回答，而是先把问题问清楚、问到位。';
     }else
     if(type==='resume_deep_dive'||type==='behavioral'||/讲.*经历|哪一段经历|举例|项目|具体负责|最后结果|冲突|失败|成就|影响别人|资源有限|压力|挫折|带领|领导/.test(text)){
         recommended=['STAR','PAR','PREP'];
@@ -3802,6 +3802,10 @@ function sanitizePrepareOutputs(output,session){
     }
     return next;
 }
+function getPrepareQuestionGroups(session){
+    const normalizedOutputs=session?.outputs?sanitizePrepareOutputs(session.outputs,session):null;
+    return normalizedOutputs?.questions?.question_groups||[];
+}
 function syncPrepareApplicationDraft(appId){
     prepareState.selectedApplicationId=appId||'';
     const app=appId?store.getApp(appId):null;
@@ -4141,7 +4145,7 @@ function buildPrepareQuestionGroupMessagesClient(session,group){
     return[
         {
             role:'system',
-            content:'你是资深面试教练，任务是针对指定题型重新生成 3 道更具体、更可回答的面试题。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。要求：1）所有文案简体中文；2）严格围绕当前 JD 和简历上下文；3）不要复用已有题目；4）如果题型是“你可以反问面试官”，题目必须是候选人要反问面试官的问题，不要写成让候选人回答的问题；5）如果题型是简历深挖，要尽量绑定简历中真实线索；6）如果题型是行为面，优先覆盖冲突、成就、失败、压力、取舍；7）如果题型是场景题，优先覆盖业务判断、指标、方案和收尾；8）每道题都要带 recommended_frameworks、default_framework、framework_reason；9）questions 必须正好 3 条。输出 schema：{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR","PREP","PAR","SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}'
+            content:'你是资深面试教练，任务是针对指定题型重新生成 3 道更具体、更可回答的面试题。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。要求：1）所有文案简体中文；2）严格围绕当前 JD 和简历上下文；3）不要复用已有题目；4）如果题型是“反问环节”，题目必须是候选人要反问面试官的问题，不要写成让候选人回答的问题；5）如果题型是简历深挖，要尽量绑定简历中真实线索；6）如果题型是行为面，优先覆盖冲突、成就、失败、压力、取舍；7）如果题型是场景题，优先覆盖业务判断、指标、方案和收尾；8）每道题都要带 recommended_frameworks、default_framework、framework_reason；9）questions 必须正好 3 条。输出 schema：{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR","PREP","PAR","SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}'
         },
         {
             role:'user',
@@ -4549,7 +4553,7 @@ function buildPrepareOutputsFallback(session){
     };
 }
 function getPrepareAllQuestions(session){
-    return session?.outputs?.questions?.question_groups?.flatMap(group=>group.questions||[])||[];
+    return getPrepareQuestionGroups(session).flatMap(group=>group.questions||[]);
 }
 function getPrepareSelectedQuestion(session,options){
     const opts=Object.assign({fallback:true},options||{});
@@ -5192,7 +5196,7 @@ function renderPrepareQuestions(session){
 async function ensurePrepareAnswer(sessionId,questionId,framework){
     const session=store.getPrepareSession(sessionId);
     if(!session||!session.outputs)return;
-    const groups=session.outputs?.questions?.question_groups||[];
+    const groups=getPrepareQuestionGroups(session);
     const rawQuestion=groups.flatMap(group=>group.questions||[]).find(item=>item.id===questionId);
     const question=rawQuestion?normalizePrepareQuestionRecord(rawQuestion):null;
     if(!question)return;
@@ -5278,7 +5282,7 @@ function renderPrepareAnswerBody(answer){
                 <div class="prepare-token-row">${answer.resume_evidence_used.map(item=>`<span class="prepare-token">${escapeHTML(item)}</span>`).join('')}</div>
             </div>
         `:''}
-        ${answer.gap_note?`<div class="prepare-inline-notice">${escapeHTML(answer.gap_note)}</div>`:''}
+        ${answer.gap_note?`<div class="prepare-inline-notice prepare-answer-gap-note">${escapeHTML(answer.gap_note)}</div>`:''}
         <div class="prepare-answer-structure">
             ${answer.structure.map(part=>`
                 <div class="prepare-answer-block">
@@ -5390,8 +5394,8 @@ function renderPrepareSupplementModal(session){
 }
 
 function renderPrepareQuestionsList(session){
-    const questions=session.outputs?.questions?.question_groups||[];
-    const introText='这些问题会混合 JD、简历深挖、行为面 / 宝洁八大问、场景题和反问面试官。点题后会直接进入回答页，不再把答案堆在列表下面。';
+    const questions=getPrepareQuestionGroups(session);
+    const introText='这些问题会混合 JD、简历深挖、行为面 / 宝洁八大问、场景题和反问环节。点题后会直接进入回答页，不再把答案堆在列表下面。';
     return `
         <div class="prepare-question-page">
             <section class="prepare-card-surface prepare-question-toolbox">
@@ -5477,7 +5481,7 @@ function renderPrepareAnswers(session){
     if(!prepareState.selectedFramework||prepareState.selectedFramework!==framework)prepareState.selectedFramework=framework;
     const frameworkMeta=getPrepareFrameworkMeta(framework);
     const questionSource=questionMeta?escapeHTML(questionMeta.source==='jd'?'来自 JD':questionMeta.source==='resume'?'来自简历':questionMeta.source==='behavioral'?'来自行为面':questionMeta.source==='custom'?'来自自定义问题':questionMeta.source==='reverse'?'反问环节':'来自岗位信息'):'';
-    const backButton=`<button type="button" class="btn-secondary btn-sm" id="prepare-answer-back">返回题目列表</button>`;
+    const backButton=`<button type="button" class="prepare-back-btn" id="prepare-answer-back">← 返回题目列表</button>`;
     if(framework==='FREE'){
         const freeQuestion=normalizePrepareText(prepareState.freeQuestionText);
         const answer=session.outputs?.answer_cache?.[getPrepareFreeQuestionKey(freeQuestion)]?.FREE;
@@ -5802,7 +5806,7 @@ function getPrepareAnswerPageMeta(session){
         return {
             kicker:questionMeta.question_type==='reverse_question'?'反问环节':'问题回答页',
             title:questionMeta.question_type==='reverse_question'?'反问环节':questionMeta.question,
-            detail:'问题列表已收起，这里是单独的回答页。'
+            detail:questionMeta.question_type==='reverse_question'?'这里是单独的反问环节页面。':'问题列表已收起，这里是单独的回答页。'
         };
     }
     return {
@@ -5990,7 +5994,7 @@ function renderPrepareMockInterview(session){
             <section class="prepare-card-surface prepare-section-shell prepare-mock-question-card">
                 <div class="prepare-mock-progress">
                     <span>第 ${prepareMockState.currentIndex+1} 题 / 共 ${total} 题</span>
-                    <em>${escapeHTML(question.question_type==='reverse_question'?'反问面试官':(question.question_type||'模拟题'))}</em>
+                    <em>${escapeHTML(question.question_type==='reverse_question'?'反问环节':(question.question_type||'模拟题'))}</em>
                 </div>
                 <h3>${escapeHTML(question.question)}</h3>
                 <p>${escapeHTML(question.framework_reason||'先把回答说完整，再补结果和证据。')}</p>
@@ -6081,6 +6085,7 @@ function renderPrepareMockFeedbackCard(feedback){
     `;
 }
 function renderPrepareWorkbench(session){
+    const renderSession=session?.outputs?Object.assign({},session,{outputs:sanitizePrepareOutputs(session.outputs,session)}):session;
     const linkedApp=getPrepareLinkedApp(session);
     const linkedResume=getPrepareLinkedResume(session);
     const account=window.rtReadCachedAccount&&window.rtReadCachedAccount()||null;
@@ -6090,20 +6095,20 @@ function renderPrepareWorkbench(session){
         summaryText:session.resume_text
     });
     const generatedAt=session.generated_at?fmtDT(session.generated_at):'刚刚生成';
-    const generationMeta=session.outputs?.meta||{};
+    const generationMeta=renderSession.outputs?.meta||{};
     const prepareConfig=getPrepareConfig();
     const modelOptions=getPrepareModelOptions();
     const activeModel=modelOptions.find(option=>option.key===(generationMeta.model||prepareConfig.model))||modelOptions[0];
     const summaryText=generationMeta.summary||'围绕当前岗位整理一套背调、重点、问题与回答骨架。';
     const jdPreviewText=normalizePrepareText(session.jd_text||'');
     const activeTab=prepareState.activeTab==='answers'?'questions':prepareState.activeTab;
-    const tabContent=session.outputs?{
-        research:renderPrepareResearch(session),
-        focus:renderPrepareFocus(session),
-        questions:renderPrepareQuestions(session),
-        mock:renderPrepareMockInterview(session),
-        supplement:renderPrepareSupplementHub(session)
-    }[activeTab]||renderPrepareResearch(session):`
+    const tabContent=renderSession.outputs?{
+        research:renderPrepareResearch(renderSession),
+        focus:renderPrepareFocus(renderSession),
+        questions:renderPrepareQuestions(renderSession),
+        mock:renderPrepareMockInterview(renderSession),
+        supplement:renderPrepareSupplementHub(renderSession)
+    }[activeTab]||renderPrepareResearch(renderSession):`
         <div class="prepare-state-panel${session.error_message?' is-error':''}">
             <div class="prepare-section-kicker">${session.error_message?'生成失败':'准备中'}</div>
             <h3>${session.error_message?'这套准备暂时没生成出来':'这套准备会话还在等待生成'}</h3>
@@ -6147,7 +6152,7 @@ function renderPrepareWorkbench(session){
                         <strong>${escapeHTML(answerPageMeta.title)}</strong>
                         <span>${escapeHTML(answerPageMeta.detail)}</span>
                     </div>
-                    <button type="button" class="btn-secondary btn-sm" id="prepare-shell-back-to-questions">返回题目列表</button>
+                    <button type="button" class="prepare-back-btn" id="prepare-shell-back-to-questions">← 返回题目列表</button>
                 </div>
             `:`
                 <div class="prepare-tabs">
@@ -6564,7 +6569,7 @@ function renderPrepare(){
         if(!session)return;
         const groupIndex=Number(this.dataset.prepareQuestionGroup);
         if(Number.isNaN(groupIndex))return;
-        const groups=session.outputs?.questions?.question_groups||[];
+        const groups=getPrepareQuestionGroups(session);
         const group=groups[groupIndex];
         if(!group)return;
         withButtonBusy(this,async function(){
@@ -6583,7 +6588,7 @@ function renderPrepare(){
                         importance:item?.importance||'medium'
                     }));
                 });
-                const targetIndex=nextGroups.findIndex(function(item){
+                const targetIndex=nextGroups[groupIndex]?groupIndex:nextGroups.findIndex(function(item){
                     return item.group_name===group.group_name;
                 });
                 if(targetIndex>=0){
@@ -6596,16 +6601,12 @@ function renderPrepare(){
                     questions:Object.assign({},current.outputs.questions||{},{question_groups:nextGroups})
                 });
                 await store.updatePrepareSession(session.id,{outputs:nextOutputs});
-                const refreshed=store.getPrepareSession(session.id);
                 prepareState.questionGroupLoadingKey='';
-                prepareState.selectedQuestionId=normalizedOutputQuestions[0]?.id||null;
-                prepareState.questionPane='answer';
+                prepareState.selectedQuestionId=null;
+                prepareState.questionPane='list';
                 prepareState.activeTab='questions';
-                prepareState.selectedFramework=getPrepareQuestionDefaultFramework(normalizedOutputQuestions[0]);
+                prepareState.selectedFramework='';
                 renderPrepare();
-                if(refreshed&&normalizedOutputQuestions[0]&&normalizePrepareQuestionRecord(normalizedOutputQuestions[0]).question_type!=='reverse_question'){
-                    await ensurePrepareAnswer(refreshed.id,prepareState.selectedQuestionId,prepareState.selectedFramework||'PREP');
-                }
                 toast('已重新生成 3 道问题','success');
             }catch(error){
                 prepareState.questionGroupLoadingKey='';
