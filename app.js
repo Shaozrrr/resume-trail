@@ -1486,6 +1486,7 @@ const prepareState={
     mode:'application',
     screen:'compose',
     selectedSessionId:null,
+    lastOpenedSessionId:'',
     selectedApplicationId:'',
     activeTab:'research',
     questionPane:'list',
@@ -2282,11 +2283,12 @@ function getPrepareSelectedSession(){
     const sessions=getPrepareSessionsSorted();
     if(!sessions.length){
         prepareState.selectedSessionId=null;
+        prepareState.lastOpenedSessionId='';
         return null;
     }
     const current=prepareState.selectedSessionId?store.getPrepareSession(prepareState.selectedSessionId):null;
     if(current)return current;
-    prepareState.selectedSessionId=sessions[0].id;
+    resetPrepareWorkspaceState(sessions[0].id);
     return sessions[0];
 }
 function getPrepareLinkedApp(session){
@@ -2870,8 +2872,12 @@ function summarizePrepareLookupPayload(payload){
     };
 }
 async function buildPrepareExternalResearchDigest(input,kind){
+    const prepareConfig=getPrepareConfig();
+    if((prepareConfig.model||'').includes('flash')&&kind!=='answer'){
+        return [];
+    }
     const allQueries=extractPrepareLookupQueries(input);
-    const queries=allQueries.slice(0,kind==='answer'?1:2);
+    const queries=allQueries.slice(0,1);
     const results=await Promise.allSettled(queries.map(async function(query){
         const raw=await runPrepareWebLookup({
             query,
@@ -3930,6 +3936,26 @@ function buildPrepareFallbackRenderSession(session){
         outputs:sanitizePrepareOutputs(buildPrepareOutputsFallback(session),session)
     });
 }
+function resetPrepareWorkspaceState(sessionId){
+    prepareState.selectedSessionId=sessionId||null;
+    prepareState.lastOpenedSessionId=sessionId||'';
+    prepareState.activeTab='research';
+    prepareState.questionPane='list';
+    prepareState.selectedQuestionId=null;
+    prepareState.selectedFramework='STAR';
+    prepareState.questionGroupLoadingKey='';
+    prepareState.answerLoading=false;
+    prepareState.answerError='';
+    prepareState.showSupplementModal=false;
+    prepareState.showJdPreview=false;
+    prepareState.showResumePreview=false;
+    prepareState.freeQuestionText='';
+}
+function renderPrepareWorkbenchFallback(session){
+    const fallbackSession=buildPrepareFallbackRenderSession(session);
+    resetPrepareWorkspaceState(session?.id||'');
+    return renderPrepareWorkbench(fallbackSession);
+}
 function renderPrepareTabByKey(activeTab,session){
     switch(activeTab){
         case 'focus':
@@ -4930,10 +4956,8 @@ async function createPrepareSessionFromApp(appId){
     if(!app)return null;
     const existing=store.prepareSessions.find(session=>session.source_type==='application'&&session.application_id===appId);
     if(existing){
-        prepareState.selectedSessionId=existing.id;
-        prepareState.activeTab='research';
+        resetPrepareWorkspaceState(existing.id);
         prepareState.screen='workspace';
-        prepareState.questionPane='list';
         return existing;
     }
     const draft=getPrepareApplicationDraft(app);
@@ -4990,11 +5014,7 @@ async function createPrepareSessionFromApp(appId){
         role_name:app.position_title||''
     });
     prepareState.screen='workspace';
-    prepareState.selectedSessionId=session.id;
-    prepareState.activeTab='research';
-    prepareState.selectedQuestionId=null;
-    prepareState.questionPane='list';
-    prepareState.selectedFramework='STAR';
+    resetPrepareWorkspaceState(session.id);
     prepareState.sessionLoading=true;
     prepareState.sessionError='';
     startPrepareLoading('session');
@@ -5082,11 +5102,7 @@ async function createManualPrepareSession(){
         role_name:roleName
     });
     prepareState.screen='workspace';
-    prepareState.selectedSessionId=session.id;
-    prepareState.activeTab='research';
-    prepareState.selectedQuestionId=null;
-    prepareState.questionPane='list';
-    prepareState.selectedFramework='STAR';
+    resetPrepareWorkspaceState(session.id);
     prepareState.sessionLoading=true;
     prepareState.sessionError='';
     prepareState.screen='workspace';
@@ -5144,9 +5160,9 @@ async function regeneratePrepareSession(sessionId){
     try{
         const outputs=await generatePrepareOutputs(session);
         await store.updatePrepareSession(session.id,{outputs,generated_at:new Date().toISOString(),status:'generated',error_message:''});
+        resetPrepareWorkspaceState(session.id);
         prepareState.sessionLoading=false;
         stopPrepareLoading();
-        prepareState.selectedQuestionId=null;
         renderPrepare();
         toast('已重新生成准备工作台','success');
     }catch(error){
@@ -6755,13 +6771,7 @@ function renderPrepareWorkbench(session){
                 tabContent=renderPrepareTabByKey(activeTab,buildPrepareFallbackRenderSession(session));
             }catch(fallbackError){
                 console.warn('prepare fallback tab render failed',fallbackError);
-                tabContent=`
-                    <div class="prepare-state-panel is-error">
-                        <div class="prepare-section-kicker">当前会话打开失败</div>
-                        <h3>这条准备会话还有一部分历史数据没有自动修好</h3>
-                        <p>先点右上角“重新生成”，我会用现有 JD、简历和补充经历把它重建成新版工作台。</p>
-                    </div>
-                `;
+                tabContent=renderPrepareResearch(buildPrepareFallbackRenderSession(session));
             }
         }
     }
@@ -6848,6 +6858,9 @@ function renderPrepare(){
         appDraft.requiresResume?'补一份简历上下文（绑定简历、临时文件或摘要）':null
     ].filter(Boolean):[];
     const showWorkspace=Boolean(selectedSession)&&prepareState.screen==='workspace';
+    if(showWorkspace&&selectedSession&&prepareState.lastOpenedSessionId!==selectedSession.id){
+        resetPrepareWorkspaceState(selectedSession.id);
+    }
     try{
     root.innerHTML=showWorkspace?`
         <div class="prepare-shell prepare-shell-workspace-view">
@@ -7023,21 +7036,41 @@ function renderPrepare(){
     `;
     }catch(error){
         console.warn('prepare root render failed',error);
-        root.innerHTML=`
-            <div class="prepare-shell prepare-shell-workspace-view">
-                <section class="prepare-workspace-screen">
-                    <div class="prepare-state-panel is-error">
-                        <div class="prepare-section-kicker">最近会话暂时打不开</div>
-                        <h3>这条准备会话的历史数据和当前页面版本不完全兼容</h3>
-                        <p>我已经加了兜底，但这次渲染仍然失败。你可以先点“新建分析”重新生成，旧会话不会被删除。</p>
-                        <ul class="prepare-bullet-list">
-                            <li>如果是旧会话，最稳的做法是点一次重新生成。</li>
-                            <li>如果你愿意，也可以把公司名和岗位名发我，我继续按这条数据排。</li>
-                        </ul>
+        if(showWorkspace&&selectedSession){
+            try{
+                root.innerHTML=`
+                    <div class="prepare-shell prepare-shell-workspace-view">
+                        <section class="prepare-workspace-screen">
+                            ${renderPrepareWorkbenchFallback(selectedSession)}
+                        </section>
                     </div>
-                </section>
-            </div>
-        `;
+                `;
+            }catch(fallbackError){
+                console.warn('prepare root fallback render failed',fallbackError);
+                root.innerHTML=`
+                    <div class="prepare-shell prepare-shell-workspace-view">
+                        <section class="prepare-workspace-screen">
+                            <div class="prepare-state-panel is-error">
+                                <div class="prepare-section-kicker">当前会话打开失败</div>
+                                <h3>这条准备会话还没有完全恢复</h3>
+                                <p>请直接点右上角“重新生成”，我会用现有 JD、简历和补充经历把它重建成新版工作台。</p>
+                            </div>
+                        </section>
+                    </div>
+                `;
+            }
+        }else{
+            root.innerHTML=`
+                <div class="prepare-shell prepare-shell-workspace-view">
+                    <section class="prepare-workspace-screen">
+                        <div class="prepare-state-panel is-error">
+                            <div class="prepare-section-kicker">准备页打开失败</div>
+                            <h3>请回到新建分析后再试一次</h3>
+                        </div>
+                    </section>
+                </div>
+            `;
+        }
     }
     syncPrepareLoadingTicker();
     $('#prepare-banner-upgrade')?.addEventListener('click',function(){
@@ -7120,15 +7153,8 @@ function renderPrepare(){
         },'生成中...');
     });
     $$('[data-prepare-session]').forEach(button=>button.addEventListener('click',function(){
-        prepareState.selectedSessionId=this.dataset.prepareSession;
+        resetPrepareWorkspaceState(this.dataset.prepareSession);
         prepareState.sessionError=store.getPrepareSession(this.dataset.prepareSession)?.error_message||'';
-        prepareState.activeTab='research';
-        prepareState.selectedQuestionId=null;
-        prepareState.questionPane='list';
-        prepareState.questionGroupLoadingKey='';
-        prepareState.showSupplementModal=false;
-        prepareState.showJdPreview=false;
-        prepareState.showResumePreview=false;
         prepareState.screen='workspace';
         renderPrepare();
     }));
@@ -7141,14 +7167,7 @@ function renderPrepare(){
     });
     $('#prepare-start-new')?.addEventListener('click',function(){
         prepareState.screen='compose';
-        prepareState.selectedSessionId=null;
-        prepareState.selectedQuestionId=null;
-        prepareState.questionPane='list';
-        prepareState.questionGroupLoadingKey='';
-        prepareState.activeTab='research';
-        prepareState.showResumePreview=false;
-        prepareState.showJdPreview=false;
-        prepareState.showSupplementModal=false;
+        resetPrepareWorkspaceState('');
         renderPrepare();
     });
     $('#prepare-open-resume-preview')?.addEventListener('click',function(){
