@@ -5463,9 +5463,10 @@ function getPrepareJdRequirementCatalog(session){
     return catalog.slice(0,10);
 }
 function analyzePrepareExperienceAgainstJd(item,session,concreteBullets){
+    const safeBullets=Array.isArray(concreteBullets)?concreteBullets:[];
     const requirements=getPrepareJdRequirementCatalog(session);
     const matches=[];
-    concreteBullets.slice(0,4).forEach(function(point){
+    safeBullets.slice(0,4).forEach(function(point){
         const bulletTags=getPrepareSemanticTags(point);
         const bulletAngles=getPrepareExperienceAnglesFromText(point,session);
         requirements.forEach(function(req){
@@ -5631,7 +5632,7 @@ function buildPrepareExperienceDisplayDetails(item,session){
     const concreteBullets=getPrepareConcreteExperienceBullets(item);
     const followupPrompts=getPrepareExperienceFollowupPrompts(item);
     const synthesized={
-        jd:buildPrepareExperienceJdBullets(concreteBullets,session),
+        jd:buildPrepareExperienceJdBullets(item,session,concreteBullets),
         expand:buildPrepareExperienceExpandBullets(item,session,concreteBullets,actionSummary),
         gap:[followupPrompts.length
             ?followupPrompts.slice(0,3).map(rewritePrepareFollowupPrompt).filter(Boolean)
