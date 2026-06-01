@@ -4268,6 +4268,18 @@ function isPrepareReverseQuestionGroup(group){
         return question.question_type==='reverse_question'||question.source==='reverse';
     });
 }
+function getPrepareQuestionSourceLabel(question){
+    return question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'反问环节':'来自岗位信息';
+}
+function shouldShowPrepareQuestionSource(group){
+    const labels=(Array.isArray(group?.questions)?group.questions:[]).map(function(item){
+        return getPrepareQuestionSourceLabel(normalizePrepareQuestionRecord(item));
+    }).filter(Boolean);
+    if(!labels.length)return false;
+    const unique=[...new Set(labels)];
+    if(unique.length===1&&(unique[0]==='来自岗位信息'||unique[0]==='来自 JD'))return false;
+    return true;
+}
 function arePrepareQuestionSetsEquivalent(currentQuestions,nextQuestions){
     const currentKeys=(Array.isArray(currentQuestions)?currentQuestions:[]).map(function(item){
         return normalizePrepareCompareKey(item?.question||'');
@@ -5291,11 +5303,14 @@ function buildPrepareExperienceSpecificExample(item,session,concreteBullets){
     const section=normalizePrepareText(item?.resume_section||'这段经历');
     const roleName=normalizePrepareText(session?.role_name||'这个岗位');
     const jdMatch=getPrepareExperienceSpecificJdMatch(item,session).join(' / ');
+    if(concreteBullets.length>=3){
+        return `可以直接讲：「我在 ${section} 这段经历里，做得最完整的一条链路是：先 ${concreteBullets[0]}，再 ${concreteBullets[1]}，最后用 ${concreteBullets[2]} 去验证这件事有没有真正跑通。对我来说，这段经历最能证明我能把 ${jdMatch||'岗位要求'} 从想法做到落地，这也是我为什么觉得自己适合 ${roleName}。」`;
+    }
     if(concreteBullets.length>=2){
-        return `可以直接讲：「在 ${section} 这段经历里，我先围绕 ${concreteBullets[0]} 去定义问题和方案，后面再通过 ${concreteBullets[1]} 去验证这件事有没有真正跑通。对我来说，这段经历最能证明我能把 ${jdMatch||'岗位要求'} 从想法做到落地，这也是我为什么觉得自己适合 ${roleName}。」`;
+        return `可以直接讲：「我在 ${section} 这段经历里，先 ${concreteBullets[0]}，后面再 ${concreteBullets[1]}。这段经历最能证明我不只是理解概念，而是真的能把 ${jdMatch||'岗位要求'} 做到落地，所以我会优先拿它来回答这类题。」`;
     }
     if(concreteBullets.length===1){
-        return `可以直接讲：「在 ${section} 这段经历里，我最核心的一步是 ${concreteBullets[0]}。我会把当时的问题、我的判断、推进动作和最后结果连起来讲清楚，再收回到 ${roleName} 看重的 ${jdMatch||'岗位能力'}。」`;
+        return `可以直接讲：「我在 ${section} 这段经历里，最值得讲的一步是 ${concreteBullets[0]}。如果把这一步讲清楚，再补上我当时怎么判断、怎么推进、结果如何，就足以证明我能对上 ${roleName} 看重的 ${jdMatch||'岗位能力'}。」`;
     }
     return `可以直接讲：「在 ${section} 这段经历里，我面对的核心问题是 [具体问题]，我先 [关键判断]，再 [关键动作]，最后带来了 [结果]。这段经历和 ${roleName} 看重的 ${jdMatch||'岗位能力'} 是直接对应的。」`;
 }
@@ -5322,14 +5337,14 @@ function buildPrepareExperienceDisplayDetails(item,session){
     const followupPrompts=getPrepareExperienceFollowupPrompts(item);
     const synthesized={
         jd:[concreteBullets.length
-            ?`这段经历别泛泛说“都匹配”。直接打这几张牌：${concreteBullets.slice(0,3).join('；')}。它们分别对应 JD 里的 ${focusLabel}。`
+            ?`这段经历最值得拿来对 JD 的，是这几件已经做出来的事：${concreteBullets.slice(0,3).join('；')}。它们分别能证明你在 ${focusLabel} 上不是空讲。`
             :`这段经历最适合对应 JD 里的 ${focusLabel}，尤其是你在「${section}」里做过的 ${actionSummary}。`],
         expand:[concreteBullets.length>=2
-            ?`展开顺序可以直接用这条线：先讲 ${concreteBullets[0]} 说明你怎么定义问题，再讲 ${concreteBullets[1]} 说明你怎么把方案做到落地${concreteBullets[2]?`，最后补 ${concreteBullets[2]} 说明结果怎么验证`:''}。`
+            ?`建议按这个顺序讲：先讲 ${concreteBullets[0]}，把问题和判断立住；再讲 ${concreteBullets[1]}，把你的动作和推进讲出来${concreteBullets[2]?`；最后补 ${concreteBullets[2]}，让结果收得住`:''}。`
             :`展开时别只报岗位名，直接按「在 ${section} 里，问题是什么、你怎么判断、你做了什么、结果如何」来讲，把 ${actionSummary} 串成一条线。`],
         gap:[followupPrompts.length
             ?followupPrompts.slice(0,3).map(function(point){
-                return /^如何|如果|是否|能否|为什么/.test(point)?`这块要提前准备：${point}`:point;
+                return /^如何|如果|是否|能否|为什么/.test(point)?`高概率会被追问：${point}`:point;
             })
             :[`这段还要补两类细节：一是你亲自负责到哪一步，二是结果有没有数字、反馈、采纳记录或效率变化来证明。`]],
         example:[buildPrepareExperienceSpecificExample(item,session,concreteBullets)]
@@ -5723,22 +5738,22 @@ function renderPrepareQuestionsList(session){
             ${!questions.length?'<div class="prepare-empty prepare-question-empty">先生成一套准备工作台，再查看模拟问题。</div>':''}
             ${questions.map(function(group,groupIndex){
                 const isReverseGroup=isPrepareReverseQuestionGroup(group);
+                const showSourceLabel=shouldShowPrepareQuestionSource(group);
                 return `
                     <section class="prepare-card-surface prepare-section-shell">
                         <div class="prepare-question-group-head">
                             <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
-                            <button type="button" class="prepare-question-group-refresh-btn" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个">${prepareState.questionGroupLoadingKey===String(groupIndex)?'⟳':'↻'}</button>
+                            ${isReverseGroup?'':`<button type="button" class="prepare-question-group-refresh-btn${prepareState.questionGroupLoadingKey===String(groupIndex)?' is-loading':''}" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个"><span aria-hidden="true">${prepareState.questionGroupLoadingKey===String(groupIndex)?'⟳':'↻'}</span></button>`}
                         </div>
-                        <div class="prepare-question-list">
+                        <div class="prepare-question-list${isReverseGroup?' is-static':''}">
                             ${group.questions.map(function(rawQuestion){
                                 const question=normalizePrepareQuestionRecord(rawQuestion);
-                                const sourceLabel=question.source==='jd'?'来自 JD':question.source==='resume'?'来自简历':question.source==='behavioral'?'来自行为面':question.source==='custom'?'来自自定义问题':question.source==='reverse'?'反问环节':'来自岗位信息';
+                                const sourceLabel=getPrepareQuestionSourceLabel(question);
                                 if(isReverseGroup){
                                     return `
                                         <div class="prepare-question-card prepare-question-card-static prepare-question-card-reverse" aria-label="${escapeHTML(question.question)}">
                                             <div class="prepare-question-main">
                                                 <strong>${escapeHTML(question.question)}</strong>
-                                                <span>${escapeHTML(sourceLabel)}</span>
                                             </div>
                                         </div>
                                     `;
@@ -5747,7 +5762,7 @@ function renderPrepareQuestionsList(session){
                                     <button class="prepare-question-card${prepareState.selectedQuestionId===question.id&&prepareState.questionPane==='answer'?' is-active':''}" type="button" data-prepare-question="${question.id}">
                                         <div class="prepare-question-main">
                                             <strong>${escapeHTML(question.question)}</strong>
-                                            <span>${escapeHTML(sourceLabel)}</span>
+                                            ${showSourceLabel?`<span>${escapeHTML(sourceLabel)}</span>`:''}
                                             ${question.question_type==='reverse_question'?'':`
                                                 <div class="prepare-question-frameworks">
                                                     ${question.recommended_frameworks.map(function(framework){
