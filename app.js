@@ -6708,13 +6708,24 @@ function renderPrepareWorkbench(session){
     `;
     if(renderSession.outputs){
         try{
-            tabContent={
-                research:renderPrepareResearch(renderSession),
-                focus:renderPrepareFocus(renderSession),
-                questions:renderPrepareQuestions(renderSession),
-                mock:renderPrepareMockInterview(renderSession),
-                supplement:renderPrepareSupplementHub(renderSession)
-            }[activeTab]||renderPrepareResearch(renderSession);
+            switch(activeTab){
+                case 'focus':
+                    tabContent=renderPrepareFocus(renderSession);
+                    break;
+                case 'questions':
+                    tabContent=renderPrepareQuestions(renderSession);
+                    break;
+                case 'mock':
+                    tabContent=renderPrepareMockInterview(renderSession);
+                    break;
+                case 'supplement':
+                    tabContent=renderPrepareSupplementHub(renderSession);
+                    break;
+                case 'research':
+                default:
+                    tabContent=renderPrepareResearch(renderSession);
+                    break;
+            }
         }catch(error){
             console.warn('prepare workbench tab render failed',error);
             tabContent=`
