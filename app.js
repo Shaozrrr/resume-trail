@@ -1485,6 +1485,7 @@ let kanbanSortDirection='desc';
 const prepareState={
     mode:'application',
     screen:'compose',
+    composeStep:'entry',
     selectedSessionId:null,
     lastOpenedSessionId:'',
     selectedApplicationId:'',
@@ -1545,7 +1546,8 @@ const prepareMockState={
     transcriptText:'',
     recorderTimer:null,
     recorderSeconds:0,
-    recognition:null
+    recognition:null,
+    showResumeGate:false
 };
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
@@ -1797,6 +1799,22 @@ function renderPrepareAccessBanner(account,options){
     const supportingText=membershipLabel==='月会员'
         ? '可续 30 天，或升级永久会员。'
         : '';
+    if(opts.compactPaid&&hasPaidAccess&&!noTrialLeft){
+        return `
+            <div class="prepare-access-banner is-compact">
+                <div class="prepare-access-banner-copy">
+                    <strong>${escapeHTML(membershipLabel)}</strong>
+                    <p>${escapeHTML(detailText)}${supportingText?` ${escapeHTML(supportingText)}`:''}</p>
+                </div>
+                <div class="prepare-access-banner-actions">
+                    <span class="prepare-access-badge">${escapeHTML(membershipLabel)}</span>
+                    ${membershipLabel==='lifetime'
+                        ? ''
+                        : `<button type="button" class="btn-secondary btn-sm" id="prepare-banner-upgrade">${escapeHTML(ctaText)}</button>`}
+                </div>
+            </div>
+        `;
+    }
     return `
         <div class="prepare-access-banner${noTrialLeft?' is-paywall':''}">
             <div class="prepare-access-banner-copy">
@@ -3964,8 +3982,6 @@ function renderPrepareTabByKey(activeTab,session){
             return renderPrepareQuestions(session);
         case 'mock':
             return renderPrepareMockInterview(session);
-        case 'supplement':
-            return renderPrepareSupplementHub(session);
         case 'research':
         default:
             return renderPrepareResearch(session);
@@ -6055,7 +6071,7 @@ function renderPrepareSupplementalExperienceCard(session,options){
                 </div>
                 <div class="prepare-supplement-capsule-actions">
                     <button type="button" class="btn-primary btn-sm" id="prepare-supplemental-add-global">添加经历</button>
-                    ${compact?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-supplement-tab-answer">打开经历库</button>':'<span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>'}
+                    ${compact?'<span class="prepare-supplement-hint">补完后重新生成，这条经历会被优先纳入。</span>':'<span class="prepare-supplement-hint">尽量写“动作 + 结果 + 证据”，别只写任务名。</span>'}
                 </div>
             </div>
             ${recentItems.length?`
@@ -6088,7 +6104,7 @@ function renderPrepareSupplementTrigger(session){
     const items=getPrepareSupplementalExperiences(session);
     return `
         <div class="prepare-answer-supplement-trigger">
-            <button type="button" class="btn-secondary btn-sm" id="prepare-open-supplement-modal">补充经历</button>
+            <button type="button" class="btn-secondary btn-sm" data-prepare-open-supplement="1">补充经历</button>
             <span>${items.length?`已存 ${items.length} 条，点开就能补到这道题里。`:'这道题想临时补一段经历，可以点这里再记进去。'}</span>
         </div>
     `;
@@ -6114,6 +6130,17 @@ function renderPrepareSupplementModal(session){
             </div>
         </div>
     `;
+}
+
+function hasPrepareMockProgress(session){
+    if(!session||prepareMockState.sessionId!==session.id)return false;
+    if(prepareMockState.stage==='summary')return true;
+    if(prepareMockState.stage==='interview'&&prepareMockState.questions.length)return true;
+    return prepareMockState.currentIndex>0
+        || !!normalizePrepareText(prepareMockState.currentAnswer)
+        || !!prepareMockState.currentFeedback
+        || !!prepareMockState.finalFeedback
+        || (Array.isArray(prepareMockState.history)&&prepareMockState.history.length>0);
 }
 
 function renderPrepareQuestionsList(session){
@@ -6429,6 +6456,9 @@ function buildPrepareMockInterviewQuestions(session){
     return buildPrepareGeneratedMockInterviewQuestions(session);
 }
 function resetPrepareMockInterviewState(session){
+    const rememberedQuestionMode=prepareMockState.questionMode||'generated';
+    const rememberedFeedbackMode=prepareMockState.feedbackMode||'per_question';
+    const rememberedCustomQuestions=prepareMockState.sessionId===session?.id?cloneData(prepareMockState.customQuestions||[]):[];
     prepareMockState.sessionId=session?.id||'';
     prepareMockState.questions=buildPrepareGeneratedMockInterviewQuestions(session);
     prepareMockState.currentIndex=0;
@@ -6440,13 +6470,14 @@ function resetPrepareMockInterviewState(session){
     prepareMockState.error='';
     prepareMockState.stage='setup';
     prepareMockState.finalFeedback=null;
-    prepareMockState.questionMode='generated';
-    prepareMockState.feedbackMode='per_question';
+    prepareMockState.questionMode=rememberedQuestionMode;
+    prepareMockState.feedbackMode=rememberedFeedbackMode;
     prepareMockState.customQuestionDraft='';
-    prepareMockState.customQuestions=[];
+    prepareMockState.customQuestions=rememberedCustomQuestions;
     prepareMockState.transcriptMode='text';
     prepareMockState.voiceActive=false;
     prepareMockState.transcriptText='';
+    prepareMockState.showResumeGate=false;
     prepareMockState.recorderSeconds=0;
     if(prepareMockState.recorderTimer){
         clearInterval(prepareMockState.recorderTimer);
@@ -6472,6 +6503,7 @@ function startPrepareMockInterview(session){
     prepareMockState.transcriptMode='text';
     prepareMockState.voiceActive=false;
     prepareMockState.transcriptText='';
+    prepareMockState.showResumeGate=false;
     prepareMockState.recorderSeconds=0;
     if(prepareMockState.recorderTimer){
         clearInterval(prepareMockState.recorderTimer);
@@ -6530,6 +6562,29 @@ function renderPrepareMockInterview(session){
     const feedback=prepareMockState.currentFeedback;
     const feedbackModeLabel=prepareMockState.feedbackMode==='end'?'全部结束再点评':'每题都点评';
     const questionModeLabel=prepareMockState.questionMode==='custom'?'自己出题':'生成题目';
+    if(prepareMockState.showResumeGate&&hasPrepareMockProgress(session)){
+        const progressText=prepareMockState.stage==='summary'
+            ? `上一轮已经完成，共 ${total||prepareMockState.questions.length||0} 题。`
+            : `你已经做到第 ${Math.min((prepareMockState.currentIndex||0)+1,total||prepareMockState.questions.length||1)} 题，共 ${total||prepareMockState.questions.length||0} 题。`;
+        return `
+            <div class="prepare-mock-workbench">
+                <section class="prepare-card-surface prepare-section-shell prepare-mock-resume-card">
+                    <div class="prepare-mock-header-copy">
+                        <div class="prepare-section-kicker">模拟面试</div>
+                        <h3>继续上次练习，或者开一轮新的模拟</h3>
+                        <p>${escapeHTML(companyLabel)} · ${escapeHTML(questionModeLabel)} · ${escapeHTML(feedbackModeLabel)}</p>
+                    </div>
+                    <div class="prepare-inline-notice">${escapeHTML(progressText)}</div>
+                    <div class="prepare-mock-actions">
+                        <button type="button" class="btn-primary" id="prepare-mock-resume">继续上次练习</button>
+                        <button type="button" class="btn-secondary" id="prepare-mock-new-round">开一轮新模拟</button>
+                        <button type="button" class="btn-secondary btn-sm" id="prepare-mock-open-setup">修改题目模式和点评方式</button>
+                    </div>
+                </section>
+                ${prepareMockState.stage==='summary'&&prepareMockState.finalFeedback?renderPrepareMockFeedbackCard(prepareMockState.finalFeedback):''}
+            </div>
+        `;
+    }
     if(prepareMockState.stage==='setup'){
         const canStart=prepareMockState.questionMode==='custom'?questions.length>0:generatedQuestions.length>0;
         return `
@@ -6805,7 +6860,8 @@ function renderPrepareWorkbench(session){
     const activeModel=modelOptions.find(option=>option.key===(generationMeta.model||prepareConfig.model))||modelOptions[0];
     const summaryText=generationMeta.summary||'围绕当前岗位整理一套背调、重点、问题与回答骨架。';
     const jdPreviewText=normalizePrepareText(session.jd_text||'');
-    const activeTab=prepareState.activeTab==='answers'?'questions':prepareState.activeTab;
+    const supplementCount=getPrepareSupplementalExperiences(session).length;
+    const activeTab=(prepareState.activeTab==='answers'||prepareState.activeTab==='supplement')?'questions':prepareState.activeTab;
     let tabContent=`
         <div class="prepare-state-panel${session.error_message?' is-error':''}">
             <div class="prepare-section-kicker">${session.error_message?'生成失败':'准备中'}</div>
@@ -6849,19 +6905,19 @@ function renderPrepareWorkbench(session){
                 <div class="prepare-workbench-actions">
                     ${resumePreview.text?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-resume-preview">查看简历正文</button>':''}
                     ${jdPreviewText?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-jd-preview">查看JD正文</button>':''}
+                    <button type="button" class="btn-secondary btn-sm" data-prepare-open-supplement="1">补充经历${supplementCount?` · ${supplementCount}`:''}</button>
                     <button type="button" class="btn-secondary btn-sm" id="prepare-regenerate">重新生成</button>
                     ${linkedApp?'<button type="button" class="btn-secondary btn-sm" id="prepare-open-app">查看投递</button>':''}
                 </div>
             </div>
             ${prepareState.sessionError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.sessionError)}</div>`:''}
-            ${renderPrepareAccessBanner(account,{showRegister:true})}
+            ${renderPrepareAccessBanner(account,{showRegister:true,compactPaid:true})}
             ${isAnswerMode?'':`
                 <div class="prepare-tabs">
                     <button type="button" class="prepare-tab${prepareState.activeTab==='research'?' is-active':''}" data-prepare-tab="research">背调</button>
                     <button type="button" class="prepare-tab${prepareState.activeTab==='focus'?' is-active':''}" data-prepare-tab="focus">重点</button>
                     <button type="button" class="prepare-tab${prepareState.activeTab==='questions'?' is-active':''}" data-prepare-tab="questions">问题</button>
                     <button type="button" class="prepare-tab${activeTab==='mock'?' is-active':''}" data-prepare-tab="mock">模拟面试</button>
-                    <button type="button" class="prepare-tab${activeTab==='supplement'?' is-active':''}" data-prepare-tab="supplement">补充经历</button>
                 </div>
             `}
             <div class="prepare-tab-panel${isAnswerMode?' is-answer-mode':''}">
@@ -6882,6 +6938,7 @@ function renderPrepare(){
     const appOptions=store.apps.filter(app=>app.status!=='WITHDRAWN');
     const prepareConfig=getPrepareConfig();
     const modelOptions=getPrepareModelOptions();
+    const composeStep=prepareState.composeStep||'entry';
     const selectedAppId=prepareState.selectedApplicationId||'';
     const selectedApp=selectedAppId?store.getApp(selectedAppId):null;
     const appDraft=selectedApp?getPrepareApplicationDraft(selectedApp):null;
@@ -6929,133 +6986,155 @@ function renderPrepare(){
             <section class="prepare-compose-screen">
                 <div class="prepare-compose-hero">
                     <div class="prepare-kicker">Prepare Session</div>
-                    <h2>先把岗位、JD 和简历上下文填完整，再一键切换到全屏分析结果。</h2>
-                    <p>这一页只负责输入与选择；点击分析后，我们会进入独立的结果工作台，不再左右挤压。</p>
+                    <h2>${composeStep==='entry'?'先选开始方式，再进入准备工作台':'把这次分析要用的 JD、简历和模型补完整'}</h2>
+                    <p>${composeStep==='entry'?'第一步先决定是从已有投递开始，还是单独新建一套准备；第二步再补材料并开始分析。':'这一页只保留本次分析真正要用的输入，填完后会直接切到独立工作台。'}</p>
                 </div>
-                ${renderPrepareAccessBanner(account,{showRegister:true})}
+                ${renderPrepareAccessBanner(account,{showRegister:true,compactPaid:true})}
                 <div class="prepare-compose-grid">
                     <div class="prepare-card-surface prepare-compose-primary">
-                        <div class="prepare-mode-switch" role="tablist">
-                            <button type="button" class="prepare-mode-btn${prepareState.mode==='application'?' is-active':''}" data-prepare-mode="application">选择已有投递</button>
-                            <button type="button" class="prepare-mode-btn${prepareState.mode==='manual'?' is-active':''}" data-prepare-mode="manual">新建准备</button>
-                        </div>
-                        <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='application'?' is-visible':''}" id="prepare-existing-panel">
-                            <div class="prepare-section-kicker">从已投递岗位开始</div>
-                            <h3>自动带入岗位与简历</h3>
-                            <p>适合已经录进系统的机会，选中后直接补齐缺的信息。</p>
-                            <div class="prepare-form-grid prepare-form-grid-wide">
-                                <label class="prepare-field prepare-field-full">
-                                    <span>选择岗位</span>
-                                    <select id="prepare-application-select">
-                                        <option value="">请选择一条投递…</option>
-                                        ${appOptions.map(app=>`<option value="${app.id}" ${selectedAppId===app.id?'selected':''}>${escapeHTML(app.company_name)} · ${escapeHTML(app.position_title)}</option>`).join('')}
-                                    </select>
-                                </label>
-                                ${selectedApp?`
-                                    <div class="prepare-application-summary prepare-field-full">
-                                        <div>
-                                            <strong>${escapeHTML(selectedApp.company_name)} · ${escapeHTML(selectedApp.position_title)}</strong>
-                                            <span>${escapeHTML(getSI(selectedApp.status).label)} · 当前简历：${escapeHTML(appDraft?.linkedResume?.file_name||'未绑定')} · ${escapeHTML(appLinkedResumeStatus)}</span>
+                        ${composeStep==='entry'?`
+                            <div class="prepare-entry-selector">
+                                <button type="button" class="prepare-entry-option" data-prepare-enter-mode="application" ${appOptions.length?'':'disabled'}>
+                                    <div class="prepare-section-kicker">从已有投递开始</div>
+                                    <h3>自动带入岗位与简历</h3>
+                                    <p>${appOptions.length?`已录入 ${appOptions.length} 条可用投递，适合直接接着准备。`:'当前还没有可用投递，先去看板或表格录一条岗位。'}</p>
+                                    <span>${appOptions.length?'选择岗位并继续':'暂无可用岗位'}</span>
+                                </button>
+                                <button type="button" class="prepare-entry-option" data-prepare-enter-mode="manual">
+                                    <div class="prepare-section-kicker">新建准备工作台</div>
+                                    <h3>单独为一个岗位拉起准备</h3>
+                                    <p>适合还没录入系统的机会，先补公司、岗位、JD 和简历上下文。</p>
+                                    <span>手动填写并继续</span>
+                                </button>
+                            </div>
+                        `:`
+                            <div class="prepare-entry-detail-head">
+                                <button type="button" class="btn-secondary btn-sm" id="prepare-compose-back-step">返回上一步</button>
+                                <div class="prepare-mode-switch" role="tablist">
+                                    <button type="button" class="prepare-mode-btn${prepareState.mode==='application'?' is-active':''}" data-prepare-mode="application">选择已有投递</button>
+                                    <button type="button" class="prepare-mode-btn${prepareState.mode==='manual'?' is-active':''}" data-prepare-mode="manual">新建准备</button>
+                                </div>
+                            </div>
+                            <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='application'?' is-visible':''}" id="prepare-existing-panel">
+                                <div class="prepare-section-kicker">从已投递岗位开始</div>
+                                <h3>选中岗位后，把缺的 JD 和简历上下文补齐</h3>
+                                <p>这一步只保留本次分析真正要用到的材料。</p>
+                                <div class="prepare-form-grid prepare-form-grid-wide">
+                                    <label class="prepare-field prepare-field-full">
+                                        <span>选择岗位</span>
+                                        <select id="prepare-application-select">
+                                            <option value="">请选择一条投递…</option>
+                                            ${appOptions.map(app=>`<option value="${app.id}" ${selectedAppId===app.id?'selected':''}>${escapeHTML(app.company_name)} · ${escapeHTML(app.position_title)}</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    ${selectedApp?`
+                                        <div class="prepare-application-summary prepare-field-full">
+                                            <div>
+                                                <strong>${escapeHTML(selectedApp.company_name)} · ${escapeHTML(selectedApp.position_title)}</strong>
+                                                <span>${escapeHTML(getSI(selectedApp.status).label)} · 当前简历：${escapeHTML(appDraft?.linkedResume?.file_name||'未绑定')} · ${escapeHTML(appLinkedResumeStatus)}</span>
+                                            </div>
+                                            <em>${hasPrepareUsableJd(appDraft?.jdText)?'JD 已就位':'需要补 JD'}</em>
                                         </div>
-                                        <em>${hasPrepareUsableJd(appDraft?.jdText)?'JD 已就位':'需要补 JD'}</em>
-                                    </div>
-                                    ${appDraft?.requiresJd?`
-                                        <label class="prepare-field prepare-field-full">
-                                            <span>JD 文本</span>
-                                            <textarea id="prepare-app-jd-text" rows="5" placeholder="请直接粘贴岗位 JD 原文。">${escapeHTML(prepareState.appSupplement.jdText||'')}</textarea>
-                                            <em>至少 ${PREP_MIN_JD_LENGTH} 个字，避免 AI 只靠公司名和岗位名猜。</em>
+                                        ${appDraft?.requiresJd?`
+                                            <label class="prepare-field prepare-field-full">
+                                                <span>JD 文本</span>
+                                                <textarea id="prepare-app-jd-text" rows="5" placeholder="请直接粘贴岗位 JD 原文。">${escapeHTML(prepareState.appSupplement.jdText||'')}</textarea>
+                                                <em>至少 ${PREP_MIN_JD_LENGTH} 个字，避免 AI 只靠公司名和岗位名猜。</em>
+                                            </label>
+                                        `:''}
+                                        <label class="prepare-field">
+                                            <span>选择已有简历</span>
+                                            <select id="prepare-app-resume-select">
+                                                <option value="">暂不绑定</option>
+                                                ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.appSupplement.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
+                                            </select>
                                         </label>
+                                        <label class="prepare-field prepare-upload-field">
+                                            <span>附简历文件</span>
+                                            <input type="file" id="prepare-app-file" accept=".pdf,.doc,.docx,.txt,.md">
+                                            <em id="prepare-app-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.appSupplementFile,prepareState.appSupplementParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
+                                        </label>
+                                        <label class="prepare-field prepare-field-full">
+                                            <span>简历摘要</span>
+                                            <textarea id="prepare-app-resume-text" rows="4" placeholder="补几段你最希望面试里被用到的经历、结果和项目线索。">${escapeHTML(prepareState.appSupplement.resumeText||'')}</textarea>
+                                        </label>
+                                        ${renderPrepareResumePreviewCard(appResumePreview,{
+                                            title:'当前会用于分析的简历内容',
+                                            hint:'上传 PDF / DOCX 后会优先展示解析出来的正文；如果只有摘要，这里也会明确告诉你。'
+                                        })}
+                                        ${missingMessages.length?`
+                                            <div class="prepare-inline-notice prepare-field-full">${escapeHTML(missingMessages.join('；'))}</div>
+                                        `:'<div class="prepare-inline-notice is-success prepare-field-full">JD 和简历上下文都已就位，可以直接进入分析结果。</div>'}
                                     `:''}
+                                </div>
+                                <div class="prepare-entry-actions">
+                                    <button type="button" class="btn-primary" id="prepare-create-from-app">开始分析</button>
+                                </div>
+                            </div>
+                            <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='manual'?' is-visible':''}" id="prepare-manual-panel">
+                                <div class="prepare-section-kicker">新建准备工作台</div>
+                                <h3>把这次分析要用到的岗位信息一次补完整</h3>
+                                <p>填完后会直接进入独立的结果工作台。</p>
+                                <div class="prepare-form-grid prepare-form-grid-wide">
                                     <label class="prepare-field">
-                                        <span>选择已有简历</span>
-                                        <select id="prepare-app-resume-select">
-                                            <option value="">暂不绑定</option>
-                                            ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.appSupplement.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
+                                        <span>公司名</span>
+                                        <input type="text" id="prepare-manual-company" placeholder="例如：字节跳动" value="${escapeHTML(prepareState.manualDraft.companyName||'')}">
+                                    </label>
+                                    <label class="prepare-field">
+                                        <span>岗位名</span>
+                                        <input type="text" id="prepare-manual-role" placeholder="例如：产品经理" value="${escapeHTML(prepareState.manualDraft.roleName||'')}">
+                                    </label>
+                                    <label class="prepare-field prepare-field-full">
+                                        <span>JD 文本</span>
+                                        <textarea id="prepare-manual-jd" rows="5" placeholder="把职位描述直接贴进来，越完整越好。">${escapeHTML(prepareState.manualDraft.jdText||'')}</textarea>
+                                    </label>
+                                    <label class="prepare-field">
+                                        <span>选择已有简历（可选）</span>
+                                        <select id="prepare-manual-resume">
+                                            <option value="">不绑定现有简历</option>
+                                            ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.manualDraft.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
                                         </select>
                                     </label>
                                     <label class="prepare-field prepare-upload-field">
-                                        <span>附简历文件</span>
-                                        <input type="file" id="prepare-app-file" accept=".pdf,.doc,.docx,.txt,.md">
-                                        <em id="prepare-app-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.appSupplementFile,prepareState.appSupplementParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
+                                        <span>附简历文件（可选）</span>
+                                        <input type="file" id="prepare-manual-file" accept=".pdf,.doc,.docx,.txt,.md">
+                                        <em id="prepare-manual-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.manualResumeFile,prepareState.manualResumeParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
                                     </label>
                                     <label class="prepare-field prepare-field-full">
-                                        <span>简历摘要</span>
-                                        <textarea id="prepare-app-resume-text" rows="4" placeholder="补几段你最希望面试里被用到的经历、结果和项目线索。">${escapeHTML(prepareState.appSupplement.resumeText||'')}</textarea>
+                                        <span>简历摘要（可选）</span>
+                                        <textarea id="prepare-manual-resume-text" rows="4" placeholder="把你最希望 AI 用到的经历、成果、项目线索贴进来。">${escapeHTML(prepareState.manualDraft.resumeText||'')}</textarea>
                                     </label>
-                                    ${renderPrepareResumePreviewCard(appResumePreview,{
+                                    ${renderPrepareResumePreviewCard(manualResumePreview,{
                                         title:'当前会用于分析的简历内容',
-                                        hint:'上传 PDF / DOCX 后会优先展示解析出来的正文；如果只有摘要，这里也会明确告诉你。'
+                                        hint:'这里会实时展示解析出的正文或你手动补的摘要，开始分析前先确认它读全了。'
                                     })}
-                                    ${missingMessages.length?`
-                                        <div class="prepare-inline-notice prepare-field-full">${escapeHTML(missingMessages.join('；'))}</div>
-                                    `:'<div class="prepare-inline-notice is-success prepare-field-full">JD 和简历上下文都已就位，可以直接进入分析结果。</div>'}
-                                `:''}
+                                </div>
+                                <div class="prepare-entry-actions">
+                                    <button type="button" class="btn-primary" id="prepare-create-manual">开始分析</button>
+                                </div>
                             </div>
-                            <div class="prepare-entry-actions">
-                                <button type="button" class="btn-primary" id="prepare-create-from-app">开始分析</button>
-                            </div>
-                        </div>
-                        <div class="prepare-entry-card prepare-entry-card-immersive${prepareState.mode==='manual'?' is-visible':''}" id="prepare-manual-panel">
-                            <div class="prepare-section-kicker">新建准备工作台</div>
-                            <h3>为还没录入系统的岗位单独拉起准备会话</h3>
-                            <p>把关键输入集中在一页里填完，再进入结果工作台。</p>
-                            <div class="prepare-form-grid prepare-form-grid-wide">
-                                <label class="prepare-field">
-                                    <span>公司名</span>
-                                    <input type="text" id="prepare-manual-company" placeholder="例如：字节跳动" value="${escapeHTML(prepareState.manualDraft.companyName||'')}">
-                                </label>
-                                <label class="prepare-field">
-                                    <span>岗位名</span>
-                                    <input type="text" id="prepare-manual-role" placeholder="例如：产品经理" value="${escapeHTML(prepareState.manualDraft.roleName||'')}">
-                                </label>
-                                <label class="prepare-field prepare-field-full">
-                                    <span>JD 文本</span>
-                                    <textarea id="prepare-manual-jd" rows="5" placeholder="把职位描述直接贴进来，越完整越好。">${escapeHTML(prepareState.manualDraft.jdText||'')}</textarea>
-                                </label>
-                                <label class="prepare-field">
-                                    <span>选择已有简历（可选）</span>
-                                    <select id="prepare-manual-resume">
-                                        <option value="">不绑定现有简历</option>
-                                        ${store.resumes.map(resume=>`<option value="${resume.id}" ${prepareState.manualDraft.resumeId===resume.id?'selected':''}>${escapeHTML(resume.file_name)}</option>`).join('')}
-                                    </select>
-                                </label>
-                                <label class="prepare-field prepare-upload-field">
-                                    <span>附简历文件（可选）</span>
-                                    <input type="file" id="prepare-manual-file" accept=".pdf,.doc,.docx,.txt,.md">
-                                    <em id="prepare-manual-file-meta">${escapeHTML(getPrepareResumeMetaText(prepareState.manualResumeFile,prepareState.manualResumeParse,'上传后会先读取正文，读不到不会开始分析。'))}</em>
-                                </label>
-                                <label class="prepare-field prepare-field-full">
-                                    <span>简历摘要（可选）</span>
-                                    <textarea id="prepare-manual-resume-text" rows="4" placeholder="把你最希望 AI 用到的经历、成果、项目线索贴进来。">${escapeHTML(prepareState.manualDraft.resumeText||'')}</textarea>
-                                </label>
-                                ${renderPrepareResumePreviewCard(manualResumePreview,{
-                                    title:'当前会用于分析的简历内容',
-                                    hint:'这里会实时展示解析出的正文或你手动补的摘要，开始分析前先确认它读全了。'
-                                })}
-                            </div>
-                            <div class="prepare-entry-actions">
-                                <button type="button" class="btn-primary" id="prepare-create-manual">开始分析</button>
-                            </div>
-                        </div>
+                        `}
                     </div>
                     <aside class="prepare-compose-side">
-                        <div class="prepare-card-surface prepare-config-card">
-                            <div class="prepare-config-compact">
-                                <div>
-                                    <div class="prepare-section-kicker">AI 模型</div>
-                                    <h3>先选这次想用的 DeepSeek 档位</h3>
-                                    <p>只保留模型切换，其他预览配置都隐藏在本机环境里。</p>
-                                </div>
-                                <div class="prepare-model-switch" role="tablist">
-                                    ${modelOptions.map(option=>`
-                                        <button type="button" class="prepare-model-btn${(prepareConfig.model||'deepseek-v4-pro')===option.key?' is-active':''}" data-prepare-model="${option.key}">
-                                            <strong>${escapeHTML(option.label)}</strong>
-                                            <span>${escapeHTML(option.desc)}</span>
-                                        </button>
-                                    `).join('')}
+                        ${composeStep==='details'?`
+                            <div class="prepare-card-surface prepare-config-card">
+                                <div class="prepare-config-compact">
+                                    <div>
+                                        <div class="prepare-section-kicker">AI 模型</div>
+                                        <h3>这次分析想用哪档模型</h3>
+                                        <p>模型切换放到第二步，先把路径和材料确定下来。</p>
+                                    </div>
+                                    <div class="prepare-model-switch" role="tablist">
+                                        ${modelOptions.map(option=>`
+                                            <button type="button" class="prepare-model-btn${(prepareConfig.model||'deepseek-v4-pro')===option.key?' is-active':''}" data-prepare-model="${option.key}">
+                                                <strong>${escapeHTML(option.label)}</strong>
+                                                <span>${escapeHTML(option.desc)}</span>
+                                            </button>
+                                        `).join('')}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        `:''}
                         <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
                             <div class="prepare-section-kicker">最近会话</div>
                             <div class="prepare-recent-list prepare-recent-list-compact">
@@ -7125,8 +7204,18 @@ function renderPrepare(){
     $('#prepare-banner-register')?.addEventListener('click',function(){
         if(typeof window.rtStartUpgradeRegistration==='function')window.rtStartUpgradeRegistration();
     });
+    $$('[data-prepare-enter-mode]').forEach(button=>button.addEventListener('click',function(){
+        prepareState.mode=this.dataset.prepareEnterMode||'application';
+        prepareState.composeStep='details';
+        renderPrepare();
+    }));
+    $('#prepare-compose-back-step')?.addEventListener('click',function(){
+        prepareState.composeStep='entry';
+        renderPrepare();
+    });
     $$('.prepare-mode-btn').forEach(button=>button.addEventListener('click',function(){
         prepareState.mode=this.dataset.prepareMode||'application';
+        prepareState.composeStep='details';
         renderPrepare();
     }));
     $$('[data-prepare-model]').forEach(button=>button.addEventListener('click',function(){
@@ -7206,6 +7295,7 @@ function renderPrepare(){
     }));
     $('#prepare-back-compose')?.addEventListener('click',function(){
         prepareState.screen='compose';
+        prepareState.composeStep='entry';
         prepareState.showResumePreview=false;
         prepareState.showJdPreview=false;
         prepareState.showSupplementModal=false;
@@ -7213,6 +7303,7 @@ function renderPrepare(){
     });
     $('#prepare-start-new')?.addEventListener('click',function(){
         prepareState.screen='compose';
+        prepareState.composeStep='entry';
         resetPrepareWorkspaceState('');
         renderPrepare();
     });
@@ -7247,22 +7338,21 @@ function renderPrepare(){
         }
     });
     $$('[data-prepare-tab]').forEach(button=>button.addEventListener('click',function(){
-        prepareState.activeTab=this.dataset.prepareTab||'research';
+        const nextTab=this.dataset.prepareTab||'research';
+        prepareState.activeTab=nextTab;
+        if(nextTab==='mock'){
+            const session=getPrepareSelectedSession();
+            if(session&&hasPrepareMockProgress(session))prepareMockState.showResumeGate=true;
+        }
         if(prepareState.activeTab==='questions')prepareState.questionPane='list';
         prepareState.showSupplementModal=false;
         prepareState.showJdPreview=false;
         renderPrepare();
     }));
-    $('#prepare-open-supplement-tab-answer')?.addEventListener('click',function(){
-        prepareState.activeTab='supplement';
-        prepareState.questionPane='list';
-        prepareState.showSupplementModal=false;
-        renderPrepare();
-    });
-    $('#prepare-open-supplement-modal')?.addEventListener('click',function(){
+    $$('[data-prepare-open-supplement]').forEach(button=>button.addEventListener('click',function(){
         prepareState.showSupplementModal=true;
         renderPrepare();
-    });
+    }));
     $('#prepare-supplement-close')?.addEventListener('click',function(){
         prepareState.showSupplementModal=false;
         renderPrepare();
@@ -7463,7 +7553,7 @@ function renderPrepare(){
         if(ok===false)return;
         prepareState.supplementalExperienceDraft='';
         renderPrepare();
-        toast('已加入经历库','success');
+        toast('已纳入本次生成','success');
     });
     $$('[data-prepare-supplement-remove]').forEach(button=>button.addEventListener('click',async function(){
         const session=getPrepareSelectedSession();
@@ -7479,6 +7569,19 @@ function renderPrepare(){
         const mockQuestion=getCurrentPrepareMockQuestion();
         const linkedApp=mockSession.application_id?store.getApp(mockSession.application_id):null;
         const resolvedAppId=linkedApp?.id||mockSession.application_id||null;
+        $('#prepare-mock-resume')?.addEventListener('click',function(){
+            prepareMockState.showResumeGate=false;
+            renderPrepare();
+        });
+        $('#prepare-mock-new-round')?.addEventListener('click',function(){
+            resetPrepareMockInterviewState(mockSession);
+            renderPrepare();
+        });
+        $('#prepare-mock-open-setup')?.addEventListener('click',function(){
+            prepareMockState.showResumeGate=false;
+            prepareMockState.stage='setup';
+            renderPrepare();
+        });
         $('#prepare-mock-restart')?.addEventListener('click',function(){
             if(prepareMockState.stage==='setup'){
                 resetPrepareMockInterviewState(mockSession);
@@ -7488,6 +7591,7 @@ function renderPrepare(){
             renderPrepare();
         });
         $('#prepare-mock-back-setup')?.addEventListener('click',function(){
+            prepareMockState.showResumeGate=false;
             prepareMockState.stage='setup';
             prepareMockState.currentIndex=0;
             prepareMockState.currentAnswer='';
