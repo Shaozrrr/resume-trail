@@ -5299,20 +5299,118 @@ function getPrepareExperienceSpecificJdMatch(item,session){
     }
     return matches.slice(0,4);
 }
-function buildPrepareExperienceSpecificExample(item,session,concreteBullets){
+function getPrepareExperienceAnglesFromText(text,session){
+    const normalized=normalizePrepareText(text).toLowerCase();
+    const angles=[];
+    const push=function(label,pattern){
+        if(angles.includes(label))return;
+        if(pattern.test(normalized))angles.push(label);
+    };
+    push('需求挖掘',/访谈|痛点|需求|洞察|问题定义|问卷|调研/);
+    push('PRD/方案撰写',/prd|方案|原型|文档|需求说明|改进文档/);
+    push('AI Skill/产品落地',/skill|agent|workflow|智能体|产品化|调用超/);
+    push('漏斗/指标验证',/漏斗|留存|转化|指标|埋点|提升\d+|回升/);
+    push('跨团队推进',/协同|推进|跨团队|产研|研发|设计|业务|对接/);
+    push('财务/风控理解',/财务|风控|报销|对账|入金|合规|异常交易/);
+    return angles.length?angles:getPrepareExperienceSpecificJdMatch({ why_match:text },session).slice(0,2);
+}
+function isPrepareExperienceTemplateLine(text){
+    const normalized=normalizePrepareText(text);
+    if(!normalized)return true;
+    return /这段经历最值得拿来对 JD 的|这段经历最适合对应 JD 里的|建议按这个顺序讲|展开时别只报岗位名|可以直接讲|先说这段经历对应 JD|按[“"'「]?[场情]景\s*\/\s*判断\s*\/\s*动作\s*\/\s*结果|别只报任务名|先亮一句结论|高概率会被追问/.test(normalized);
+}
+function buildPrepareExperienceJdBullets(concreteBullets,session){
+    const templates=[
+        function(point,angles){
+            return `${point}。这一句最适合拿来打 ${angles.join('、')}。`;
+        },
+        function(point,angles){
+            return `把 ${point} 讲透，面试官基本就能听到你在 ${angles.join('、')} 上不是纸上谈兵。`;
+        },
+        function(point,angles){
+            return `${point} 更像收尾证据，用来把 ${angles.join('、')} 这几项能力坐实。`;
+        }
+    ];
+    return concreteBullets.slice(0,3).map(function(point,index){
+        const angles=getPrepareExperienceAnglesFromText(point,session).slice(0,2);
+        const formatter=templates[Math.min(index,templates.length-1)];
+        return formatter(point,angles.length?angles:['岗位匹配点']);
+    });
+}
+function buildPrepareExperienceExpandBullets(item,session,concreteBullets,actionSummary){
     const section=normalizePrepareText(item?.resume_section||'这段经历');
-    const roleName=normalizePrepareText(session?.role_name||'这个岗位');
-    const jdMatch=getPrepareExperienceSpecificJdMatch(item,session).join(' / ');
     if(concreteBullets.length>=3){
-        return `可以直接讲：「我在 ${section} 这段经历里，做得最完整的一条链路是：先 ${concreteBullets[0]}，再 ${concreteBullets[1]}，最后用 ${concreteBullets[2]} 去验证这件事有没有真正跑通。对我来说，这段经历最能证明我能把 ${jdMatch||'岗位要求'} 从想法做到落地，这也是我为什么觉得自己适合 ${roleName}。」`;
+        return [
+            `开头直接抛 ${concreteBullets[0]}，先把当时看到的问题和你的判断立住。`,
+            `中段重点讲 ${concreteBullets[1]}，这里要把你怎么拆、怎么推进、和谁协同说具体。`,
+            `结尾用 ${concreteBullets[2]} 收住，顺手补上数字口径和你自己负责到哪一步。`
+        ];
     }
-    if(concreteBullets.length>=2){
-        return `可以直接讲：「我在 ${section} 这段经历里，先 ${concreteBullets[0]}，后面再 ${concreteBullets[1]}。这段经历最能证明我不只是理解概念，而是真的能把 ${jdMatch||'岗位要求'} 做到落地，所以我会优先拿它来回答这类题。」`;
+    if(concreteBullets.length===2){
+        return [
+            `先拿 ${concreteBullets[0]} 起手，把为什么要做这件事讲清楚。`,
+            `后面把 ${concreteBullets[1]} 讲成结果段，重点放在你的主动作和最终变化。`
+        ];
     }
     if(concreteBullets.length===1){
-        return `可以直接讲：「我在 ${section} 这段经历里，最值得讲的一步是 ${concreteBullets[0]}。如果把这一步讲清楚，再补上我当时怎么判断、怎么推进、结果如何，就足以证明我能对上 ${roleName} 看重的 ${jdMatch||'岗位能力'}。」`;
+        return [
+            `别平铺整段 ${section}，就围绕 ${concreteBullets[0]} 往下深挖。`,
+            `这道题最值钱的是把 ${actionSummary} 讲成一条完整链路：问题、判断、动作、结果。`
+        ];
     }
-    return `可以直接讲：「在 ${section} 这段经历里，我面对的核心问题是 [具体问题]，我先 [关键判断]，再 [关键动作]，最后带来了 [结果]。这段经历和 ${roleName} 看重的 ${jdMatch||'岗位能力'} 是直接对应的。」`;
+    return [
+        `别从岗位名和职责概述讲起，直接挑 ${section} 里最能说明 ${actionSummary} 的一件事。`,
+        '整段回答只保留一条主线：你怎么判断、怎么推进、最后拿到了什么结果。'
+    ];
+}
+function rewritePrepareFollowupPrompt(point){
+    const normalized=normalizePrepareText(point).replace(/[？?]+$/,'');
+    if(!normalized)return'';
+    if(/质量标准|可复用/.test(normalized)){
+        return '把 Skill 质量标准准备成 3 个维度再去答：效果准不准、运行稳不稳、换场景后哪些模块还能复用。';
+    }
+    if(/留存.*计算|指标变化|样本量|口径/.test(normalized)){
+        return '把留存提升的口径准备清楚：比较的是哪段时间、样本量多大、有没有同步看激活率或转化率。';
+    }
+    if(/迁移到财务场景|财务场景/.test(normalized)){
+        return '不要只说“可以迁移到财务场景”。至少准备一个报销审核、对账或风控预警版本，把输入、规则、输出讲完整。';
+    }
+    if(/量化体验优化|客诉率|体验优化效果/.test(normalized)){
+        return '把体验优化补成能量化的结果，比如关键步骤耗时、成功率、客诉率或人工介入率。';
+    }
+    if(/风控规则|平衡安全与用户体验/.test(normalized)){
+        return '把风控设计拆成两层：先拦什么风险，再用什么阈值和兜底流程把误伤控制住。';
+    }
+    if(/异常交易预警/.test(normalized)){
+        return '如果被问到异常交易预警，不要泛讲模型，直接说监控哪些信号、何时触发、触发后谁处理。';
+    }
+    if(/优先级|哪些方法/.test(normalized)){
+        return '把需求优先级的判断依据补出来，例如访谈频次、影响面、实现成本和上线后的验证指标。';
+    }
+    if(/上线后用户反馈|迭代了哪些功能/.test(normalized)){
+        return '最好准备一轮上线后的真实反馈，再补一条你因此改过什么功能，不然整段会像停在方案阶段。';
+    }
+    return normalized;
+}
+function resolvePrepareExperienceSection(preferred,fallback){
+    const cleaned=sanitizePrepareTextList(preferred,[],6).filter(function(point){
+        return !isPrepareExperienceTemplateLine(point);
+    });
+    return cleaned.length?cleaned:fallback;
+}
+function buildPrepareExperienceSpecificExample(item,session,concreteBullets){
+    const section=normalizePrepareText(item?.resume_section||'这段经历');
+    const jdMatch=getPrepareExperienceSpecificJdMatch(item,session).join(' / ');
+    if(concreteBullets.length>=3){
+        return `我会把 ${section} 讲成一条完整链路：先说 ${concreteBullets[0]}，让面试官先听懂问题和判断；中间重点放在 ${concreteBullets[1]}，把我真正做过的设计、推进和落地讲出来；最后用 ${concreteBullets[2]} 收尾，把 ${jdMatch||'岗位要求'} 这几项能力用结果压实。`;
+    }
+    if(concreteBullets.length>=2){
+        return `这段别讲成流水账。更好的讲法是先把 ${concreteBullets[0]} 抛出来，再接 ${concreteBullets[1]}，这样需求判断和落地结果都会自然带出，也更容易对上 ${jdMatch||'岗位要求'}。`;
+    }
+    if(concreteBullets.length===1){
+        return `这段最该抓住的是 ${concreteBullets[0]}。只要把这一步背后的判断、推进动作和结果讲清楚，已经足够撑起一段有说服力的回答。`;
+    }
+    return `把 ${section} 里最能说明你的那件事挑出来，照着“问题为什么成立 -> 你怎么判断 -> 你做了什么 -> 最后结果怎样”这一条线去讲。`;
 }
 function inferPrepareExperienceActionSummary(item,session){
     const source=[item?.resume_section,item?.why_match].concat(item?.highlight_points||[]).join(' ');
@@ -5328,33 +5426,30 @@ function inferPrepareExperienceActionSummary(item,session){
 }
 function buildPrepareExperienceDisplayDetails(item,session){
     const details=breakdownPrepareExperienceHighlights(item?.highlight_points||[]);
-    const specificMatches=getPrepareExperienceSpecificJdMatch(item,session);
-    const focusLabel=getPrepareJdFocusLabel(specificMatches,session?.role_name||'岗位要求');
-    const section=normalizePrepareText(item?.resume_section||'这段经历');
     const actionSummary=inferPrepareExperienceActionSummary(item,session);
-    const roleName=normalizePrepareText(session?.role_name||'这个岗位');
     const concreteBullets=getPrepareConcreteExperienceBullets(item);
     const followupPrompts=getPrepareExperienceFollowupPrompts(item);
     const synthesized={
-        jd:[concreteBullets.length
-            ?`这段经历最值得拿来对 JD 的，是这几件已经做出来的事：${concreteBullets.slice(0,3).join('；')}。它们分别能证明你在 ${focusLabel} 上不是空讲。`
-            :`这段经历最适合对应 JD 里的 ${focusLabel}，尤其是你在「${section}」里做过的 ${actionSummary}。`],
-        expand:[concreteBullets.length>=2
-            ?`建议按这个顺序讲：先讲 ${concreteBullets[0]}，把问题和判断立住；再讲 ${concreteBullets[1]}，把你的动作和推进讲出来${concreteBullets[2]?`；最后补 ${concreteBullets[2]}，让结果收得住`:''}。`
-            :`展开时别只报岗位名，直接按「在 ${section} 里，问题是什么、你怎么判断、你做了什么、结果如何」来讲，把 ${actionSummary} 串成一条线。`],
+        jd:buildPrepareExperienceJdBullets(concreteBullets,session),
+        expand:buildPrepareExperienceExpandBullets(item,session,concreteBullets,actionSummary),
         gap:[followupPrompts.length
-            ?followupPrompts.slice(0,3).map(function(point){
-                return /^如何|如果|是否|能否|为什么/.test(point)?`高概率会被追问：${point}`:point;
-            })
-            :[`这段还要补两类细节：一是你亲自负责到哪一步，二是结果有没有数字、反馈、采纳记录或效率变化来证明。`]],
+            ?followupPrompts.slice(0,3).map(rewritePrepareFollowupPrompt).filter(Boolean)
+            :[
+                '先把你亲自负责到哪一步说死，不要把团队共同完成的结果全算在自己头上。',
+                '结果别只留一句“效果不错”，至少准备一个数字、一个反馈来源和一个你当时的判断依据。'
+            ]],
         example:[buildPrepareExperienceSpecificExample(item,session,concreteBullets)]
     };
+    const dedupedExtra=(details.extra||[]).filter(function(point){
+        const normalized=normalizePrepareText(point);
+        return normalized&&!concreteBullets.includes(normalized)&&!isPrepareExperienceTemplateLine(normalized);
+    });
     return{
-        jd:details.jd.length?details.jd:synthesized.jd,
-        expand:details.expand.length?details.expand:synthesized.expand,
-        gap:details.gap.length?details.gap:synthesized.gap,
-        example:details.example.length?details.example:synthesized.example,
-        extra:details.extra
+        jd:resolvePrepareExperienceSection(details.jd,synthesized.jd),
+        expand:resolvePrepareExperienceSection(details.expand,synthesized.expand),
+        gap:resolvePrepareExperienceSection(details.gap,synthesized.gap),
+        example:resolvePrepareExperienceSection(details.example,synthesized.example),
+        extra:dedupedExtra
     };
 }
 
@@ -5408,7 +5503,7 @@ function renderPrepareFocus(session){
                                                 ${renderPrepareExperienceDetailBlock('对应 JD',details.jd,[])}
                                                 ${renderPrepareExperienceDetailBlock('怎么展开',details.expand,[])}
                                                 ${renderPrepareExperienceDetailBlock('还要补清楚',details.gap,[])}
-                                                ${renderPrepareExperienceDetailBlock('可以直接开讲',details.example,[])}
+                                                ${renderPrepareExperienceDetailBlock('开口版本',details.example,[])}
                                                 ${details.extra.length?renderPrepareExperienceDetailBlock('还能再补',details.extra,[]):''}
                                             </div>
                                             ${item.possible_followups?.length?`
