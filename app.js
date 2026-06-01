@@ -6263,11 +6263,6 @@ function renderPrepareAnswers(session){
     if(!questionMeta){
         return `
             <div class="prepare-answer-page">
-                ${renderPrepareAnswerPageLead({
-                    tag:'回答页',
-                    title:'先选一道题，再进入回答页',
-                    description:'点开问题后，这里会切成独立回答页，不会把答案塞回题目列表底部。'
-                })}
                 <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
@@ -6338,11 +6333,6 @@ function renderPrepareAnswers(session){
     if(!answer){
         return `
             <div class="prepare-answer-page">
-                ${renderPrepareAnswerPageLead({
-                    tag:questionSource||'问题回答',
-                    title:'回答页',
-                    description:'这里是这道题的独立回答页。先选模板或重新生成，再继续补经历和改答案。'
-                })}
                 <div class="prepare-answer-flow">
                 ${answerMeta}
                 <section class="prepare-card-surface prepare-answer-surface">
@@ -6355,11 +6345,6 @@ function renderPrepareAnswers(session){
     }
     return `
         <div class="prepare-answer-page">
-            ${renderPrepareAnswerPageLead({
-                tag:questionSource||'问题回答',
-                title:'回答页',
-                description:'题目列表已经收起，现在只保留这道题的回答、模板切换和你补充的经历素材。'
-            })}
             <div class="prepare-answer-flow">
             ${answerMeta}
             <section class="prepare-card-surface prepare-answer-surface">
