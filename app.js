@@ -6189,11 +6189,6 @@ function renderPrepareAnswers(session){
         const answer=rawAnswer?normalizePrepareAnswerOutput(rawAnswer,session,freeQuestionMeta,'FREE'):rawAnswer;
         return `
             <div class="prepare-answer-page">
-                ${renderPrepareAnswerPageLead({
-                    tag:'自定义问题',
-                    title:'自由回答页',
-                    description:'这里不再显示问题列表，只保留你的问题、回答骨架和可补充的经历素材。'
-                })}
                 <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
@@ -6228,11 +6223,6 @@ function renderPrepareAnswers(session){
         const reverseQuestions=getPrepareReverseQuestions(session);
         return `
             <div class="prepare-answer-page">
-                ${renderPrepareAnswerPageLead({
-                    tag:'反问环节',
-                    title:'反问环节',
-                    description:'这里只列你可以直接问面试官的问题，不做回答解析。'
-                })}
                 <div class="prepare-answer-flow">
                 <section class="prepare-card-surface prepare-answer-hero-card">
                     <div class="prepare-answer-hero-copy">
@@ -6316,11 +6306,6 @@ function renderPrepareAnswers(session){
     if(prepareState.answerLoading&&!answer){
         return `
             <div class="prepare-answer-page">
-                ${renderPrepareAnswerPageLead({
-                    tag:questionSource||'问题回答',
-                    title:'回答页',
-                    description:'这道题已经切到独立回答页，正在生成对应的回答骨架。'
-                })}
                 <div class="prepare-answer-flow">
                 ${answerMeta}
                 <section class="prepare-card-surface prepare-answer-surface prepare-loading-panel">
