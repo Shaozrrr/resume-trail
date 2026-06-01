@@ -6113,7 +6113,7 @@ function renderPrepareQuestionsList(session){
                     <section class="prepare-card-surface prepare-section-shell">
                         <div class="prepare-question-group-head">
                             <div class="prepare-section-kicker">${escapeHTML(group.group_name)}</div>
-                            ${isReverseGroup?'':`<button type="button" class="prepare-question-group-refresh-btn${prepareState.questionGroupLoadingKey===String(groupIndex)?' is-loading':''}" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个"><svg class="prepare-refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg></button>`}
+                            <button type="button" class="prepare-question-group-refresh-btn${prepareState.questionGroupLoadingKey===String(groupIndex)?' is-loading':''}" data-prepare-question-group="${groupIndex}" ${prepareState.questionGroupLoadingKey===String(groupIndex)?'disabled':''} aria-label="重新生成 3 个" title="重新生成 3 个"><svg class="prepare-refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg></button>
                         </div>
                         <div class="prepare-question-list${isReverseGroup?' is-static':''}">
                             ${group.questions.map(function(rawQuestion){
