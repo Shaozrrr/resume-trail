@@ -3846,6 +3846,8 @@ function getPrepareApplicationDraft(app){
 function getPrepareSessionPayload(session){
     const linkedResume=getPrepareLinkedResume(session);
     const supplementalExperiences=getPrepareSupplementalExperiences(session);
+    const supplementalSummary=getPrepareSupplementalExperienceSummary(session);
+    const mergedResumeText=mergePrepareResumeTexts(session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'',supplementalSummary);
     return{
         company_name:session.company_name||'',
         role_name:session.role_name||'',
@@ -3853,12 +3855,12 @@ function getPrepareSessionPayload(session){
         jd_text:session.jd_text||'',
         jd_url:session.jd_url||'',
         resume_name:linkedResume?.file_name||session.resume_name||'',
-        resume_text:session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'',
+        resume_text:mergedResumeText,
         resume_file_meta:session.resume_file_meta||null,
         resume_source:session.resume_source||'',
         resume_verified:!!session.resume_verified,
         supplemental_experiences:supplementalExperiences,
-        supplemental_experience_summary:getPrepareSupplementalExperienceSummary(session)
+        supplemental_experience_summary:supplementalSummary
     };
 }
 function normalizePrepareSupplementalExperience(item){
@@ -3908,7 +3910,10 @@ async function removePrepareSupplementalExperience(sessionId,experienceId){
 }
 function getPrepareResumeSnapshot(session){
     const linkedResume=getPrepareLinkedResume(session);
-    const rawText=normalizePrepareText(session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'');
+    const rawText=normalizePrepareText(mergePrepareResumeTexts(
+        session.resume_text||linkedResume?.extracted_text||linkedResume?.notes||'',
+        getPrepareSupplementalExperienceSummary(session)
+    ));
     const tags=(linkedResume?.tags||[]).map(item=>normalizePrepareText(item)).filter(Boolean);
     const fragments=rawText.split(/[\n。；;]+/).map(item=>normalizePrepareText(item)).filter(Boolean);
     const metricEvidence=fragments.filter(item=>/\d/.test(item)).slice(0,6);
@@ -5300,6 +5305,18 @@ function renderPrepareFocus(session){
 function renderPrepareQuestions(session){
     return renderPrepareAnswers(session);
 }
+async function replacePrepareAnswerCache(sessionId,cacheKey,framework,nextAnswer){
+    const current=store.getPrepareSession(sessionId);
+    if(!current?.outputs)return false;
+    const answerCache=cloneData(current.outputs.answer_cache||{});
+    answerCache[cacheKey]=Object.assign({},answerCache[cacheKey]||{},{
+        [framework]:nextAnswer
+    });
+    await store.updatePrepareSession(sessionId,{
+        outputs:Object.assign({},current.outputs,{answer_cache:answerCache})
+    });
+    return true;
+}
 async function ensurePrepareAnswer(sessionId,questionId,framework){
     const session=store.getPrepareSession(sessionId);
     if(!session||!session.outputs)return;
@@ -5329,6 +5346,29 @@ async function ensurePrepareAnswer(sessionId,questionId,framework){
         prepareState.answerLoading=false;
         stopPrepareLoading();
         renderPrepare();
+    }catch(error){
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        prepareState.answerError=error instanceof Error?error.message:String(error);
+        renderPrepare();
+        toast(prepareState.answerError,'error');
+    }
+}
+async function regeneratePrepareAnswer(sessionId,question,framework){
+    const session=store.getPrepareSession(sessionId);
+    if(!session||!session.outputs||!question)return;
+    framework=frameworkMetaFromSelection(framework,question.recommended_frameworks);
+    prepareState.answerLoading=true;
+    prepareState.answerError='';
+    startPrepareLoading('answer');
+    renderPrepare();
+    try{
+        const nextAnswer=normalizePrepareAnswerOutput(Object.assign({},await requestPrepareAnswerAI(session,question,framework),{source:'ai'}),session,question,framework);
+        await replacePrepareAnswerCache(sessionId,question.id,framework,nextAnswer);
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        renderPrepare();
+        toast('已重新生成回答','success');
     }catch(error){
         prepareState.answerLoading=false;
         stopPrepareLoading();
@@ -5372,6 +5412,40 @@ async function ensurePrepareFreeAnswer(sessionId){
         prepareState.answerLoading=false;
         stopPrepareLoading();
         renderPrepare();
+    }catch(error){
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        prepareState.answerError=error instanceof Error?error.message:String(error);
+        renderPrepare();
+        toast(prepareState.answerError,'error');
+    }
+}
+async function regeneratePrepareFreeAnswer(sessionId){
+    const session=store.getPrepareSession(sessionId);
+    const questionText=normalizePrepareText(prepareState.freeQuestionText);
+    if(!session||!session.outputs)return;
+    if(!questionText){
+        toast('先输入你想追问的问题。','error');
+        return;
+    }
+    const cacheKey=getPrepareFreeQuestionKey(questionText);
+    const question={
+        id:cacheKey,
+        question:questionText,
+        question_type:'free',
+        source:'custom'
+    };
+    prepareState.answerLoading=true;
+    prepareState.answerError='';
+    startPrepareLoading('answer');
+    renderPrepare();
+    try{
+        const nextAnswer=normalizePrepareAnswerOutput(Object.assign({},await requestPrepareAnswerAI(session,question,'FREE'),{source:'ai'}),session,question,'FREE');
+        await replacePrepareAnswerCache(sessionId,cacheKey,'FREE',nextAnswer);
+        prepareState.answerLoading=false;
+        stopPrepareLoading();
+        renderPrepare();
+        toast('已重新生成回答','success');
     }catch(error){
         prepareState.answerLoading=false;
         stopPrepareLoading();
@@ -5632,6 +5706,7 @@ function renderPrepareAnswers(session){
                         </label>
                         <div class="prepare-entry-actions prepare-answer-actions">
                             <button type="button" class="btn-primary" id="prepare-generate-free-answer">生成自由回答</button>
+                            <button type="button" class="btn-secondary" id="prepare-regenerate-free-answer">重新生成回答</button>
                         </div>
                         ${renderPrepareSupplementTrigger(session)}
                     </div>
@@ -5743,6 +5818,9 @@ function renderPrepareAnswers(session){
                     <h3>${escapeHTML(frameworkMeta.label)}</h3>
                     <p>${escapeHTML(frameworkMeta.description)}</p>
                     <span>${escapeHTML(frameworkMeta.useCase||'')}</span>
+                </div>
+                <div class="prepare-entry-actions prepare-answer-actions">
+                    <button type="button" class="btn-secondary" id="prepare-regenerate-answer">重新生成回答</button>
                 </div>
                 <div class="prepare-framework-switch" role="tablist">${frameworkPills}</div>
                         ${renderPrepareSupplementTrigger(session)}
@@ -6216,7 +6294,7 @@ function renderPrepareWorkbench(session){
     const resumeStatus=getPrepareResumeStatus(session);
     const resumePreview=getPrepareResumePreviewData({
         linkedText:linkedResume?.extracted_text,
-        summaryText:session.resume_text
+        summaryText:mergePrepareResumeTexts(session.resume_text,getPrepareSupplementalExperienceSummary(session))
     });
     const generatedAt=session.generated_at?fmtDT(session.generated_at):'刚刚生成';
     const generationMeta=renderSession.outputs?.meta||{};
@@ -6781,6 +6859,18 @@ function renderPrepare(){
     $('#prepare-generate-free-answer')?.addEventListener('click',function(){
         const session=getPrepareSelectedSession();
         if(session)withButtonBusy(this,async()=>{await ensurePrepareFreeAnswer(session.id);},'生成中...');
+    });
+    $('#prepare-regenerate-free-answer')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        if(session)withButtonBusy(this,async()=>{await regeneratePrepareFreeAnswer(session.id);},'生成中...');
+    });
+    $('#prepare-regenerate-answer')?.addEventListener('click',function(){
+        const session=getPrepareSelectedSession();
+        const questionId=prepareState.selectedQuestionId;
+        if(!session||!questionId)return;
+        const question=getPrepareAllQuestions(session).find(item=>item.id===questionId);
+        if(!question)return;
+        withButtonBusy(this,async()=>{await regeneratePrepareAnswer(session.id,question,prepareState.selectedFramework||getPrepareQuestionDefaultFramework(question));},'生成中...');
     });
     $('#prepare-answer-back')?.addEventListener('click',function(){
         prepareState.questionPane='list';
