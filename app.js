@@ -3884,11 +3884,7 @@ function sanitizePrepareFocus(output,session){
     }).filter(function(item){
         return item.title&&item.description&&item.avoidance_tip;
     });
-    const synthesizedPriorities=synthesizePreparePriorities(session||{},bestExperiences,riskWarnings);
-    const specificPriorityCount=rawPrepPriorities.filter(function(item){
-        return hasPrepareSpecificPriorityReference(item,bestExperiences,session);
-    }).length;
-    const prepPriorities=(specificPriorityCount>=2?rawPrepPriorities:synthesizedPriorities).slice(0,3);
+    const prepPriorities=rawPrepPriorities.slice(0,3);
     return{
         prep_priorities:prepPriorities,
         best_experiences:bestExperiences.slice(0,3),
@@ -4238,7 +4234,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 不能只写缺口，至少 2 条要明确写“先打哪段已有经历”、这段对应 JD 哪个要求、以及面试时该怎么讲；17）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 应该围绕 JD 最看重的职责、能力、业务理解和高频追问来写，不要和 best_experiences 重复去讲具体哪段经历；17）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -4782,17 +4778,17 @@ function buildPrepareOutputsFallback(session){
     };
     const prepPriorities=[
         {title:'先把岗位讲明白',reason:`这类 ${roleName} 面试通常先判断你是否真的理解岗位价值。`,what_to_prepare:['准备一段 60 秒岗位理解','说明岗位服务的业务目标','讲清最关键的 2 到 3 个能力']},
-        {title:'把最强经历提前选好',reason:'真正拉开差距的不是经历数量，而是你最先讲出的那段是否准确命中岗位。',what_to_prepare:['挑 2 到 3 段最相关经历','每段都补上目标、动作、结果','避免只说过程不说结果']},
+        {title:'把 JD 关键词翻译成真实工作',reason:'很多面试看起来在问概念，实际上是在确认你是否理解岗位每天到底在做什么。',what_to_prepare:['把 JD 里的关键词翻成具体工作动作','准备每个关键词对应的业务场景','避免只背术语不解释业务含义']},
         {title:'提前准备追问',reason:'面试深挖往往发生在你讲完案例之后。',what_to_prepare:['准备为什么这么做','准备有没有别的方案','准备结果如何衡量']}
     ];
     if(isProductRole){
         prepPriorities.unshift({
-            title:'把 JD 关键词串成一条经历链',
-            reason:`这份岗位更看重你能不能把 ${jdAngles.length?jdAngles.join('、'):'需求挖掘、方案表达、结果验证'} 讲成一条完整链，而不是只说自己参与过。`,
+            title:'把 JD 关键词串成一条工作链',
+            reason:`这份岗位更看重你能不能把 ${jdAngles.length?jdAngles.join('、'):'需求挖掘、方案表达、结果验证'} 讲成一条完整工作链，而不是只停在名词层面。`,
             what_to_prepare:[
-                `准备一段最接近的经历，按“问题是什么、你怎么判断、你做了什么、结果如何”重写`,
-                `如果缺少直接经历，先补一页最小 PRD / 需求说明 + 一个可验证结果`,
-                '准备面试官追问时能拿出的证据：数据、文档、截图、反馈'
+                '先说明这类岗位通常从哪里拿需求、怎么判断优先级、最后如何验证结果',
+                `把 ${jdAngles[0]||'需求挖掘'} 到 ${jdAngles[jdAngles.length-1]||'结果验证'} 这条链讲顺，不要只讲其中一个点`,
+                '提前准备指标口径、方案取舍和业务影响，方便面试官往下追问'
             ]
         });
     }
