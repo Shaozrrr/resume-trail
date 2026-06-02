@@ -706,6 +706,7 @@ function onSuccess(result,meta){
     var guestWasActive=!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled());
     if(guestWasActive&&typeof window.rtMarkGuestMigrationPending==='function')window.rtMarkGuestMigrationPending({reason:'signup_or_login'});
     if(window.rtGuestStore)window.rtGuestStore.disable();
+    if(typeof window.rtResetGuestIdentityId==='function')window.rtResetGuestIdentityId();
     clearLocalBusinessData();
     if(result&&result.user&&result.user.email){
         var emailNick=getDefaultNicknameFromEmail(result.user.email);
@@ -805,6 +806,7 @@ var guestBtn=document.getElementById('login-guest');
 if(guestBtn)guestBtn.addEventListener('click',function(){
     hideMsg();
     resetVerifyStep();
+    if(typeof window.rtResetGuestIdentityId==='function')window.rtResetGuestIdentityId();
     enterGuestMode();
 });
 
@@ -1326,6 +1328,7 @@ if(profileLogout)profileLogout.addEventListener('click',async function(){
     if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_logged_out',{entry:'profile_modal'});
     if(rtSession&&rtSession.access_token)await sb.signOut(rtSession.access_token);
     sb.clearSession('auth.logout');
+    if(typeof window.rtResetGuestIdentityId==='function')window.rtResetGuestIdentityId();
     if(window.rtAnalytics&&typeof window.rtAnalytics.reset==='function')window.rtAnalytics.reset();
     clearLocalBusinessData();
     location.reload();

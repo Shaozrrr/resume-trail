@@ -144,6 +144,11 @@ function getGuestIdentityId(){
         return createLocalId('guest');
     }
 }
+function resetGuestIdentityId(){
+    try{
+        localStorage.removeItem(RT_GUEST_IDENTITY_KEY);
+    }catch(err){}
+}
 
 function readCachedAccount(){
     try{
@@ -193,6 +198,7 @@ function clearGuestMigrationPending(){
 }
 
 window.rtGetGuestIdentityId=getGuestIdentityId;
+window.rtResetGuestIdentityId=resetGuestIdentityId;
 window.rtReadCachedAccount=readCachedAccount;
 window.rtWriteCachedAccount=writeCachedAccount;
 window.rtMarkGuestMigrationPending=markGuestMigrationPending;

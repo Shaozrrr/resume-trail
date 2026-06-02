@@ -688,8 +688,31 @@ const rtAccountService={
     return sb.getAccessToken()||SUPABASE_KEY;
   },
 
+  accountMatchesCurrentIdentity(account){
+    if(!account||typeof account!=='object')return false;
+    const session=sb.getSession();
+    const authUserId=session&&session.user&&session.user.id||'';
+    if(authUserId){
+      return !!account.auth_user_id&&account.auth_user_id===authUserId;
+    }
+    const guestMode=!!(typeof window!=='undefined'&&window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled());
+    if(guestMode){
+      const guestId=this.getGuestId();
+      return !!guestId
+        && account.guest_id===guestId
+        && !account.auth_user_id
+        && String(account.auth_mode||'guest')==='guest';
+    }
+    return false;
+  },
+
   getCachedAccount(){
-    return this.currentAccount||rtReadCachedAccountSafe();
+    const candidate=this.currentAccount||rtReadCachedAccountSafe();
+    if(!candidate)return null;
+    if(this.accountMatchesCurrentIdentity(candidate))return candidate;
+    this.currentAccount=null;
+    rtWriteCachedAccountSafe(null);
+    return null;
   },
 
   setCachedAccount(account){
