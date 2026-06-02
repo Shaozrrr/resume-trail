@@ -3703,6 +3703,105 @@ function getPrepareJdFocusLabel(jdAngles, fallback){
     if(angles.length)return angles.join(' / ');
     return fallback||'需求挖掘 / 方案表达 / 结果验证';
 }
+function getPreparePriorityBaseAngles(session){
+    const jdAngles=getPrepareJdFocusAngles(session?.jd_text||'');
+    if(jdAngles.length)return jdAngles.slice(0,3);
+    const lens=getPrepareLens(session||{});
+    if(lens.key==='product')return['需求挖掘','PRD/方案撰写','漏斗/指标验证'];
+    if(lens.key==='data')return['漏斗/指标验证','行业/业务理解','跨团队推进'];
+    if(lens.key==='operations'||lens.key==='pm')return['跨团队推进','行业/业务理解','漏斗/指标验证'];
+    return['行业/业务理解','跨团队推进','漏斗/指标验证'];
+}
+function hasPrepareAngleSupport(session,angle){
+    const snapshot=getPrepareResumeSnapshot(session||{});
+    const text=normalizePrepareText([
+        snapshot.raw_text||'',
+        session?.resume_text||'',
+        getPrepareSupplementalExperienceSummary(session||{})
+    ].join(' ')).toLowerCase();
+    if(!text)return false;
+    const rules={
+        '需求挖掘':/访谈|调研|问卷|痛点|需求|洞察|问题定义/,
+        'PRD/方案撰写':/prd|方案|原型|需求文档|改进文档|说明书/,
+        'AI Skill/产品落地':/skill|agent|workflow|工作流|智能体|产品化|上线|调用/,
+        '漏斗/指标验证':/漏斗|留存|转化|指标|埋点|a\/b|ab|分析|提升|回升/,
+        '跨团队推进':/跨团队|协同|推进|研发|算法|设计|业务|运营|对接/,
+        '行业/业务理解':/行业|竞品|商业模式|市场|生态|财务|风控|报销|对账|合规/
+    };
+    const pattern=rules[angle];
+    return pattern?pattern.test(text):false;
+}
+function buildPrepareJdPriorityBlueprint(session){
+    const angles=getPreparePriorityBaseAngles(session);
+    const makeItem=function(angle){
+        const supported=hasPrepareAngleSupport(session,angle);
+        const prefix=supported?'强化':'补齐';
+        switch(angle){
+            case'需求挖掘':
+                return{
+                    title:`${prefix}需求挖掘与问题定义`,
+                    reason:supported?'这是 JD 里的直接要求，面试官通常会继续追问需求信号来自哪里、优先级为什么这样排。':'这是 JD 的高频要求，也是最容易在追问里暴露薄弱点的部分，面试前要先把需求来源和判断口径补齐。',
+                    what_to_prepare:[
+                        '准备 2 到 3 类需求信号：用户反馈、业务目标、数据异常分别说明什么',
+                        '准备优先级判断口径：影响面、紧急度、实现成本、验证周期',
+                        '准备一个这轮先做、另一轮后做的取舍例子'
+                    ]
+                };
+            case'PRD/方案撰写':
+                return{
+                    title:`${prefix}方案结构与交付口径`,
+                    reason:supported?'JD 提到方案、文档或产品表达时，面试官会重点看你能不能把目标、流程、边界和验收标准讲完整。':'这块如果表达不完整，面试里很容易只剩空泛想法，提前把方案结构和交付口径准备扎实会稳很多。',
+                    what_to_prepare:[
+                        '把方案讲成四段：目标、主流程、异常处理、验收标准',
+                        '准备一段版本取舍：为什么先做这个版本、暂时不做什么',
+                        '准备和研发/设计对齐时最容易卡住的一处细节'
+                    ]
+                };
+            case'AI Skill/产品落地':
+                return{
+                    title:`${prefix}Skill 设计与落地表达`,
+                    reason:supported?'JD 写到 Skill、Agent 或工作流时，核心是看你能不能讲清输入、处理逻辑、输出结果和上线后的稳定性。':'这块通常会被深挖到很细，提前把 Skill 的输入、规则、兜底和质量标准讲顺，现场会稳很多。',
+                    what_to_prepare:[
+                        '准备一条完整链路：输入是什么、核心处理逻辑是什么、输出给谁看',
+                        '准备质量标准：准确性、稳定性、响应时长、人工介入率',
+                        '准备可复用口径：哪些模块能迁到新场景，哪些必须重做'
+                    ]
+                };
+            case'漏斗/指标验证':
+                return{
+                    title:`${prefix}指标验证与结果口径`,
+                    reason:supported?'JD 提到指标、转化或留存时，面试官会继续问你看了哪些数据、怎么验证变化、结果有没有业务意义。':'这块如果口径不清，现场很容易被追问卡住，最好把核心指标、辅助指标和验证方式提前定下来。',
+                    what_to_prepare:[
+                        '把主链路拆成 3 到 4 个关键环节，明确每一层看什么指标',
+                        '准备核心指标和辅助指标的定义口径、统计周期和样本范围',
+                        '准备一次验证方法：改了什么、看多久、怎么判断有效'
+                    ]
+                };
+            case'跨团队推进':
+                return{
+                    title:`${prefix}跨团队推进与协作节奏`,
+                    reason:supported?'JD 强调协作推进时，面试官通常会看你怎么分工、怎么收敛分歧、怎么把节奏推进到交付。':'这是非常容易被追问的能力项，提前把角色分工、卡点处理和里程碑讲清楚会更有说服力。',
+                    what_to_prepare:[
+                        '准备一版角色分工：产品、研发、设计、算法、业务各自负责什么',
+                        '准备一次分歧处理：意见不一致时怎么收敛到可执行方案',
+                        '准备推进节奏：里程碑、灰度范围、回滚条件'
+                    ]
+                };
+            case'行业/业务理解':
+            default:
+                return{
+                    title:`${prefix}业务场景与行业理解`,
+                    reason:supported?'JD 只要涉及业务场景、行业理解或竞品判断，面试官就会看你能不能把场景说具体、把业务关系说清楚。':'这块往往决定面试官会不会把你当成能快速上手的人，最好把业务流程、场景痛点和判断口径先准备完整。',
+                    what_to_prepare:[
+                        '把业务场景讲具体：谁在用、在哪一步卡住、结果怎么衡量',
+                        '准备 1 到 2 个高频业务流程，说明每一步的关键判断',
+                        '准备为什么这家公司现在要做这件事，以及你觉得最难的环节'
+                    ]
+                };
+        }
+    };
+    return angles.map(makeItem).slice(0,3);
+}
 function buildPrepareExperienceExample(entry,roleName,jdAngles){
     const focusLabel=getPrepareJdFocusLabel(jdAngles);
     switch(entry?.type){
@@ -3836,14 +3935,13 @@ function sanitizePrepareFocus(output,session){
     const fallbackFocus=buildPrepareOutputsFallback(session||{}).focus||{};
     const currentFocus=output?.focus||{};
     const rawPrepPriorities=((currentFocus.prep_priorities||[]).length?currentFocus.prep_priorities:fallbackFocus.prep_priorities||[]).map(function(item,index){
-        const fallbackItem=(fallbackFocus.prep_priorities||[])[index]||{};
         return{
-            title:normalizePrepareText(item?.title||fallbackItem.title||`准备重点 ${index+1}`),
-            reason:normalizePrepareText(item?.reason||fallbackItem.reason||'把这块准备清楚，能明显提升面试稳定性。'),
-            what_to_prepare:sanitizePrepareTextList(item?.what_to_prepare,fallbackItem.what_to_prepare,4)
+            title:normalizePrepareText(item?.title||`准备重点 ${index+1}`),
+            reason:normalizePrepareText(item?.reason||''),
+            what_to_prepare:sanitizePrepareTextList(item?.what_to_prepare,[],4)
         };
     }).filter(function(item){
-        return item.title&&item.reason&&item.what_to_prepare.length;
+        return item.title||item.reason||item.what_to_prepare.length;
     });
     const currentExperiences=((currentFocus.best_experiences||[]).length?currentFocus.best_experiences:fallbackFocus.best_experiences||[]).map(function(item,index){
         const fallbackItem=(fallbackFocus.best_experiences||[])[index]||(fallbackFocus.best_experiences||[])[0]||{};
@@ -3883,7 +3981,19 @@ function sanitizePrepareFocus(output,session){
     }).filter(function(item){
         return item.title&&item.description&&item.avoidance_tip;
     });
-    const prepPriorities=rawPrepPriorities.slice(0,3);
+    const priorityBlueprint=buildPrepareJdPriorityBlueprint(session||{});
+    const prepPriorities=priorityBlueprint.map(function(item,index){
+        const currentItem=rawPrepPriorities[index]||{};
+        const joined=[currentItem.title,currentItem.reason].concat(currentItem.what_to_prepare||[]).join(' ');
+        const polluted=/简历|经历|实习|项目经历|项目里|这段经历|右边|讲哪段|哪段经历|第一段|第二张牌|补位/.test(joined);
+        const tooGeneric=/准备重点|讲清楚|说清楚|泛泛|能力|这块/.test(currentItem.title||'')&&!(currentItem.what_to_prepare||[]).length;
+        if(!currentItem.title||polluted||tooGeneric)return item;
+        return{
+            title:normalizePrepareText(currentItem.title||item.title),
+            reason:polluted||!currentItem.reason?item.reason:normalizePrepareText(currentItem.reason),
+            what_to_prepare:polluted||!(currentItem.what_to_prepare||[]).length?item.what_to_prepare:sanitizePrepareTextList(currentItem.what_to_prepare,item.what_to_prepare,4)
+        };
+    }).slice(0,3);
     return{
         prep_priorities:prepPriorities,
         best_experiences:bestExperiences.slice(0,3),
@@ -4233,7 +4343,7 @@ function buildPrepareSessionMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 应该围绕 JD 最看重的职责、能力、业务理解和高频追问来写，不要和 best_experiences 重复去讲具体哪段经历；17）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 必须百分百围绕 JD 的职责、能力、业务理解和高频追问来写，简历只能作为判断“哪些点该强化、哪些点该补齐”的后台依据，禁止在 prep_priorities 里出现简历、经历、实习、项目、哪段经历、怎么讲某段经历这类表述；17）prep_priorities 要写成专业面试老师会给出的准备建议，重点是“面试官会怎么追问、你要准备什么判断口径、业务理解、指标定义和表达边界”，不要写固定模板句；18）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -4775,28 +4885,7 @@ function buildPrepareOutputsFallback(session){
             '你能不能把行动、结果和个人贡献说清楚'
         ]
     };
-    const prepPriorities=[
-        {title:'先把岗位讲明白',reason:`这类 ${roleName} 面试通常先判断你是否真的理解岗位价值。`,what_to_prepare:['准备一段 60 秒岗位理解','说明岗位服务的业务目标','讲清最关键的 2 到 3 个能力']},
-        {title:'把 JD 关键词翻译成真实工作',reason:'很多面试看起来在问概念，实际上是在确认你是否理解岗位每天到底在做什么。',what_to_prepare:['把 JD 里的关键词翻成具体工作动作','准备每个关键词对应的业务场景','避免只背术语不解释业务含义']},
-        {title:'提前准备追问',reason:'面试深挖往往发生在你讲完案例之后。',what_to_prepare:['准备为什么这么做','准备有没有别的方案','准备结果如何衡量']}
-    ];
-    if(isProductRole){
-        prepPriorities.unshift({
-            title:'把 JD 关键词串成一条工作链',
-            reason:`这份岗位更看重你能不能把 ${jdAngles.length?jdAngles.join('、'):'需求挖掘、方案表达、结果验证'} 讲成一条完整工作链，而不是只停在名词层面。`,
-            what_to_prepare:[
-                '先说明这类岗位通常从哪里拿需求、怎么判断优先级、最后如何验证结果',
-                `把 ${jdAngles[0]||'需求挖掘'} 到 ${jdAngles[jdAngles.length-1]||'结果验证'} 这条链讲顺，不要只讲其中一个点`,
-                '提前准备指标口径、方案取舍和业务影响，方便面试官往下追问'
-            ]
-        });
-    }
-    if(lens.key==='data'){
-        prepPriorities.unshift({title:'指标与分析框架',reason:'数据/分析岗最怕只会报数字，不会解释业务意义。',what_to_prepare:['准备一个完整的指标分析案例','说明你如何判断问题优先级','说明数据如何转成动作建议']});
-    }
-    if(lens.key==='operations'||lens.key==='pm'){
-        prepPriorities.unshift({title:'推进与协同案例',reason:'这类岗位会被重点判断执行节奏和跨团队推进能力。',what_to_prepare:['准备一个多方协作案例','讲清你如何推进卡点','说明最终怎么收尾和交付']});
-    }
+    const prepPriorities=buildPrepareJdPriorityBlueprint(session);
     const riskWarnings=[
         {title:'不要只讲公司印象',description:'如果只停留在品牌层面，面试官很难判断你是否理解这份岗位。',avoidance_tip:'把公司认知翻译成“这个岗位为什么存在、要解决什么问题”。'},
         {title:'不要只讲过程',description:'很多候选人在项目经历里说了很多动作，却没有清楚交代结果。',avoidance_tip:'每段经历至少准备一组结果数字，或明确的变化描述。'},
