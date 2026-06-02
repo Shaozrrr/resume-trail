@@ -3945,6 +3945,66 @@ function sanitizePrepareOutputs(output,session){
     }
     return next;
 }
+function isPrepareCompanyFitQuestion(question){
+    const text=normalizePrepareText(question?.question||'');
+    const type=normalizePrepareText(question?.question_type||'');
+    return type==='company_fit'||/为什么(想来|选择|投递|加入).*(公司|团队)|为什么是.*(公司|团队)|为什么来我们公司|为什么选择我们|为什么投我们/.test(text);
+}
+function getPrepareQuestionExperienceKeywords(question){
+    const text=normalizePrepareText(question?.question||'');
+    const lower=text.toLowerCase();
+    const keywords=[];
+    const push=function(keyword){
+        if(keyword&&!keywords.includes(keyword))keywords.push(keyword);
+    };
+    if(/skill|agent|tool/.test(lower)){push('skill');push('agent');}
+    if(/prd|需求|访谈|痛点|功能优先级|产品/.test(text)){push('需求');push('prd');push('访谈');}
+    if(/漏斗|留存|转化|增长|指标|数据|分析/.test(text)){push('漏斗');push('留存');push('数据');}
+    if(/竞品|洞察/.test(text)){push('竞品');}
+    if(/协作|产研|算法|设计|推进/.test(text)){push('协作');push('推进');}
+    if(/财务|报销|对账|风控/.test(text)){push('财务');push('风控');}
+    if(/项目|上线|落地/.test(text)){push('落地');push('上线');}
+    return keywords;
+}
+function selectPrepareRelevantExperiences(experiences,question){
+    const list=(Array.isArray(experiences)?experiences:[]).filter(function(item){
+        return item&&normalizePrepareText(item.resume_section)!=='当前简历缺少直接证据';
+    });
+    if(!list.length)return[];
+    const companyFit=isPrepareCompanyFitQuestion(question);
+    const text=normalizePrepareText(question?.question||'');
+    const normalizedQuestion=normalizePrepareText(text).toLowerCase();
+    const keywords=getPrepareQuestionExperienceKeywords(question);
+    const scored=list.map(function(item,index){
+        const haystack=[item.resume_section,item.why_match].concat(item.highlight_points||[]).concat(item.possible_followups||[]).join(' ');
+        const normalizedHaystack=normalizePrepareText(haystack).toLowerCase();
+        let score=0;
+        const section=normalizePrepareText(item.resume_section||'');
+        if(section&&normalizedQuestion.includes(section.toLowerCase()))score+=80;
+        keywords.forEach(function(keyword){
+            if(normalizedHaystack.includes(keyword.toLowerCase()))score+=18;
+        });
+        if(/被调用|留存|提升|转化|上线|输出prd|访谈|风控|对账|报销|竞品|协作|推进/.test(haystack))score+=12;
+        if(companyFit){
+            if(/产品|需求|落地|技能|skill|agent|协作|数据|增长|访谈/.test(haystack))score+=16;
+            if(/留存|调用|上线|prd/.test(haystack))score+=10;
+        }
+        if((question?.question_type||'')==='resume_deep_dive')score+=10;
+        return{item,score,index};
+    }).sort(function(a,b){
+        if(b.score!==a.score)return b.score-a.score;
+        return a.index-b.index;
+    });
+    return scored.map(function(entry){return entry.item;});
+}
+function getPrepareQuestionMatchedExperiences(source,question){
+    const experiences=Array.isArray(source)
+        ?source
+        :Array.isArray(source?.focus?.best_experiences)
+            ?source.focus.best_experiences
+            :[];
+    return selectPrepareRelevantExperiences(experiences,question).slice(0,3);
+}
 function getPrepareQuestionGroups(session){
     const normalizedOutputs=session?.outputs?sanitizePrepareOutputs(session.outputs,session):null;
     return normalizedOutputs?.questions?.question_groups||[];
@@ -4184,6 +4244,7 @@ function buildPrepareAnswerMessagesClient(input){
     const resumeSnapshot=getPrepareResumeSnapshot(input);
     const knownTermBriefs=getPrepareKnownTermBriefs(input);
     const analysisPlaybooks=getPrepareAnalysisPlaybooks(input);
+    const matchedExperiences=getPrepareQuestionMatchedExperiences(input.prep_focus||[],input);
     const payload={
         company_name:normalizePrepareText(input.company_name||'目标公司'),
         role_name:normalizePrepareText(input.role_name||'目标岗位'),
@@ -4201,6 +4262,7 @@ function buildPrepareAnswerMessagesClient(input){
         question:normalizePrepareText(input.question),
         question_type:normalizePrepareText(input.question_type),
         source:normalizePrepareText(input.source),
+        question_matched_experiences:matchedExperiences,
         recommended_frameworks:input.recommended_frameworks||[],
         default_framework:normalizePrepareText(input.default_framework),
         framework_type:normalizePrepareText(input.framework_type||'STAR')
@@ -4208,7 +4270,7 @@ function buildPrepareAnswerMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，但这版骨架必须足够接近现场可直接开口，不要只给空泛提纲。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot 和 prep_focus 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 不能写成 Point/Reason/Example 这种模板标题，必须是一段 120 到 220 字、用户可以直接说出口的中文回答；10）如果题目像“如何定义 Skill 的质量标准 / 如何保证可复用性”这种业务判断题，必须直接给出你的判断维度和落地做法，不要只写“先讲背景、再讲动作”。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
+            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，但这版骨架必须足够接近现场可直接开口，不要只给空泛提纲。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot、prep_focus 和 question_matched_experiences 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 不能写成 Point/Reason/Example 这种模板标题，必须是一段 120 到 220 字、用户可以直接说出口的中文回答；10）如果题目像“如何定义 Skill 的质量标准 / 如何保证可复用性”这种业务判断题，必须直接给出你的判断维度和落地做法，不要只写“先讲背景、再讲动作”；11）如果问题是“为什么来我们公司 / 为什么选择我们 / 为什么想加入”，先回答公司和岗位吸引力，再挑 1 段最相关经历做证明，禁止把整段回答写成最近一段实习复述；12）不要机械默认 prep_focus 第一条或最近经历。每道题都要重新判断最匹配的经历；如果另一段项目或实习更贴题，就切换到那一段；13）如果题目更看业务理解、岗位判断或公司动机，回答主体应该是你的判断，经历只用来做短证据，不要把经历写成主角。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
         },
         {
             role:'user',
@@ -4809,12 +4871,19 @@ function getPrepareSelectedQuestion(session,options){
 }
 function buildPrepareAnswerFrameworkFallback(session,question,framework){
     const ctx=buildPrepareOutputsFallback(session);
-    const firstExperience=ctx.focus.best_experiences[0];
+    const rankedExperiences=getPrepareQuestionMatchedExperiences(ctx,question);
+    const primaryExperience=rankedExperiences[0]||ctx.focus.best_experiences[0];
+    const secondaryExperience=rankedExperiences[1]||null;
     const jdKeyword=ctx.research.keyword_translation[0];
     const matchedBrief=findPrepareKnownTermBrief(question?.question||'',getPrepareKnownTermBriefs(session));
-    const resumeEvidence=[firstExperience?.raw||firstExperience?.resume_section].filter(Boolean);
+    const primaryConcreteBullets=getPrepareConcreteExperienceBullets(primaryExperience);
+    const secondaryConcreteBullets=getPrepareConcreteExperienceBullets(secondaryExperience);
+    const matchedAngles=getPrepareExperienceSpecificJdMatch(primaryExperience,session);
+    const resumeEvidence=rankedExperiences.slice(0,2).map(function(item){
+        return item?.raw||item?.resume_section;
+    }).filter(Boolean);
     const supplementalSummary=getPrepareSupplementalExperienceSummary(session);
-    const gapNote=firstExperience?.resume_section==='当前简历缺少直接证据'?'这题当前缺少能直接支撑的简历证据，建议先补挖一段更贴近岗位目标的经历，再把结果和个人贡献讲具体。':'';
+    const gapNote=primaryExperience?.resume_section==='当前简历缺少直接证据'?'这题当前缺少能直接支撑的简历证据，建议先补挖一段更贴近岗位目标的经历，再把结果和个人贡献讲具体。':'';
     const commonTips=[
         `回答时记得把内容拉回 ${session.role_name||'目标岗位'} 的目标，而不是停在泛化经历描述。`,
         '尽量加入可验证的数字、结果变化或判断依据。',
@@ -4828,19 +4897,26 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
     }
     const directDraft=(function(){
         const roleName=normalizePrepareText(session.role_name||'这个岗位');
-        const experienceLabel=normalizePrepareText(firstExperience?.resume_section||'最接近的一段经历');
+        const companyName=normalizePrepareText(session.company_name||'这家公司');
+        const experienceLabel=normalizePrepareText(primaryExperience?.resume_section||'最接近的一段经历');
+        const evidenceLine=primaryConcreteBullets[0]||primaryExperience?.why_match||'一段最贴题的经历';
+        const resultLine=primaryConcreteBullets[1]||secondaryConcreteBullets[0]||'可验证的结果';
+        const matchedAngleText=matchedAngles.length?matchedAngles.join('、'):`${roleName} 最看重的能力`;
+        if(isPrepareCompanyFitQuestion(question)){
+            return `我想加入 ${companyName}，核心还是这份 ${roleName} 和我已经做过的事情是顺着的。这个岗位要的不只是对 AI 有兴趣，而是能把需求判断、方案落地和结果验证串起来。我最能证明这一点的是 ${experienceLabel}：我实际做过 ${evidenceLine}，后面也拿到了 ${resultLine}。所以吸引我的不是公司名字本身，而是这里能把我已经验证过的能力放到更完整、更有规模的产品场景里。`;
+        }
         if(/质量标准|可复用|复用性|quality/.test(question?.question||'')){
-            return `如果让我定义 Skill 的质量标准，我会看三层。第一层是任务结果，能不能稳定把具体问题解决掉，比如在 ${experienceLabel} 里对应的场景里，输出是否准确、流程是否跑通。第二层是可复用性，输入输出接口、规则和提示词是不是标准化，能不能迁移到相邻场景，而不是每次重写一套。第三层是运行表现，比如调用成功率、人工接管率和用户反馈。我会先把共性的判断逻辑抽出来做成固定流程，再用真实 case 回测，最后根据调用数据持续迭代，这样既保证质量，也能让后续新场景复用成本更低。`;
+            return `如果让我定义 Skill 的质量标准，我会直接看三件事。第一是结果准不准，像 ${experienceLabel} 里我会先看它能不能稳定完成 ${primaryConcreteBullets[0]||'核心任务'}，错误会集中在哪些步骤。第二是用起来顺不顺，我会看输入输出是不是标准化，边界条件是不是写清楚，换个相邻场景时要不要大改。第三是上线后的表现，我会盯调用成功率、人工兜底比例、用户反馈和关键业务指标。落地时我会先把通用规则拆出来，再用 10 到 20 个真实 case 回测，最后根据异常 case 持续补规则。`;
         }
         if(/openclaw|agent|skill|tool/.test((question?.question||'').toLowerCase())){
-            return `我的理解是 Agent 更像负责任务编排和决策的大脑，Skill 是可复用的能力模块，Tool 是被调用的底层工具。真正落地时，先把高频场景拆成稳定步骤，再把像 ${jdKeyword?.jd_keyword||'关键信息提取、规则判断、结果回写'} 这样的通用动作沉淀成 Skill，最后让 Agent 按场景去调用不同 Skill 和 Tool。结合我在 ${experienceLabel} 里的经历，我会重点强调自己做过的 ${firstExperience?.why_match||'问题拆解、方案设计和结果验证'}，这就是我理解可复用能力沉淀的基础。`;
+            return `我的理解是 Agent 负责把任务拆开、决定每一步怎么走，Skill 是可复用的能力模块，Tool 是底层执行工具。真正在产品里落地时，我会先把场景拆成固定步骤，再把高频动作沉淀成 Skill，例如 ${jdKeyword?.jd_keyword||'信息提取、规则判断、结果回写'}。这和我在 ${experienceLabel} 里做过的事情很接近，因为我当时实际负责过 ${evidenceLine}，后面又用 ${resultLine} 去验证这套设计有没有跑通。`;
         }
-        return `如果让我回答这题，我会先直接给结论：我最能对应 ${roleName} 的，不是单一做过某个名词，而是我在 ${experienceLabel} 里真正做过 ${firstExperience?.why_match||'问题拆解、推进落地和结果验证'}。当时我面对的问题是 [具体问题]，我先 [关键判断]，再 [关键动作]，最后拿到 [结果]。这也是为什么我觉得自己能把这段能力迁移到当前岗位。`;
+        return `如果让我直接回答这题，我会把重点放在 ${experienceLabel}。这段经历和题目最贴近的地方在于，我真的做过 ${matchedAngleText} 相关的事，具体就是 ${evidenceLine}。我当时先判断清楚问题和优先级，再推进关键动作，最后拿到了 ${resultLine}。所以这题我不会泛泛讲经历，而是直接用这段证明我已经把相关能力做成过结果。`;
     })();
     const map={
         STAR:{
             structure:[
-                {section:'Situation',guidance:'先用 2 到 3 句话交代背景：业务场景、目标和当时的限制。',suggested_points:[`可以用「${firstExperience?.raw||'你最相关的一段经历'}」作为主案例。`,'交代当时为什么这个问题重要。']},
+                {section:'Situation',guidance:'先用 2 到 3 句话交代背景：业务场景、目标和当时的限制。',suggested_points:[`主案例优先用「${primaryExperience?.raw||'你最相关的一段经历'}」。`,'交代当时为什么这个问题重要。']},
                 {section:'Task',guidance:'明确你当时真正负责的任务，而不是团队共同目标。',suggested_points:['把你的角色说清楚','说明你需要解决的核心问题']},
                 {section:'Action',guidance:'重点讲你的判断、动作和推进方式。',suggested_points:[`结合 JD 关键词「${jdKeyword?.jd_keyword||'结果表达'}」说明你为什么这么做。`,'讲一到两个关键动作，不要流水账。']},
                 {section:'Result',guidance:'最后一定要回到结果和复盘。',suggested_points:['补充数字或明确变化','说明这段经历为什么适合当前岗位']},
@@ -4852,7 +4928,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
             structure:[
                 {section:'Point',guidance:'先给结论，不要绕。',suggested_points:[`直接回答你为什么适合 ${session.role_name||'这个岗位'}`,'一句话亮明观点']},
                 {section:'Reason',guidance:'解释你为什么得出这个结论。',suggested_points:['从岗位要求和你的经历匹配度讲','点出 2 个最关键的能力']},
-                {section:'Example',guidance:'举最能证明结论的一段经历。',suggested_points:[`优先使用「${firstExperience?.raw||'最相关经历'}」`,'例子里必须有动作和结果']},
+                {section:'Example',guidance:'举最能证明结论的一段经历。',suggested_points:[`优先使用「${primaryExperience?.raw||'最相关经历'}」`,secondaryExperience?.raw?`如果主案例不够，再补一句「${secondaryExperience.raw}」去兜结果或场景。`:'例子里必须有动作和结果']},
                 {section:'Point',guidance:'最后收回结论。',suggested_points:['把经历和岗位需要的能力再次连接起来']}
             ],
             delivery_tips:commonTips,
