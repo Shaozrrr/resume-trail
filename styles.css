@@ -1664,10 +1664,6 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 :root[data-theme=light] .prepare-supplement-item{border-color:rgba(176,133,79,.18);background:rgba(195,138,71,.1)}
 :root[data-theme=light] .prepare-experience-detail{border-color:rgba(176,154,127,.14);background:rgba(255,255,255,.72)}
 :root[data-theme=light] .prepare-answer-supplement-trigger{border-color:rgba(176,154,127,.14);background:rgba(255,255,255,.78)}
-:root[data-theme=light] .prepare-supplement-modal .modal-body{background:transparent}
-:root[data-theme=light] .prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-capsule-input textarea{background:rgba(255,255,255,.86);box-shadow:inset 0 1px 0 rgba(255,255,255,.96)}
-:root[data-theme=light] .prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-list:not(.is-capsule-list) .prepare-supplement-item{background:rgba(255,255,255,.56);border-color:rgba(176,154,127,.16)}
-:root[data-theme=light] .prepare-supplement-modal .prepare-supplement-card-modal-simple .prepare-supplement-empty{background:rgba(255,255,255,.4);border-color:rgba(176,154,127,.14)}
 :root[data-theme=light] .prepare-supplement-modal .modal-header p{color:#634c38}
 :root[data-theme=light] .prepare-mock-choice-card,:root[data-theme=light] .prepare-mock-custom-box,:root[data-theme=light] .prepare-mock-preview{border-color:rgba(176,154,127,.14);background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,241,232,.92));box-shadow:0 18px 34px rgba(78,60,39,.08),inset 0 1px 0 rgba(255,255,255,.9)}
 :root[data-theme=light] .prepare-mock-answer-card textarea{background:linear-gradient(180deg,rgba(255,255,255,.99),rgba(245,240,233,.94));border-color:rgba(176,154,127,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.96),0 18px 34px rgba(84,66,43,.08)}
