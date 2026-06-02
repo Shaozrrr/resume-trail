@@ -5744,8 +5744,11 @@ function renderPrepareFollowupAdvice(item,session){
     const prompts=sanitizePrepareTextList(item?.possible_followups,[],6);
     if(!prompts.length)return'';
     return `
-        <div class="prepare-followup-block">
-            <strong>补挖 / 补做 / 包装建议</strong>
+        <details class="prepare-followup-block">
+            <summary class="prepare-followup-toggle">
+                <strong>补挖 / 补做 / 包装建议</strong>
+                <span class="prepare-followup-toggle-icon" aria-hidden="true"></span>
+            </summary>
             <div class="prepare-followup-qa-list">
                 ${prompts.map(function(point){
                     const question=normalizePrepareText(point);
@@ -5758,7 +5761,7 @@ function renderPrepareFollowupAdvice(item,session){
                     `;
                 }).join('')}
             </div>
-        </div>
+        </details>
     `;
 }
 function resolvePrepareExperienceSection(preferred,fallback){
