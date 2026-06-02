@@ -2346,12 +2346,12 @@ function getPrepareConfig(){
         apiBase:'http://127.0.0.1:8788',
         directBaseUrl:'https://api.deepseek.com',
         provider:'DeepSeek',
-        model:'deepseek-v4-pro',
+        model:'deepseek-v4-flash',
         apiKey:''
     };
     const runtime=window.RT_PREPARE_CONFIG||{};
     const stored=getStoredPrepareRuntimeConfig();
-    return Object.assign({},defaults,runtime,stored);
+    return Object.assign({},defaults,runtime,stored,{model:'deepseek-v4-flash'});
 }
 function getPrepareApiBase(){
     return String(getPrepareConfig().apiBase||'http://127.0.0.1:8788').replace(/\/+$/,'');
@@ -2437,7 +2437,6 @@ function getPrepareFreeQuestionKey(text){
 }
 function getPrepareModelOptions(){
     return[
-        {key:'deepseek-v4-pro',label:'V4 Pro',desc:'更稳，更适合正式准备与回答骨架。'},
         {key:'deepseek-v4-flash',label:'V4 Flash',desc:'更快，适合快速试跑和改写。'}
     ];
 }
@@ -4300,7 +4299,7 @@ async function requestPrepareDirectAI(messages,input,kind){
                     'Authorization':`Bearer ${apiKey}`
                 },
                 body:JSON.stringify({
-                    model:config.model||'deepseek-v4-pro',
+                    model:config.model||'deepseek-v4-flash',
                     temperature:0.2,
                     stream:false,
                     max_tokens:attempt.maxTokens,
@@ -4324,7 +4323,7 @@ async function requestPrepareDirectAI(messages,input,kind){
             return Object.assign({},output,{
                 meta:Object.assign({},output?.meta||{},{
                     provider:'DeepSeek',
-                    model:config.model||'deepseek-v4-pro',
+                    model:config.model||'deepseek-v4-flash',
                     source:'direct'
                 })
             });
@@ -4332,7 +4331,7 @@ async function requestPrepareDirectAI(messages,input,kind){
             continue;
         }
     }
-    throw new Error((config.model||'deepseek-v4-pro')==='deepseek-v4-flash'?'DeepSeek 这次没有稳定返回结构化结果。请切到 V4 Pro 再试一次。':'DeepSeek 这次没有稳定返回结构化结果。我已经自动重试过安全路径，你可以再点一次重新生成。');
+    throw new Error('DeepSeek 这次没有稳定返回结构化结果。我已经自动重试过安全路径，你可以再点一次重新生成。');
 }
 async function requestPrepareEdgeAI(messages,kind){
     if(!window.rtAccountService||typeof window.rtAccountService.invokeFunction!=='function'){
@@ -4341,7 +4340,7 @@ async function requestPrepareEdgeAI(messages,kind){
     const config=getPrepareConfig();
     const payload=await window.rtAccountService.invokeFunction(config.functionName||'prepare-ai',{
         kind:kind||'session',
-        model:config.model||'deepseek-v4-pro',
+        model:config.model||'deepseek-v4-flash',
         messages:messages
     });
     if(!payload||typeof payload!=='object'||!payload.output){
@@ -6715,29 +6714,9 @@ function renderPrepareMockInterview(session){
                                 }).join(''):'<div class="prepare-empty prepare-mock-custom-empty">先添加 1 到 3 个你想自己回答的问题。</div>'}
                             </div>
                         </div>
-                    `:`
-                        <div class="prepare-mock-preview">
-                            <div class="prepare-mock-preview-head">
-                                <div class="prepare-section-kicker">题目预览</div>
-                                <span>${generatedQuestions.length} 题</span>
-                            </div>
-                            <div class="prepare-mock-preview-list">
-                                ${generatedQuestions.slice(0,4).map(function(question,index){
-                                    const meta=normalizePrepareQuestionRecord(question);
-                                    return `
-                                        <article class="prepare-mock-preview-card">
-                                            <span>Q${index+1}</span>
-                                            <strong>${escapeHTML(meta.question)}</strong>
-                                            <em>${escapeHTML(meta.framework_reason||'')}</em>
-                                        </article>
-                                    `;
-                                }).join('')}
-                            </div>
-                        </div>
-                    `}
+                    `:''}
                 </section>
                 <div class="prepare-mock-setup-footer">
-                    <div class="prepare-inline-notice">${escapeHTML(prepareMockState.questionMode==='custom'?'你自己写的问题会直接进入模拟流程，AI 只负责点评。':'AI 会先帮你生成一套更接近真实面试的题目。')} ${escapeHTML(feedbackModeLabel)}。</div>
                     <div class="prepare-mock-actions">
                         <button type="button" class="btn-primary" id="prepare-mock-start" ${canStart?'':'disabled'}>${canStart?'开始模拟面试':'先补齐题目'}</button>
                     </div>
@@ -7013,8 +6992,6 @@ function renderPrepare(){
     const sessions=getPrepareSessionsSorted();
     const selectedSession=getPrepareSelectedSession();
     const appOptions=store.apps.filter(app=>app.status!=='WITHDRAWN');
-    const prepareConfig=getPrepareConfig();
-    const modelOptions=getPrepareModelOptions();
     const composeStep=prepareState.composeStep||'entry';
     const selectedAppId=prepareState.selectedApplicationId||'';
     const selectedApp=selectedAppId?store.getApp(selectedAppId):null;
@@ -7063,7 +7040,7 @@ function renderPrepare(){
             <section class="prepare-compose-screen">
                 <div class="prepare-compose-hero">
                     <div class="prepare-kicker">Prepare Session</div>
-                    <h2>${composeStep==='entry'?'先选开始方式，再进入准备工作台':'把这次分析要用的 JD、简历和模型补完整'}</h2>
+                    <h2>${composeStep==='entry'?'先选开始方式，再进入准备工作台':'把这次分析要用的 JD 和简历补完整'}</h2>
                     <p>${composeStep==='entry'?'第一步先决定是从已有投递开始，还是单独新建一套准备；第二步再补材料并开始分析。':'这一页只保留本次分析真正要用的输入，填完后会直接切到独立工作台。'}</p>
                 </div>
                 ${renderPrepareAccessBanner(account,{showRegister:true,compactPaid:true})}
@@ -7193,25 +7170,6 @@ function renderPrepare(){
                         `}
                     </div>
                     <aside class="prepare-compose-side">
-                        ${composeStep==='details'?`
-                            <div class="prepare-card-surface prepare-config-card">
-                                <div class="prepare-config-compact">
-                                    <div>
-                                        <div class="prepare-section-kicker">AI 模型</div>
-                                        <h3>这次分析想用哪档模型</h3>
-                                        <p>模型切换放到第二步，先把路径和材料确定下来。</p>
-                                    </div>
-                                    <div class="prepare-model-switch" role="tablist">
-                                        ${modelOptions.map(option=>`
-                                            <button type="button" class="prepare-model-btn${(prepareConfig.model||'deepseek-v4-pro')===option.key?' is-active':''}" data-prepare-model="${option.key}">
-                                                <strong>${escapeHTML(option.label)}</strong>
-                                                <span>${escapeHTML(option.desc)}</span>
-                                            </button>
-                                        `).join('')}
-                                    </div>
-                                </div>
-                            </div>
-                        `:''}
                         <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
                             <div class="prepare-section-kicker">最近会话</div>
                             <div class="prepare-recent-list prepare-recent-list-compact">
@@ -7293,10 +7251,6 @@ function renderPrepare(){
     $$('.prepare-mode-btn').forEach(button=>button.addEventListener('click',function(){
         prepareState.mode=this.dataset.prepareMode||'application';
         prepareState.composeStep='details';
-        renderPrepare();
-    }));
-    $$('[data-prepare-model]').forEach(button=>button.addEventListener('click',function(){
-        savePrepareRuntimeConfig({model:this.dataset.prepareModel||'deepseek-v4-pro'});
         renderPrepare();
     }));
     $('#prepare-application-select')?.addEventListener('change',function(){
