@@ -5874,10 +5874,6 @@ function renderPrepareFocus(session){
                 <div class="prepare-focus-groups">
                     ${experienceGroups.length?experienceGroups.map(group=>`
                         <section class="prepare-focus-group">
-                            <div class="prepare-focus-group-head">
-                                <div class="prepare-section-kicker">${escapeHTML(group.label)}</div>
-                                <p>${escapeHTML(group.description)}</p>
-                            </div>
                             <div class="prepare-stack-list">
                                 ${group.items.map(function(item){
                                     const details=buildPrepareExperienceDisplayDetails(item,session);
