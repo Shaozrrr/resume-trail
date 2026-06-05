@@ -1,13 +1,21 @@
 // features.js - 日历、排序、导入、可定制看板
+const featureSelect=(selector,root=document)=>root.querySelector(selector);
+const featureSelectAll=(selector,root=document)=>Array.from(root.querySelectorAll(selector));
+const featureEscapeHTML=value=>{
+    if(typeof escapeHTML==='function')return escapeHTML(value);
+    return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+};
+const featureStore=()=>typeof store!=='undefined'?store:window.store;
+const featureRenderKanban=q=>{if(typeof renderKanban==='function')renderKanban(q);};
 
 // ---- 看板排序 ----
-const ks=$('#kanban-sort');
-if(ks)ks.addEventListener('change',()=>{if(typeof renderKanban==='function')renderKanban($('#global-search').value.toLowerCase().trim());});
+const ks=featureSelect('#kanban-sort');
+if(ks)ks.addEventListener('change',()=>{featureRenderKanban((featureSelect('#global-search')?.value||'').toLowerCase().trim());});
 window.sortKanbanCards=function(cards){
     const sort=ks?ks.value:'';if(!sort)return cards;
     return cards.sort((a,b)=>{
         if(sort==='preference')return(parseInt(b.preference_level)||0)-(parseInt(a.preference_level)||0);
-        if(sort==='waiting'){return(getWait(b)||0)-(getWait(a)||0);}
+        if(sort==='waiting'){const wait=typeof getWait==='function'?getWait:()=>0;return(wait(b)||0)-(wait(a)||0);}
         if(sort==='deadline'){return(a.next_deadline||'9999').localeCompare(b.next_deadline||'9999');}
         return 0;
     });
@@ -15,11 +23,23 @@ window.sortKanbanCards=function(cards){
 
 // ---- 日历视图 ----
 let calDate=new Date(),calView='month';
+const CALENDAR_MOBILE_QUERY='(max-width: 720px)';
+function isMobileCalendar(){
+    return window.matchMedia?window.matchMedia(CALENDAR_MOBILE_QUERY).matches:window.innerWidth<=720;
+}
+function syncCalendarViewButtons(){
+    featureSelectAll('.cal-view-btn').forEach(b=>b.classList.toggle('active',b.dataset.calview===calView));
+}
+function normalizeCalendarViewForViewport(){
+    if(isMobileCalendar()&&calView!=='week')calView='week';
+    syncCalendarViewButtons();
+}
 function toDateKey(date){
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 function renderCalendar(){
-    const grid=$('#calendar-grid'),title=$('#cal-title');if(!grid||!title)return;
+    normalizeCalendarViewForViewport();
+    const grid=featureSelect('#calendar-grid'),title=featureSelect('#cal-title');if(!grid||!title)return;
     const y=calDate.getFullYear(),m=calDate.getMonth();
     if(calView==='month'){
         title.textContent=`${y}年${m+1}月`;
@@ -37,8 +57,8 @@ function renderCalendar(){
             const evts=getEventsForDate(ds);
             const visibleEvents=evts.slice(0,maxVisible).map(e=>{
                 const mobileCopy=isMobileMonth
-                    ?`<strong>${escapeHTML(e.label)}</strong><span class="cal-event-company">${escapeHTML(e.company)}</span>`
-                    :`<strong>${escapeHTML(e.label)}</strong><span class="cal-event-company">${escapeHTML(e.company)}</span><span class="cal-event-role">${escapeHTML(e.position)}</span>`;
+                    ?`<strong>${featureEscapeHTML(e.label)}</strong><span class="cal-event-company">${featureEscapeHTML(e.company)}</span>`
+                    :`<strong>${featureEscapeHTML(e.label)}</strong><span class="cal-event-company">${featureEscapeHTML(e.company)}</span><span class="cal-event-role">${featureEscapeHTML(e.position)}</span>`;
                 return `<div class="cal-event" style="--event:${e.color}" title="${e.company} · ${e.position}"><span class="cal-event-mark"></span><div class="cal-event-copy">${mobileCopy}</div></div>`;
             }).join('');
             const more=evts.length>maxVisible?`<div class="cal-event-more">+${evts.length-maxVisible} 个待处理</div>`:'';
@@ -55,62 +75,76 @@ function renderCalendar(){
             const d=new Date(ws.getTime()+i*864e5),ds=toDateKey(d);
             const today=toDateKey(new Date())===ds;
             const evts=getEventsForDate(ds);
-            html+=`<div class="cal-week-day ${today?'today':''}"><div class="cal-week-header"><span class="cal-weekday-name">${dayN[i]}</span><span class="cal-day-num">${d.getDate()}</span></div>${evts.map(e=>`<div class="cal-event-lg" style="--event:${e.color}"><span class="cal-event-lg-rail"></span><div class="cal-event-lg-copy"><div class="cal-event-lg-label">${escapeHTML(e.label)}</div><div class="cal-event-lg-company">${escapeHTML(e.company)}</div><div class="cal-event-lg-role">${escapeHTML(e.position)}</div></div></div>`).join('')}</div>`;
+            html+=`<div class="cal-week-day ${today?'today':''}"><div class="cal-week-header"><span class="cal-weekday-name">${dayN[i]}</span><span class="cal-day-num">${d.getDate()}</span></div>${evts.map(e=>`<div class="cal-event-lg" style="--event:${e.color}"><span class="cal-event-lg-rail"></span><div class="cal-event-lg-copy"><div class="cal-event-lg-label">${featureEscapeHTML(e.label)}</div><div class="cal-event-lg-company">${featureEscapeHTML(e.company)}</div><div class="cal-event-lg-role">${featureEscapeHTML(e.position)}</div></div></div>`).join('')}</div>`;
         }
         html+='</div>';grid.innerHTML=html;
     }
     renderUpcoming();
 }
+window.renderCalendar=renderCalendar;
 function getEventsForDate(ds){
-    const evts=[];if(typeof store==='undefined')return evts;
+    const evts=[];const currentStore=featureStore();if(!currentStore)return evts;
     const colors={'笔试/OA':'#8b5cf6','一面':'#60a5fa','二面':'#818cf8','三面':'#d946ef','四面':'#fb923c','群面':'#34d399','HR面':'#fbbf24','Offer':'#4ade80','挂了':'#f87171','未通过':'#f87171','流程终止':'#f87171'};
-    store.apps.forEach(a=>{
+    currentStore.apps.forEach(a=>{
         if(a.timeline)a.timeline.forEach(t=>{if(t.date===ds&&t.name!=='已投递')evts.push({label:t.name,company:a.company_name,position:a.position_title,color:colors[t.name]||'#60a5fa'});});
         if(a.next_deadline&&a.next_deadline.startsWith(ds))evts.push({label:'DDL'+(a.next_action?' '+a.next_action:''),company:a.company_name,position:a.position_title,color:'#f87171'});
     });
     return evts;
 }
 function renderUpcoming(){
-    const list=$('#cal-upcoming-list');if(!list||typeof store==='undefined')return;
+    const list=featureSelect('#cal-upcoming-list'),currentStore=featureStore();if(!list||!currentStore)return;
     const today=toDateKey(new Date());const up=[];
-    store.apps.forEach(a=>{
+    currentStore.apps.forEach(a=>{
         if(a.timeline)a.timeline.forEach(t=>{if(t.date&&t.date>=today&&t.name!=='已投递')up.push({date:t.date,text:`${a.company_name} · ${a.position_title} · ${t.name}`});});
         if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd>=today)up.push({date:dd,text:`${a.company_name} · ${a.next_action||'DDL'}`});}
     });
     up.sort((a,b)=>a.date.localeCompare(b.date));
     list.innerHTML=up.length?up.slice(0,8).map(e=>{const days=Math.floor((new Date(e.date)-new Date(today))/864e5);const urg=days<=1?'color:var(--red)':days<=3?'color:var(--orange)':'color:var(--text-secondary)';return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-light);font-size:12px"><span style="width:50px;flex-shrink:0;${urg};font-weight:500">${days===0?'今天':days===1?'明天':days+'天后'}</span><span style="color:var(--text-primary);flex:1">${e.text}</span><span style="font-size:10px;color:var(--text-muted)">${e.date.slice(5)}</span></div>`;}).join(''):'<div style="font-size:12px;color:var(--text-muted);padding:16px 0;text-align:center">暂无即将到来的事件</div>';
 }
-const cp=$('#cal-prev'),cn=$('#cal-next');
+const cp=featureSelect('#cal-prev'),cn=featureSelect('#cal-next');
 if(cp)cp.addEventListener('click',()=>{if(calView==='month')calDate.setMonth(calDate.getMonth()-1);else calDate.setDate(calDate.getDate()-7);renderCalendar();});
 if(cn)cn.addEventListener('click',()=>{if(calView==='month')calDate.setMonth(calDate.getMonth()+1);else calDate.setDate(calDate.getDate()+7);renderCalendar();});
-$$('.cal-view-btn').forEach(b=>{b.addEventListener('click',()=>{$$('.cal-view-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');calView=b.dataset.calview;renderCalendar();});});
+featureSelectAll('.cal-view-btn').forEach(b=>{b.addEventListener('click',()=>{calView=isMobileCalendar()?'week':b.dataset.calview;renderCalendar();});});
+let calendarWasMobile=isMobileCalendar();
+window.addEventListener('resize',()=>{
+    const mobile=isMobileCalendar();
+    if(mobile===calendarWasMobile)return;
+    calendarWasMobile=mobile;
+    if(mobile){
+        calView='week';
+        syncCalendarViewButtons();
+        if(featureSelect('#view-calendar')?.classList.contains('active'))renderCalendar();
+    }
+});
 
 // ---- 浏览器通知 ----
 function checkNotif(){
-    if(!('Notification' in window)||typeof store==='undefined')return;
+    const currentStore=featureStore();if(!('Notification' in window)||!currentStore)return;
     if(Notification.permission!=='granted')return;
     const today=toDateKey(new Date()),tmr=toDateKey(new Date(Date.now()+864e5));
-    store.apps.forEach(a=>{if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd===today||dd===tmr){const k='n_'+a.id+'_'+dd;if(!localStorage.getItem(k)){new Notification('履迹 · 提醒',{body:`${a.company_name} · ${a.next_action||'DDL'}${dd===today?' 今天到期！':' 明天到期！'}`});localStorage.setItem(k,'1');}}}});
+    currentStore.apps.forEach(a=>{if(a.next_deadline){const dd=a.next_deadline.split('T')[0];if(dd===today||dd===tmr){const k='n_'+a.id+'_'+dd;if(!localStorage.getItem(k)){new Notification('履迹 · 提醒',{body:`${a.company_name} · ${a.next_action||'DDL'}${dd===today?' 今天到期！':' 明天到期！'}`});localStorage.setItem(k,'1');}}}});
 }
 setTimeout(checkNotif,2000);
 
 // ---- 批量导入 ----
-const ib=$('#import-btn');if(ib)ib.addEventListener('click',()=>{$('#import-paste').value='';$('#import-preview').style.display='none';$('#import-modal-overlay').classList.add('active');});
-$('#import-modal-close')?.addEventListener('click',()=>$('#import-modal-overlay').classList.remove('active'));
-$('#import-cancel')?.addEventListener('click',()=>$('#import-modal-overlay').classList.remove('active'));
-$('#import-upload-zone')?.addEventListener('click',()=>$('#import-file-input').click());
-$('#import-file-input')?.addEventListener('change',e=>{const f=e.target.files[0];if(f){const rd=new FileReader();rd.onload=ev=>{$('#import-paste').value=ev.target.result;parseImport();};rd.readAsText(f);}});
-$('#import-paste')?.addEventListener('input',parseImport);
+const ib=featureSelect('#import-btn');if(ib)ib.addEventListener('click',()=>{featureSelect('#import-paste').value='';featureSelect('#import-preview').style.display='none';featureSelect('#import-modal-overlay').classList.add('active');});
+featureSelect('#import-modal-close')?.addEventListener('click',()=>featureSelect('#import-modal-overlay').classList.remove('active'));
+featureSelect('#import-cancel')?.addEventListener('click',()=>featureSelect('#import-modal-overlay').classList.remove('active'));
+featureSelect('#import-upload-zone')?.addEventListener('click',()=>featureSelect('#import-file-input').click());
+featureSelect('#import-file-input')?.addEventListener('change',e=>{const f=e.target.files[0];if(f){const rd=new FileReader();rd.onload=ev=>{featureSelect('#import-paste').value=ev.target.result;parseImport();};rd.readAsText(f);}});
+featureSelect('#import-paste')?.addEventListener('input',parseImport);
 let importData=[];
 function parseImport(){
-    const text=$('#import-paste').value.trim();if(!text){$('#import-preview').style.display='none';importData=[];return;}
+    const text=featureSelect('#import-paste').value.trim();if(!text){featureSelect('#import-preview').style.display='none';importData=[];return;}
     importData=[];text.split('\n').filter(l=>l.trim()).forEach(line=>{const p=line.split(/[,\t|;]/).map(s=>s.trim()).filter(Boolean);if(p.length>=2)importData.push({company:p[0],position:p[1],category:p[2]||'',date:p[3]||new Date().toISOString().split('T')[0]});});
-    if(importData.length){$('#import-preview').style.display='';$('#import-count').textContent=importData.length;$('#import-preview-list').innerHTML=importData.slice(0,10).map(d=>'<div style="padding:3px 0;border-bottom:1px solid var(--border-light)">'+d.company+' · '+d.position+'</div>').join('');}
+    if(importData.length){featureSelect('#import-preview').style.display='';featureSelect('#import-count').textContent=importData.length;featureSelect('#import-preview-list').innerHTML=importData.slice(0,10).map(d=>'<div style="padding:3px 0;border-bottom:1px solid var(--border-light)">'+d.company+' · '+d.position+'</div>').join('');}
 }
-$('#import-confirm')?.addEventListener('click',async function(){
-    if(!importData.length){toast('没有数据','error');return;}
-    const ok=await store.importApps(importData);
+featureSelect('#import-confirm')?.addEventListener('click',async function(){
+    const currentStore=featureStore();
+    if(!importData.length){if(typeof toast==='function')toast('没有数据','error');return;}
+    if(!currentStore)return;
+    const ok=await currentStore.importApps(importData);
     if(ok===false)return;
     if(typeof initFilters==='function')initFilters();if(typeof refresh==='function')refresh();
-    toast('已导入 '+importData.length+' 条','success');$('#import-modal-overlay').classList.remove('active');importData=[];
+    if(typeof toast==='function')toast('已导入 '+importData.length+' 条','success');featureSelect('#import-modal-overlay').classList.remove('active');importData=[];
 });

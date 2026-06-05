@@ -2269,6 +2269,20 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
   .kanban-filters > div[style*="flex:1"]{
     display:none;
   }
+  #kanban-sort{
+    flex:1 1 180px;
+    min-height:42px;
+  }
+  #kanban-sort-direction{
+    flex:0 0 44px;
+    width:44px;
+    min-width:44px;
+    height:42px;
+    min-height:42px;
+    padding:0;
+    justify-content:center;
+    white-space:nowrap;
+  }
   .kanban-board{padding:14px 18px 20px}
   .kanban-lane{grid-template-columns:1fr;gap:12px;padding:12px}
   .lane-header{padding:0}
@@ -2599,9 +2613,18 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
     min-height:24px;
   }
   .topbar-community-entry{
-    padding:8px 14px 8px 10px;
-    gap:10px;
+    padding:8px 14px;
+    gap:0;
     min-height:44px;
+    justify-content:center;
+    text-align:center;
+  }
+  .topbar-community-dot{
+    display:none;
+  }
+  .topbar-community-copy{
+    width:100%;
+    align-items:center;
   }
   .topbar-community-copy strong,
   .topbar-community-copy small{
@@ -2644,6 +2667,10 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
     padding:12px 14px;
     background:rgba(255,255,255,.02);
   }
+  .kanban-filters{
+    grid-template-columns:minmax(0,1fr) 44px;
+    align-items:stretch;
+  }
   .kanban-filters .filter-select,
   .kanban-filters .btn-ghost,
   .table-toolbar .filter-select,
@@ -2651,6 +2678,24 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
   .table-toolbar .table-filter-input{
     width:100%;
     min-width:0;
+  }
+  #filter-category{
+    grid-column:1 / -1;
+  }
+  #kanban-sort{
+    grid-column:1 / 2;
+    min-height:42px;
+  }
+  #kanban-sort-direction{
+    grid-column:2 / 3;
+    width:44px;
+    min-width:44px;
+    max-width:44px;
+    height:42px;
+    min-height:42px;
+    padding:0;
+    justify-content:center;
+    white-space:nowrap;
   }
   .kanban-filters .toggle-label{
     grid-column:1 / -1;
@@ -2917,16 +2962,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
     font-size:14px!important;
   }
   .cal-view-btn{
-    min-height:38px;
-    justify-content:center;
-  }
-  .cal-view-btn[data-calview="month"]{
-    grid-column:1 / 2;
-    grid-row:2;
-  }
-  .cal-view-btn[data-calview="week"]{
-    grid-column:2 / 4;
-    grid-row:2;
+    display:none!important;
   }
   .calendar-grid{
     padding:12px 12px 12px;
