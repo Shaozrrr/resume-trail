@@ -1327,6 +1327,9 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-field input:focus,.prepare-field select:focus,.prepare-field textarea:focus{border-color:rgba(255,255,255,.18);box-shadow:0 0 0 4px var(--focus-ring)}
 :root[data-theme=light] .prepare-field input,:root[data-theme=light] .prepare-field select,:root[data-theme=light] .prepare-field textarea{background:rgba(255,255,255,.64);border-color:rgba(176,154,127,.22)}
 :root[data-theme=light] .prepare-field input:focus,:root[data-theme=light] .prepare-field select:focus,:root[data-theme=light] .prepare-field textarea:focus{border-color:rgba(164,124,78,.34);box-shadow:0 0 0 4px rgba(164,124,78,.08)}
+.jd-url-action-row,.prepare-jd-url-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.jd-url-action-row input,.prepare-jd-url-row input{min-width:0}
+.prepare-jd-url-row .btn-sm,.jd-url-action-row .btn-sm{height:42px;white-space:nowrap}
 .prepare-field em{font-size:11px;line-height:1.5;color:var(--text-muted);font-style:normal}
 .prepare-field textarea{resize:none;min-height:108px}
 .prepare-upload-field input[type=file]{padding:10px 12px;border-style:dashed;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.025))}
@@ -1370,6 +1373,21 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-recent-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:104px;width:100%;margin:0 auto;padding:8px 6px 4px;text-align:center;line-height:1.55;box-sizing:border-box}
 .prepare-recent-empty strong{display:block;font-size:14px;font-weight:600;letter-spacing:-.02em;color:var(--text-primary)}
 .prepare-recent-empty span{display:block;max-width:28ch;font-size:12px;color:var(--text-secondary);line-height:1.65;overflow-wrap:normal;word-break:keep-all}
+.prepare-job-radar-card{display:flex;flex-direction:column;gap:12px;padding:18px;overflow:hidden}
+.prepare-job-radar-card h3{margin:0;font-size:15px;letter-spacing:-.025em}
+.prepare-job-radar-card p{margin:0;font-size:12px;line-height:1.65;color:var(--text-secondary)}
+.prepare-job-radar-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.prepare-job-radar-search input{width:100%;min-width:0;padding:11px 13px;border-radius:15px;border:1px solid var(--border);background:rgba(255,255,255,.035);color:var(--text-primary);font-family:var(--font);font-size:12px;outline:none}
+.prepare-job-radar-search input:focus{border-color:rgba(255,255,255,.18);box-shadow:0 0 0 4px var(--focus-ring)}
+.prepare-job-radar-list{display:flex;flex-direction:column;gap:9px;max-height:244px;overflow:auto;padding-right:2px}
+.prepare-job-radar-item{display:flex;flex-direction:column;gap:4px;padding:12px 13px;border-radius:16px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);color:var(--text-primary);text-decoration:none;transition:all .2s var(--ease)}
+.prepare-job-radar-item:hover{transform:translateY(-1px);border-color:rgba(245,197,125,.22);background:rgba(255,255,255,.055)}
+.prepare-job-radar-item strong{font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.prepare-job-radar-item span{font-size:11px;color:var(--text-muted);line-height:1.45}
+.prepare-job-radar-item em{font-style:normal;font-size:11px;line-height:1.55;color:var(--text-secondary);overflow-wrap:anywhere}
+:root[data-theme=light] .prepare-job-radar-search input{background:rgba(255,255,255,.66);border-color:rgba(176,154,127,.18)}
+:root[data-theme=light] .prepare-job-radar-item{background:rgba(255,255,255,.56);border-color:rgba(176,154,127,.16)}
+:root[data-theme=light] .prepare-job-radar-item:hover{border-color:rgba(164,124,78,.28);background:rgba(255,255,255,.82)}
 .prepare-workbench{display:flex;flex-direction:column;flex:1;min-height:0;height:auto;padding:18px 22px 24px;overflow:visible}
 .prepare-workbench-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
 .prepare-workbench-head>div:first-child{min-width:0;flex:1}

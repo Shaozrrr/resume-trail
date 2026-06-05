@@ -82,6 +82,22 @@ const RT_THEME_MODE_KEY='rt_theme_mode';
 const RT_THEME_DIRTY_KEY='rt_theme_dirty';
 const HIDDEN_VISA_VALUE='UNKNOWN';
 const PREPARE_SESSION_HISTORY_LIMIT=5;
+const PREPARE_INTELLIGENCE_CACHE_KEY='rt_prepare_intelligence_cache_v1';
+const PREPARE_INTELLIGENCE_TIMEOUT_MS=2200;
+const PREPARE_JD_READER_TIMEOUT_MS=10000;
+const PREPARE_JOB_RADAR_TIMEOUT_MS=7000;
+const PREPARE_MAINLAND_HK_CAREER_SOURCES=[
+    {company:'腾讯',region:'中国大陆',url:'https://careers.tencent.com/search.html?query={query}'},
+    {company:'字节跳动',region:'中国大陆 / 香港',url:'https://jobs.bytedance.com/zh/position?keywords={query}'},
+    {company:'阿里巴巴',region:'中国大陆',url:'https://talent.alibaba.com/off-campus/position-list?keyword={query}'},
+    {company:'美团',region:'中国大陆',url:'https://zhaopin.meituan.com/web/position?keyword={query}'},
+    {company:'小米',region:'中国大陆',url:'https://xiaomi.jobs.f.mioffice.cn/referral/position'},
+    {company:'香港交易所 HKEX',region:'香港',url:'https://www.hkexgroup.com/Careers/Job-Opportunities?sc_lang=zh-HK'},
+    {company:'汇丰 HSBC Hong Kong',region:'香港',url:'https://www.hsbc.com/careers/where-we-hire/hong-kong'},
+    {company:'友邦 AIA',region:'香港',url:'https://www.aia.com/en/careers'},
+    {company:'数码港 Cyberport',region:'香港',url:'https://www.cyberport.hk/en/careers'},
+    {company:'香港科技园 HKSTP',region:'香港',url:'https://www.hkstp.org/careers/'}
+];
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -1517,6 +1533,7 @@ const prepareState={
     manualDraft:{
         companyName:'',
         roleName:'',
+        jdUrl:'',
         jdText:'',
         resumeId:'',
         resumeText:''
@@ -1529,7 +1546,13 @@ const prepareState={
     loadingStartedAt:0,
     loadingFrame:0,
     supplementalExperienceDraft:'',
-    showSupplementModal:false
+    showSupplementModal:false,
+    jdReaderLoadingKey:'',
+    jdReaderError:'',
+    jobRadarQuery:'',
+    jobRadarLoading:false,
+    jobRadarResults:[],
+    jobRadarError:''
 };
 const prepareMockState={
     sessionId:'',
@@ -2706,6 +2729,261 @@ async function fetchPrepareLookupJson(url,label){
         throw new Error(`${label} 请求失败（${response.status}）`);
     }
     return data||{};
+}
+async function fetchPrepareTextWithTimeout(url,label,timeoutMs){
+    const controller=typeof AbortController!=='undefined'?new AbortController():null;
+    const timeoutId=controller?setTimeout(function(){
+        try{controller.abort();}catch(error){}
+    },timeoutMs||PREPARE_INTELLIGENCE_TIMEOUT_MS):null;
+    try{
+        const response=await fetch(url,{
+            headers:{Accept:'text/plain, text/markdown, application/json;q=0.9, */*;q=0.8'},
+            signal:controller?controller.signal:undefined
+        });
+        const text=await response.text().catch(function(){return'';});
+        if(!response.ok)throw new Error(`${label||'请求'}失败（${response.status}）`);
+        return text;
+    }finally{
+        if(timeoutId)clearTimeout(timeoutId);
+    }
+}
+function normalizePrepareUrl(value){
+    const raw=normalizePrepareText(value);
+    if(!raw)return'';
+    return /^https?:\/\//i.test(raw)?raw:`https://${raw}`;
+}
+function buildPrepareJdReaderUrls(rawUrl){
+    const url=normalizePrepareUrl(rawUrl);
+    if(!url)return[];
+    const stripped=url.replace(/^https?:\/\//i,'').replace(/^\/+/,'');
+    const urls=[
+        `https://r.jina.ai/http://${stripped}`,
+        `https://r.jina.ai/http://${url}`
+    ];
+    return [...new Set(urls)];
+}
+function normalizePrepareReaderText(value){
+    return String(value||'')
+        .replace(/\r\n?/g,'\n')
+        .replace(/^Title:\s*/gim,'')
+        .replace(/^URL Source:\s*.*$/gim,'')
+        .replace(/^Markdown Content:\s*/gim,'')
+        .replace(/!\[[^\]]*]\([^)]+\)/g,'')
+        .replace(/\[[^\]]+]\((?:mailto:|tel:|javascript:)[^)]+\)/gi,'')
+        .replace(/\n{3,}/g,'\n\n')
+        .trim()
+        .slice(0,16000);
+}
+async function readPrepareJdFromUrl(rawUrl){
+    const attempts=buildPrepareJdReaderUrls(rawUrl);
+    if(!attempts.length)throw new Error('请先填 JD 链接。');
+    let lastError=null;
+    for(const url of attempts){
+        try{
+            const text=normalizePrepareReaderText(await fetchPrepareTextWithTimeout(url,'JD 链接读取',PREPARE_JD_READER_TIMEOUT_MS));
+            if(text.length>=PREP_MIN_JD_LENGTH)return text;
+        }catch(error){
+            lastError=error;
+        }
+    }
+    throw new Error(lastError instanceof Error?lastError.message:'没有从这个链接读到足够完整的 JD，请手动粘贴正文。');
+}
+function readPrepareIntelligenceCache(){
+    try{
+        const raw=localStorage.getItem(PREPARE_INTELLIGENCE_CACHE_KEY);
+        return raw?JSON.parse(raw):{};
+    }catch(error){
+        return{};
+    }
+}
+function writePrepareIntelligenceCache(key,payload){
+    if(!key||!payload)return;
+    const cache=readPrepareIntelligenceCache();
+    cache[key]=Object.assign({cached_at:new Date().toISOString()},payload);
+    const entries=Object.entries(cache).sort(function(a,b){
+        return new Date(b[1]?.cached_at||0).getTime()-new Date(a[1]?.cached_at||0).getTime();
+    }).slice(0,16);
+    const next={};
+    entries.forEach(function(entry){next[entry[0]]=entry[1];});
+    try{localStorage.setItem(PREPARE_INTELLIGENCE_CACHE_KEY,JSON.stringify(next));}catch(error){}
+}
+function getPrepareIntelligenceCacheKey(input){
+    const base=[
+        input?.company_name,
+        input?.role_name,
+        String(input?.jd_text||'').slice(0,700),
+        String(input?.resume_text||'').slice(0,700),
+        normalizePrepareText(input?.supplemental_experience_summary||'')
+    ].join('|').toLowerCase();
+    let hash=0;
+    for(let index=0;index<base.length;index+=1){
+        hash=(hash*31+base.charCodeAt(index))>>>0;
+    }
+    return `intel_${hash.toString(36)}`;
+}
+function splitPrepareEvidenceFragments(text){
+    return String(text||'')
+        .replace(/\r\n?/g,'\n')
+        .split(/\n+|(?<=[。；.!?？])\s+/)
+        .map(function(item){return normalizePrepareText(item).replace(/^[-•*]\s*/,'');})
+        .filter(function(item){return item.length>=18;})
+        .slice(0,90);
+}
+function getPrepareTokenSet(text){
+    const raw=String(text||'').toLowerCase();
+    const words=(raw.match(/[a-z][a-z0-9+#.-]{2,}|[\u4e00-\u9fa5]{2,8}/g)||[])
+        .filter(function(token){
+            return !/^(the|and|for|with|from|this|that|your|我们|负责|相关|能力|岗位|公司|团队|项目)$/.test(token);
+        });
+    return new Set(words);
+}
+function scorePrepareTextOverlap(source,target){
+    const sourceSet=getPrepareTokenSet(source);
+    const targetSet=getPrepareTokenSet(target);
+    if(!sourceSet.size||!targetSet.size)return 0;
+    let hit=0;
+    targetSet.forEach(function(token){
+        if(sourceSet.has(token)||[...sourceSet].some(function(item){return item.includes(token)||token.includes(item);}))hit+=1;
+    });
+    return hit/Math.max(6,targetSet.size);
+}
+function buildPrepareSemanticEvidence(input){
+    const target=[input?.role_name,input?.role_category,input?.jd_text].filter(Boolean).join('\n');
+    const supplemental=(Array.isArray(input?.supplemental_experiences)?input.supplemental_experiences:[])
+        .map(function(item){return item?.content||item?.text||item?.summary||'';})
+        .join('\n');
+    const fragments=splitPrepareEvidenceFragments([input?.resume_text,supplemental,input?.supplemental_experience_summary].filter(Boolean).join('\n'));
+    return fragments.map(function(fragment){
+        return{
+            text:fragment.slice(0,260),
+            score:Number(scorePrepareTextOverlap(fragment,target).toFixed(3)),
+            matched_to:normalizePrepareText(input?.role_name||'岗位要求')
+        };
+    }).filter(function(item){return item.score>0;})
+        .sort(function(a,b){return b.score-a.score;})
+        .slice(0,10);
+}
+function buildPrepareRoleStandardLocal(input){
+    const jd=normalizePrepareText(input?.jd_text||'');
+    const role=normalizePrepareText(input?.role_name||input?.role_category||'目标岗位');
+    const combined=`${role}\n${jd}`;
+    const rules=[
+        {key:'需求与用户洞察',re:/需求|用户|访谈|调研|痛点|场景|PRD|产品方案|需求文档/i,checks:['能把 JD 中的目标用户、业务场景和真实痛点讲清楚','准备 1 套从调研到需求优先级排序的判断口径']},
+        {key:'AI / Agent 产品落地',re:/AI|Agent|智能体|大模型|LLM|Copilot|Skill|Prompt|提示词|模型/i,checks:['说明 AI 能力边界、失败兜底、评估指标和上线节奏','准备一个把通用 AI 能力迁移到岗位业务场景的方案']},
+        {key:'数据与指标验证',re:/数据|指标|漏斗|增长|留存|转化|分析|A\/B|实验|BI/i,checks:['定义成功指标、过程指标和反向风险指标','准备如何用数据验证功能是否真的创造价值']},
+        {key:'跨团队推进',re:/协作|推动|沟通|研发|算法|设计|业务|跨团队|stakeholder/i,checks:['讲清需求如何被研发、算法、业务共同理解','准备冲突处理、范围收敛和节奏管理案例']},
+        {key:'业务与行业理解',re:/金融|财务|支付|风控|电商|企业|SaaS|合规|交易|供应链|运营/i,checks:['补齐岗位所在业务链路、核心角色和典型成本/风险','准备把产品动作翻译成业务价值的表达']},
+        {key:'商业化与用户增长',re:/商业|收入|付费|会员|增长|获客|留存|活跃|生命周期/i,checks:['准备用户分层、价值主张和转化路径','说明如何找到增长瓶颈并设计实验']},
+        {key:'项目管理与交付',re:/上线|落地|交付|迭代|项目管理|排期|版本|质量/i,checks:['准备从目标拆解、排期、验收到复盘的完整流程','明确自己在项目里的角色边界和决策依据']}
+    ];
+    const matched=rules.filter(function(rule){return rule.re.test(combined);});
+    const selected=(matched.length?matched:rules.slice(0,4)).slice(0,6);
+    return{
+        role,
+        capabilities:selected.map(function(rule){return rule.key;}),
+        interview_checks:selected.flatMap(function(rule){return rule.checks;}).slice(0,10),
+        source:'local_jd_capability_map'
+    };
+}
+async function fetchPrepareEscoHints(input){
+    const query=normalizePrepareText(input?.role_name||input?.role_category||'product manager');
+    if(!query)return[];
+    try{
+        const data=await fetchPrepareLookupJson(`https://ec.europa.eu/esco/api/search?text=${encodeURIComponent(query)}&type=skill&language=en&limit=6`,'ESCO 技能标准');
+        return (data?._embedded?.results||data?.results||[]).slice(0,6).map(function(item){
+            return{
+                title:normalizePrepareText(item?.title||item?.preferredLabel?.en||item?.preferredLabel||''),
+                description:normalizePrepareText(item?.description?.en||item?.description||''),
+                source:'ESCO'
+            };
+        }).filter(function(item){return item.title;});
+    }catch(error){
+        return[];
+    }
+}
+async function fetchPrepareCompanyIntel(input){
+    const company=normalizePrepareText(input?.company_name||'');
+    if(!company)return[];
+    const queries=[
+        {query:`${company} 公司 业务 最新`,intent:'公司业务和近期重点',language:'zh'},
+        {query:`${company} ${normalizePrepareText(input?.role_name||'')} 面试 产品`,intent:'岗位和面试语境',language:'zh'}
+    ];
+    const settled=await Promise.allSettled(queries.map(async function(query){
+        const raw=await runPrepareWebLookup(query);
+        const parsed=JSON.parse(raw||'{}');
+        return summarizePrepareLookupPayload(parsed);
+    }));
+    return settled.map(function(result){return result.status==='fulfilled'?result.value:null;})
+        .filter(Boolean)
+        .slice(0,2);
+}
+async function buildPrepareIntelligenceDigest(input,kind){
+    const cacheKey=getPrepareIntelligenceCacheKey(input);
+    const cached=readPrepareIntelligenceCache()[cacheKey];
+    if(cached&&Date.now()-new Date(cached.cached_at||0).getTime()<1000*60*60*12)return cached;
+    const roleStandard=buildPrepareRoleStandardLocal(input);
+    const semanticEvidence=buildPrepareSemanticEvidence(input);
+    const [escoHints,companyIntel]=await Promise.all([
+        fetchPrepareEscoHints(input),
+        kind==='answer'?Promise.resolve([]):fetchPrepareCompanyIntel(input)
+    ]);
+    const payload={
+        role_standard:roleStandard,
+        external_skill_standard:escoHints,
+        semantic_evidence:semanticEvidence,
+        company_intelligence:companyIntel,
+        usage_note:'生成重点、问题和回答时，先按 role_standard 判断 JD 要求，再用 semantic_evidence 选择最匹配的真实经历，避免固定套模板或总引用最近经历。'
+    };
+    writePrepareIntelligenceCache(cacheKey,payload);
+    return payload;
+}
+async function buildPrepareAugmentedPayload(payload,kind){
+    try{
+        const intelligence=await buildPrepareIntelligenceDigest(payload,kind||'session');
+        return Object.assign({},payload,{intelligence_context:intelligence});
+    }catch(error){
+        return Object.assign({},payload,{intelligence_context:{error:'外部增强暂时不可用，已按本地 JD 与简历继续生成。'}});
+    }
+}
+function buildPrepareOfficialCareerUrl(template,query){
+    return template.replace('{query}',encodeURIComponent(query||''));
+}
+async function fetchPrepareHongKongJobSources(query){
+    const keyword=normalizePrepareText(query||'job vacancies');
+    try{
+        const raw=await fetchPrepareTextWithTimeout(`https://data.gov.hk/api/3/action/package_search?q=${encodeURIComponent(`${keyword} job vacancies recruitment`)}&rows=5`,'data.gov.hk 职位数据目录',PREPARE_JOB_RADAR_TIMEOUT_MS);
+        const data=JSON.parse(raw||'{}');
+        return (data?.result?.results||[]).slice(0,5).map(function(item){
+            const resource=(item.resources||[]).find(function(res){
+                return /json|csv|api/i.test(`${res.format||''} ${res.url||''}`);
+            })||(item.resources||[])[0]||{};
+            return{
+                title:normalizePrepareText(item.title||item.name||'香港公开职位数据'),
+                company:'香港公开数据',
+                region:'香港',
+                source:'data.gov.hk API',
+                url:normalizePrepareText(resource.url||`https://data.gov.hk/en-data/dataset/${item.name||''}`),
+                summary:normalizePrepareText(item.notes||'来自香港政府公开数据目录，可继续打开查看数据源和职位相关信息。').slice(0,120)
+            };
+        }).filter(function(item){return item.title&&item.url;});
+    }catch(error){
+        return[];
+    }
+}
+async function fetchPrepareJobRadar(query){
+    const keyword=normalizePrepareText(query||prepareState.jobRadarQuery||prepareState.manualDraft.roleName||'产品经理');
+    const [hkSources]=await Promise.all([fetchPrepareHongKongJobSources(keyword)]);
+    const officialLinks=PREPARE_MAINLAND_HK_CAREER_SOURCES.map(function(source){
+        return{
+            title:`${source.company} 官方招聘入口`,
+            company:source.company,
+            region:source.region,
+            source:'官方招聘页',
+            url:buildPrepareOfficialCareerUrl(source.url,keyword),
+            summary:`优先查看 ${keyword} / AI / 产品 / 数据相关岗位，并把完整 JD 链接带回准备工作台。`
+        };
+    });
+    return dedupePrepareLookupResults(hkSources.concat(officialLinks)).slice(0,10);
 }
 function flattenPrepareDuckTopics(topics,bucket){
     (topics||[]).forEach(function(topic){
@@ -4181,7 +4459,7 @@ function getPrepareApplicationDraft(app){
         size:prepareState.appSupplementFile.size,
         type:prepareState.appSupplementFile.type||'application/octet-stream'
     }:null;
-    const jdText=normalizePrepareText(app.jd_text||supplement.jdText);
+    const jdText=normalizePrepareText(supplement.jdText||app.jd_text);
     const jdUrl=normalizePrepareText(supplement.jdUrl||app.jd_url);
     const hasResumeContext=Boolean(linkedResume||resumeText||resumeFileMeta);
     return{
@@ -4338,12 +4616,13 @@ function buildPrepareSessionMessagesClient(input){
         supplemental_experiences:input.supplemental_experiences||[],
         supplemental_experience_summary:normalizePrepareText(input.supplemental_experience_summary),
         external_term_briefs:knownTermBriefs,
-        analysis_playbooks:analysisPlaybooks
+        analysis_playbooks:analysisPlaybooks,
+        intelligence_context:input.intelligence_context||{}
     };
     return[
         {
             role:'system',
-            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs 和 external_web_research 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 必须百分百围绕 JD 的职责、能力、业务理解和高频追问来写，简历只能作为判断“哪些点该强化、哪些点该补齐”的后台依据，禁止在 prep_priorities 里出现简历、经历、实习、项目、哪段经历、怎么讲某段经历这类表述；17）prep_priorities 要写成专业面试老师会给出的准备建议，重点是“面试官会怎么追问、你要准备什么判断口径、业务理解、指标定义和表达边界”，不要写固定模板句；18）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
+            content:'你是资深中文产品经理与面试教练，任务是为求职者生成高度可执行的面试准备工作台。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务、行业黑话与近期语境，禁止凭感觉猜。intelligence_context 是额外增强层：role_standard 用来判断 JD 真正考什么，semantic_evidence 用来挑最贴题的简历/补充经历证据，company_intelligence 和 external_skill_standard 用来补业务与岗位标准。只要它存在，必须优先参考它来避免模板化、重复化和总引用最近经历。强约束：1）先深度阅读 resume_snapshot，再读 JD；2）external_term_briefs 是已经核实过的公开术语情报，只要它提供了定义，就应该直接使用，禁止再写成“看起来像”“可能是”；3）analysis_playbooks 是必须复用的专业分析框架，先按这些 checklist 做结构化判断，再组织输出；4）focus.best_experiences 只能引用 resume_snapshot.evidence_lines、semantic_evidence 或 resume_text 里真实出现过的经历线索，禁止捏造项目、职位、数字和职责；5）如果简历里没有直接匹配岗位的内容，不要假装有匹配，请明确写出缺口，并在 highlight_points / possible_followups 里告诉用户应该补挖什么经历；6）best_experiences 最多返回 3 条，而且每条都必须绑定不同的真实线索，禁止把同一套泛化建议换个标题重复写；7）当匹配度低时，至少给 1 条“可以这样讲”的具体表达示例，而不是只给抽象提醒；8）所有问题和建议都必须尽量回扣 JD；9）如果 external_term_briefs、external_web_research 和 intelligence_context 都没有覆盖某个专有名词，才标注为“待确认术语”；10）keyword_translation 必须专业、准确、可执行，优先解释业务含义和面试重点；11）每道 question 都要判断最适合的回答框架，返回 recommended_frameworks、default_framework、framework_reason，不要把不适合的框架硬塞进去；12）meta.lens 要短，控制在 10 个汉字内，例如“产品增长准备”“数据分析准备”；13）questions.question_groups 必须混合 JD 题、简历深挖、行为面 / 宝洁八大问、场景 / case、反问环节，不要所有问题都只来自 JD 原文；14）focus.best_experiences 每条都要说明对应 JD 的哪一项、怎么展开、还缺什么细节要补清楚；highlight_points 至少要覆盖“对应 JD”“怎么展开”“还缺什么证据/细节”“可以直接开讲的示例句”四层信息，不要只给抽象提醒；15）best_experiences 要优先覆盖不同的真实经历板块，例如不同实习、不同项目，不要把多段经历揉成一条泛泛总结；resume_section 要尽量写成具体经历名，让前端可以按经历分组展示；16）prep_priorities 必须百分百围绕 JD 的职责、能力、业务理解和高频追问来写，简历只能作为判断“哪些点该强化、哪些点该补齐”的后台依据，禁止在 prep_priorities 里出现简历、经历、实习、项目、哪段经历、怎么讲某段经历这类表述；17）prep_priorities 要写成专业面试老师会给出的准备建议，重点是“面试官会怎么追问、你要准备什么判断口径、业务理解、指标定义和表达边界”，不要写固定模板句；18）best_experiences 的四个维度不要每条都写成同一套模板，必须引用该经历自己的具体成果、动作或数字。当匹配度低时，必须给出至少 1 条“可以这样讲”的具体表达示例，以及“可以补做什么 / 补学什么 / 怎么包装”的建议。输出字段必须严格符合 schema：{"research":{"company_overview":{"one_liner":"string","business_lines":["string"],"products_services":["string"],"business_model":"string","market_position":"string","recent_focus":["string"]},"role_analysis":{"role_type":"string","target_capabilities":["string"],"business_context":"string","interviewer_focus":["string"]},"keyword_translation":[{"jd_keyword":"string","meaning":"string","prep_direction":"string"}]},"focus":{"prep_priorities":[{"title":"string","reason":"string","what_to_prepare":["string"]}],"best_experiences":[{"resume_section":"string","why_match":"string","highlight_points":["string"],"possible_followups":["string"]}],"risk_warnings":[{"title":"string","description":"string","avoidance_tip":"string"}]},"questions":{"question_groups":[{"group_name":"string","questions":[{"id":"string","question":"string","question_type":"string","source":"string","importance":"high|medium","recommended_frameworks":["STAR|PREP|PAR|SCQA"],"default_framework":"STAR|PREP|PAR|SCQA","framework_reason":"string"}]}]},"meta":{"lens":"string","summary":"string","provider":"string","model":"string"}}'
         },
         {
             role:'user',
@@ -4370,6 +4649,7 @@ function buildPrepareAnswerMessagesClient(input){
         supplemental_experience_summary:normalizePrepareText(input.supplemental_experience_summary),
         external_term_briefs:knownTermBriefs,
         analysis_playbooks:analysisPlaybooks,
+        intelligence_context:input.intelligence_context||{},
         question:normalizePrepareText(input.question),
         question_type:normalizePrepareText(input.question_type),
         source:normalizePrepareText(input.source),
@@ -4381,7 +4661,7 @@ function buildPrepareAnswerMessagesClient(input){
     return[
         {
             role:'system',
-            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，但这版骨架必须足够接近现场可直接开口，不要只给空泛提纲。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot、prep_focus 和 question_matched_experiences 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs 和 external_web_research 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 不能写成 Point/Reason/Example 这种模板标题，必须是一段 120 到 220 字、用户可以直接说出口的中文回答；10）如果题目像“如何定义 Skill 的质量标准 / 如何保证可复用性”这种业务判断题，必须直接给出你的判断维度和落地做法，不要只写“先讲背景、再讲动作”；11）如果问题是“为什么来我们公司 / 为什么选择我们 / 为什么想加入”，先回答公司和岗位吸引力，再挑 1 段最相关经历做证明，禁止把整段回答写成最近一段实习复述；12）不要机械默认 prep_focus 第一条或最近经历。每道题都要重新判断最匹配的经历；如果另一段项目或实习更贴题，就切换到那一段；13）如果题目更看业务理解、岗位判断或公司动机，回答主体应该是你的判断，经历只用来做短证据，不要把经历写成主角。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
+            content:'你是资深面试教练。任务是基于公司、岗位、JD、简历内容，为一条具体问题生成“回答骨架”，但这版骨架必须足够接近现场可直接开口，不要只给空泛提纲。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。所有文案为简体中文。系统可能已经提供 external_web_research 公开检索背景；只要它存在，就必须优先使用这些资料理解陌生专有名词、平台名、产品名、公司业务和行业黑话，禁止凭感觉猜。intelligence_context.semantic_evidence 是针对本题选择证据的优先参考，role_standard 是判断岗位要考什么的优先参考。recommended_frameworks / default_framework 是上一步对这道题筛过的更适合框架，你要顺着这个判断来组织，不要把明显不合适的结构硬套进去。强约束：1）先从 resume_snapshot、prep_focus、semantic_evidence 和 question_matched_experiences 里找证据，再组织答案；2）external_term_briefs 是已核实的公开术语情报，只要里面有定义，就直接按该定义使用，不要再写成模糊猜测；3）analysis_playbooks 是必须复用的专业回答框架与判断维度，先按 checklist 判断，再组织输出；4）suggested_points 必须优先引用真实简历线索，禁止编造项目、角色、结果数字；5）如果当前简历没有足够证据回答这题，要明确指出缺口，并建议用户补挖哪类经历，而不是强行写像真的内容；6）如果 question 涉及 external_term_briefs 里的术语，回答重点要放在业务理解、产品判断和可迁移能力，而不是空泛概念；7）如果 external_term_briefs、external_web_research 和 intelligence_context 都没有覆盖问题里的关键术语，才用“待确认术语”表达不确定性；8）如果是自由提问，请直接围绕用户输入的问题作答，不要强行套默认问法；9）copyable_outline 不能写成 Point/Reason/Example 这种模板标题，必须是一段 120 到 220 字、用户可以直接说出口的中文回答；10）如果题目像“如何定义 Skill 的质量标准 / 如何保证可复用性”这种业务判断题，必须直接给出你的判断维度和落地做法，不要只写“先讲背景、再讲动作”；11）如果问题是“为什么来我们公司 / 为什么选择我们 / 为什么想加入”，先回答公司和岗位吸引力，再挑 1 段最相关经历做证明，禁止把整段回答写成最近一段实习复述；12）不要机械默认 prep_focus 第一条或最近经历。每道题都要重新判断最匹配的经历；如果另一段项目或实习更贴题，就切换到那一段；13）如果题目更看业务理解、岗位判断或公司动机，回答主体应该是你的判断，经历只用来做短证据，不要把经历写成主角。输出 schema：{"question_id":"string","framework_type":"string","structure":[{"section":"string","guidance":"string","suggested_points":["string"]}],"delivery_tips":["string"],"copyable_outline":"string","resume_evidence_used":["string"],"gap_note":"string"}'
         },
         {
             role:'user',
@@ -4592,25 +4872,18 @@ function hasPrepareQuestionOverlap(currentQuestions,nextQuestions){
     });
 }
 async function requestPrepareSessionAI(session){
-    const payload=getPrepareSessionPayload(session);
+    const payload=await buildPrepareAugmentedPayload(getPrepareSessionPayload(session),'session');
     if(getPrepareConfig().mode==='supabase_edge'){
         return requestPrepareEdgeAI(buildPrepareSessionMessagesClient(payload),'session');
     }
     if(getPrepareConfig().mode==='direct'){
         return requestPrepareDirectAI(buildPrepareSessionMessagesClient(payload),payload,'session');
     }
-    const response=await fetch(`${getPrepareApiBase()}/api/prepare/session`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(getPrepareSessionPayload(session))
-    });
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok||!data?.ok||!data?.output)throw new Error(data?.error||'AI 准备工作台生成失败');
-    return data.output;
+    return requestPrepareCustomAI(buildPrepareSessionMessagesClient(payload),'session',payload);
 }
 async function requestPrepareAnswerAI(session,question,framework){
     const safeFocus=sanitizePrepareFocus(session.outputs||{},session);
-    const payload=Object.assign({},getPrepareSessionPayload(session),{
+    const payload=await buildPrepareAugmentedPayload(Object.assign({},getPrepareSessionPayload(session),{
         question_id:question.id,
         question:question.question,
         question_type:question.question_type||'',
@@ -4620,21 +4893,14 @@ async function requestPrepareAnswerAI(session,question,framework){
         framework_type:framework||'STAR',
         prep_focus:safeFocus.best_experiences||[],
         prep_keywords:session.outputs?.research?.keyword_translation||[]
-    });
+    }),'answer');
     if(getPrepareConfig().mode==='supabase_edge'){
         return requestPrepareEdgeAI(buildPrepareAnswerMessagesClient(payload),'answer');
     }
     if(getPrepareConfig().mode==='direct'){
         return requestPrepareDirectAI(buildPrepareAnswerMessagesClient(payload),payload,'answer');
     }
-    const response=await fetch(`${getPrepareApiBase()}/api/prepare/answer`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
-    });
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok||!data?.ok||!data?.output)throw new Error(data?.error||'AI 回答骨架生成失败');
-    return data.output;
+    return requestPrepareCustomAI(buildPrepareAnswerMessagesClient(payload),'answer',payload);
 }
 async function requestPrepareQuestionGroupAI(session,group){
     const payload=Object.assign({},getPrepareSessionPayload(session),{
@@ -5287,7 +5553,7 @@ async function createManualPrepareSession(){
         role_name:roleName,
         role_category:'',
         jd_text:jdText,
-        jd_url:'',
+        jd_url:normalizePrepareText(prepareState.manualDraft.jdUrl),
         resume_id:linkedResume?.id||null,
         resume_name:resumeContext.resume_name,
         resume_text:resumeContext.resume_text,
@@ -5317,7 +5583,7 @@ async function createManualPrepareSession(){
         const next=store.getPrepareSession(session.id);
         prepareState.manualResumeFile=null;
         prepareState.manualResumeParse={status:'idle',text:'',message:''};
-        prepareState.manualDraft={companyName:'',roleName:'',jdText:'',resumeId:'',resumeText:''};
+        prepareState.manualDraft={companyName:'',roleName:'',jdUrl:'',jdText:'',resumeId:'',resumeText:''};
         prepareState.sessionLoading=false;
         stopPrepareLoading();
         const fileInput=$('#prepare-manual-file');
@@ -7091,6 +7357,38 @@ function renderPrepareWorkbench(session){
         </div>
     `;
 }
+function renderPrepareJobRadarCard(){
+    const query=prepareState.jobRadarQuery||prepareState.manualDraft.roleName||'AI 产品经理';
+    const results=Array.isArray(prepareState.jobRadarResults)?prepareState.jobRadarResults:[];
+    return `
+        <div class="prepare-card-surface prepare-job-radar-card">
+            <div class="prepare-section-kicker">中港职位入口</div>
+            <h3>找中国大陆 / 香港公司的真实岗位</h3>
+            <p>优先接香港公开数据目录和中港公司官方招聘入口。打开后把 JD 链接带回准备台即可读取。</p>
+            <div class="prepare-job-radar-search">
+                <input type="text" id="prepare-job-radar-query" value="${escapeHTML(query)}" placeholder="AI 产品经理 / 数据产品 / PM Intern">
+                <button type="button" class="btn-secondary btn-sm" id="prepare-job-radar-run">${prepareState.jobRadarLoading?'搜索中':'刷新'}</button>
+            </div>
+            ${prepareState.jobRadarError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.jobRadarError)}</div>`:''}
+            <div class="prepare-job-radar-list">
+                ${results.length?results.map(function(item){
+                    return `
+                        <a class="prepare-job-radar-item" href="${escapeHTML(item.url||'#')}" target="_blank" rel="noreferrer">
+                            <strong>${escapeHTML(item.title||'职位入口')}</strong>
+                            <span>${escapeHTML(item.region||'中港')} · ${escapeHTML(item.source||'公开来源')}</span>
+                            <em>${escapeHTML(item.summary||'打开官方入口查看 JD，再用 JD 链接读取到准备台。')}</em>
+                        </a>
+                    `;
+                }).join(''):`
+                    <div class="prepare-recent-empty">
+                        <strong>还没搜索职位</strong>
+                        <span>输入岗位关键词，先拿到官方入口或公开数据源。</span>
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+}
 function renderPrepare(){
     const root=$('#prepare-root');
     if(!root)return;
@@ -7197,6 +7495,14 @@ function renderPrepare(){
                                         </div>
                                         ${appDraft?.requiresJd?`
                                             <label class="prepare-field prepare-field-full">
+                                                <span>JD 链接</span>
+                                                <div class="prepare-jd-url-row">
+                                                    <input type="url" id="prepare-app-jd-url" placeholder="https://..." value="${escapeHTML(prepareState.appSupplement.jdUrl||appDraft?.jdUrl||'')}">
+                                                    <button type="button" class="btn-secondary btn-sm" id="prepare-app-read-jd">${prepareState.jdReaderLoadingKey==='app'?'读取中':'读取JD'}</button>
+                                                </div>
+                                                <em>能读取的链接会自动填到下面 JD 文本，读取不到也可以手动粘贴。</em>
+                                            </label>
+                                            <label class="prepare-field prepare-field-full">
                                                 <span>JD 文本</span>
                                                 <textarea id="prepare-app-jd-text" rows="5" placeholder="请直接粘贴岗位 JD 原文。">${escapeHTML(prepareState.appSupplement.jdText||'')}</textarea>
                                                 <em>至少 ${PREP_MIN_JD_LENGTH} 个字，避免 AI 只靠公司名和岗位名猜。</em>
@@ -7245,6 +7551,14 @@ function renderPrepare(){
                                         <input type="text" id="prepare-manual-role" placeholder="例如：产品经理" value="${escapeHTML(prepareState.manualDraft.roleName||'')}">
                                     </label>
                                     <label class="prepare-field prepare-field-full">
+                                        <span>JD 链接</span>
+                                        <div class="prepare-jd-url-row">
+                                            <input type="url" id="prepare-manual-jd-url" placeholder="https://..." value="${escapeHTML(prepareState.manualDraft.jdUrl||'')}">
+                                            <button type="button" class="btn-secondary btn-sm" id="prepare-manual-read-jd">${prepareState.jdReaderLoadingKey==='manual'?'读取中':'读取JD'}</button>
+                                        </div>
+                                        <em>支持先填链接自动读取；如果网站限制读取，再手动粘贴 JD 原文。</em>
+                                    </label>
+                                    <label class="prepare-field prepare-field-full">
                                         <span>JD 文本</span>
                                         <textarea id="prepare-manual-jd" rows="5" placeholder="把职位描述直接贴进来，越完整越好。">${escapeHTML(prepareState.manualDraft.jdText||'')}</textarea>
                                     </label>
@@ -7276,6 +7590,7 @@ function renderPrepare(){
                         `}
                     </div>
                     <aside class="prepare-compose-side">
+                        ${renderPrepareJobRadarCard()}
                         <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
                             <div class="prepare-section-kicker">最近会话</div>
                             <div class="prepare-recent-list prepare-recent-list-compact">
@@ -7366,6 +7681,27 @@ function renderPrepare(){
     $('#prepare-app-jd-text')?.addEventListener('input',function(){
         prepareState.appSupplement.jdText=this.value;
     });
+    $('#prepare-app-jd-url')?.addEventListener('input',function(){
+        prepareState.appSupplement.jdUrl=this.value;
+    });
+    $('#prepare-app-read-jd')?.addEventListener('click',async function(){
+        const url=$('#prepare-app-jd-url')?.value||prepareState.appSupplement.jdUrl||'';
+        prepareState.appSupplement.jdUrl=url;
+        prepareState.jdReaderLoadingKey='app';
+        prepareState.jdReaderError='';
+        renderPrepare();
+        try{
+            const text=await readPrepareJdFromUrl(url);
+            prepareState.appSupplement.jdText=text;
+            toast('已读取 JD，并填入本次准备。','success');
+        }catch(error){
+            prepareState.jdReaderError=error instanceof Error?error.message:String(error);
+            toast(prepareState.jdReaderError,'error');
+        }finally{
+            prepareState.jdReaderLoadingKey='';
+            renderPrepare();
+        }
+    });
     $('#prepare-app-resume-select')?.addEventListener('change',function(){
         prepareState.appSupplement.resumeId=this.value||'';
         renderPrepare();
@@ -7405,6 +7741,27 @@ function renderPrepare(){
     $('#prepare-manual-role')?.addEventListener('input',function(){
         prepareState.manualDraft.roleName=this.value;
     });
+    $('#prepare-manual-jd-url')?.addEventListener('input',function(){
+        prepareState.manualDraft.jdUrl=this.value;
+    });
+    $('#prepare-manual-read-jd')?.addEventListener('click',async function(){
+        const url=$('#prepare-manual-jd-url')?.value||prepareState.manualDraft.jdUrl||'';
+        prepareState.manualDraft.jdUrl=url;
+        prepareState.jdReaderLoadingKey='manual';
+        prepareState.jdReaderError='';
+        renderPrepare();
+        try{
+            const text=await readPrepareJdFromUrl(url);
+            prepareState.manualDraft.jdText=text;
+            toast('已读取 JD，并填入本次准备。','success');
+        }catch(error){
+            prepareState.jdReaderError=error instanceof Error?error.message:String(error);
+            toast(prepareState.jdReaderError,'error');
+        }finally{
+            prepareState.jdReaderLoadingKey='';
+            renderPrepare();
+        }
+    });
     $('#prepare-manual-jd')?.addEventListener('input',function(){
         prepareState.manualDraft.jdText=this.value;
     });
@@ -7423,6 +7780,25 @@ function renderPrepare(){
                 toast('准备工作台已生成','success');
             }
         },'生成中...');
+    });
+    $('#prepare-job-radar-query')?.addEventListener('input',function(){
+        prepareState.jobRadarQuery=this.value;
+    });
+    $('#prepare-job-radar-run')?.addEventListener('click',async function(){
+        const query=normalizePrepareText($('#prepare-job-radar-query')?.value||prepareState.jobRadarQuery||'产品经理');
+        prepareState.jobRadarQuery=query;
+        prepareState.jobRadarLoading=true;
+        prepareState.jobRadarError='';
+        renderPrepare();
+        try{
+            prepareState.jobRadarResults=await fetchPrepareJobRadar(query);
+            if(!prepareState.jobRadarResults.length)prepareState.jobRadarError='暂时没有搜到公开入口，可以换一个岗位关键词。';
+        }catch(error){
+            prepareState.jobRadarError=error instanceof Error?error.message:String(error);
+        }finally{
+            prepareState.jobRadarLoading=false;
+            renderPrepare();
+        }
     });
     $$('[data-prepare-session]').forEach(button=>button.addEventListener('click',function(){
         resetPrepareWorkspaceState(this.dataset.prepareSession);
@@ -8364,6 +8740,18 @@ if(editId){const old=store.getApp(editId);d.customFields=Object.assign({},old?.c
         d.current_status_date=getLatestTimelineEntry(d.timeline)?.date||statusDate||appliedDate;
 const ok=await store.updateApp(editId,d);if(!ok){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{d.timeline=syncTimelineFromForm([],selectedStatus,appliedDate,statusDate);const timelineError=validateTimelineChronology(d.timeline);if(timelineError){toast(timelineError,'error');return;}d.status=deriveStatus(d.timeline);d.current_status_date=getLatestTimelineEntry(d.timeline)?.date||statusDate||appliedDate;d.customFields=cf;const ok=await store.addApp(d);if(!ok){toast('保存失败，请重试','error');return;}toast('已创建','success');}if(cont){editId=null;$('#form-company').value='';$('#form-position').value='';$('#form-company').focus();}else{$('#modal-overlay').classList.remove('active');editId=null;}refresh();}
 $('#add-application-btn').addEventListener('click',()=>openAppModal());
+$('#form-read-jd-url')?.addEventListener('click',async function(){
+    const url=$('#form-jd-url')?.value||'';
+    try{
+        await withButtonBusy(this,async function(){
+            const text=await readPrepareJdFromUrl(url);
+            setFieldValue('#form-jd-text',text);
+            toast('已读取 JD 正文。','success');
+        },'读取中');
+    }catch(error){
+        toast(error instanceof Error?error.message:String(error),'error');
+    }
+});
 $('#modal-save').addEventListener('click',()=>saveApp(false));
 $('#modal-save-continue').addEventListener('click',()=>saveApp(true));
 $('#modal-cancel').addEventListener('click',()=>{$('#modal-overlay').classList.remove('active');editId=null;});
