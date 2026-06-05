@@ -1312,6 +1312,7 @@ border:1px solid rgba(255,255,255,.07);overflow:hidden;touch-action:none;cursor:
 .prepare-entry-card.is-visible{display:block}
 .prepare-entry-card-immersive{padding:0;border:none;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 .prepare-config-card{padding:18px 20px}
+.prepare-config-card:has(.prepare-model-switch),.prepare-model-switch,.prepare-mock-preview{display:none!important}
 .prepare-section-kicker{font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--text-tertiary)}
 .prepare-entry-card h3{margin-top:6px;font-size:17px;letter-spacing:-.025em}
 .prepare-entry-card>p{margin-top:6px;color:var(--text-secondary);font-size:12px;line-height:1.6}

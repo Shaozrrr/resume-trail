@@ -5001,7 +5001,7 @@ function buildPrepareAnswerFrameworkFallback(session,question,framework){
         if(/openclaw|agent|skill|tool/.test((question?.question||'').toLowerCase())){
             return `我的理解是 Agent 负责把任务拆开、决定每一步怎么走，Skill 是可复用的能力模块，Tool 是底层执行工具。真正在产品里落地时，我会先把场景拆成固定步骤，再把高频动作沉淀成 Skill，例如 ${jdKeyword?.jd_keyword||'信息提取、规则判断、结果回写'}。这和我在 ${experienceLabel} 里做过的事情很接近，因为我当时实际负责过 ${evidenceLine}，后面又用 ${resultLine} 去验证这套设计有没有跑通。`;
         }
-        return `如果让我直接回答这题，我会把重点放在 ${experienceLabel}。这段经历和题目最贴近的地方在于，我真的做过 ${matchedAngleText} 相关的事，具体就是 ${evidenceLine}。我当时先判断清楚问题和优先级，再推进关键动作，最后拿到了 ${resultLine}。所以这题我不会泛泛讲经历，而是直接用这段证明我已经把相关能力做成过结果。`;
+        return `我会用 ${experienceLabel} 来回答这题。它和题目最贴近的地方是，我做过 ${matchedAngleText} 相关的事，具体就是 ${evidenceLine}。当时我先判断清楚问题和优先级，再推进关键动作，最后拿到了 ${resultLine}。这段内容能证明我已经把相关能力做成过结果。`;
     })();
     const map={
         STAR:{
@@ -5074,6 +5074,23 @@ function shouldReplacePrepareOutlineWithDraft(outline){
         || /^先回答问题/.test(text)
         || text.length<50;
 }
+function polishPrepareCopyableOutline(outline,fallbackOutline){
+    let text=normalizePrepareText(outline||fallbackOutline||'');
+    if(!text)return normalizePrepareText(fallbackOutline||'');
+    text=text
+        .replace(/如果让我直接回答这题[，,。]?\s*/g,'')
+        .replace(/所以这题我不会泛泛讲经历[，,]?而是/g,'这道题我会')
+        .replace(/我不会泛泛讲经历[，,]?而是/g,'我会')
+        .replace(/不是([^，。；;]{1,24})[，,]?而是/g,'重点是')
+        .replace(/不只是([^，。；;]{1,24})[，,]?而是/g,'核心是')
+        .replace(/这说明我/g,'这能证明我')
+        .replace(/首先[，,]\s*/g,'')
+        .replace(/其次[，,]\s*/g,'接着，')
+        .replace(/最后[，,]\s*/g,'收尾时，')
+        .replace(/\s+/g,' ')
+        .trim();
+    return text||normalizePrepareText(fallbackOutline||'');
+}
 function normalizePrepareAnswerOutput(answer,session,question,framework){
     const fallback=buildPrepareAnswerFrameworkFallback(session,question,framework);
     const directDraft=fallback.copyable_outline;
@@ -5090,7 +5107,7 @@ function normalizePrepareAnswerOutput(answer,session,question,framework){
         framework_type:framework,
         structure:structure,
         delivery_tips:sanitizePrepareTextList(answer?.delivery_tips,fallback.delivery_tips,4),
-        copyable_outline:shouldReplacePrepareOutlineWithDraft(answer?.copyable_outline)?directDraft:normalizePrepareText(answer?.copyable_outline||directDraft),
+        copyable_outline:polishPrepareCopyableOutline(shouldReplacePrepareOutlineWithDraft(answer?.copyable_outline)?directDraft:answer?.copyable_outline,directDraft),
         resume_evidence_used:sanitizePrepareTextList(answer?.resume_evidence_used,fallback.resume_evidence_used,4),
         gap_note:normalizePrepareText(answer?.gap_note||fallback.gap_note),
         source:answer?.source||'ai'
