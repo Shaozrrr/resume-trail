@@ -1649,6 +1649,8 @@ const prepareMockState={
 const jobBoardState={
     query:'',
     activeRegion:'all',
+    page:1,
+    pageSize:80,
     loading:false,
     error:'',
     jobs:[],
@@ -2254,10 +2256,6 @@ function setTableSort(columnId){
         tableSortColumn=columnId;
         tableSortDirection=['waiting','preference_level','applied_date','created_at'].includes(columnId)?'desc':'asc';
     }
-    const dirBtn=document.getElementById('table-sort-direction');
-    if(dirBtn)dirBtn.textContent=tableSortDirection==='asc'?'↑':'↓';
-    const sortSelect=document.getElementById('table-sort-column');
-    if(sortSelect)sortSelect.value=columnId;
     renderTable(getBoardSearchQuery());
 }
 
@@ -2325,8 +2323,6 @@ function renderTableControlOptions(){
         });
         sortCol.value=tableSortColumn||'created_at';
     }
-    const dirBtn=document.getElementById('table-sort-direction');
-    if(dirBtn)dirBtn.textContent=tableSortDirection==='asc'?'↑':'↓';
 }
 
 function syncQuickEditPanel(){
@@ -3236,13 +3232,10 @@ function getBundledJobBoardCache(){
 async function loadJobBoardCache(force){
     if(jobBoardState.cacheReady&&!force)return;
     let payload=null;
-    const isLocalPreview=location.protocol==='file:'||/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
-    if(!isLocalPreview){
-        try{
-            payload=await fetchRemoteJobBoardCache();
-        }catch(error){
-            console.warn('[jobs] remote cache unavailable',error);
-        }
+    try{
+        payload=await fetchRemoteJobBoardCache();
+    }catch(error){
+        console.warn('[jobs] remote cache unavailable',error);
     }
     if(!payload)payload=getBundledJobBoardCache();
     if(!payload){
@@ -3255,6 +3248,7 @@ async function loadJobBoardCache(force){
     jobBoardState.jobs=payload.jobs;
     jobBoardState.lastFetchedAt=payload.updated_at||'';
     jobBoardState.sourceLabel=payload.source_label||'职位池';
+    jobBoardState.page=1;
     jobBoardState.cacheReady=true;
 }
 async function fetchZhaopinJson(url,label){
@@ -7783,6 +7777,11 @@ function renderJobsView(filterText){
     }).filter(function(job){
         return jobMatchesQuery(job,q);
     });
+    const totalPages=Math.max(1,Math.ceil(jobs.length/(jobBoardState.pageSize||80)));
+    const currentPage=Math.min(Math.max(jobBoardState.page||1,1),totalPages);
+    jobBoardState.page=currentPage;
+    const startIndex=(currentPage-1)*(jobBoardState.pageSize||80);
+    const pageJobs=jobs.slice(startIndex,startIndex+(jobBoardState.pageSize||80));
     const regionCounts=JOB_BOARD_REGIONS.reduce(function(map,region){
         map[region.key]=(jobBoardState.jobs||[]).filter(function(job){return job.region===region.key;}).length;
         return map;
@@ -7814,7 +7813,7 @@ function renderJobsView(filterText){
                 </div>
                 <div class="jobs-meta-row">
                     <span>${escapeHTML(metaLabel)}</span>
-                    <span>同步周期 24 小时</span>
+                    <span>第 ${currentPage} / ${totalPages} 页</span>
                 </div>
             ${jobBoardState.error?`<div class="jobs-error">${escapeHTML(jobBoardState.error)}</div>`:''}
             ${jobBoardState.loading?`
@@ -7839,8 +7838,13 @@ function renderJobsView(filterText){
                             <span></span>
                         </div>
                         <div class="jobs-table-body">
-                            ${jobs.map(renderJobRow).join('')}
+                            ${pageJobs.map(renderJobRow).join('')}
                         </div>
+                    </div>
+                    <div class="jobs-pagination">
+                        <button type="button" class="btn-secondary btn-sm" data-jobs-page="prev" ${currentPage<=1?'disabled':''}>上一页</button>
+                        <span class="jobs-pagination-meta">显示 ${jobs.length?startIndex+1:0}-${Math.min(startIndex+pageJobs.length,jobs.length)} / ${jobs.length}</span>
+                        <button type="button" class="btn-secondary btn-sm" data-jobs-page="next" ${currentPage>=totalPages?'disabled':''}>下一页</button>
                     </div>
                 </div>
             `:`
@@ -7867,6 +7871,15 @@ function renderJobsView(filterText){
     $$('[data-jobs-region]').forEach(function(button){
         button.addEventListener('click',function(){
             jobBoardState.activeRegion=this.dataset.jobsRegion||'all';
+            jobBoardState.page=1;
+            renderJobsView();
+        });
+    });
+    $$('[data-jobs-page]').forEach(function(button){
+        button.addEventListener('click',function(){
+            const direction=this.dataset.jobsPage;
+            if(direction==='prev'&&jobBoardState.page>1)jobBoardState.page-=1;
+            if(direction==='next'&&jobBoardState.page<totalPages)jobBoardState.page+=1;
             renderJobsView();
         });
     });
@@ -7909,6 +7922,7 @@ async function runJobBoardSearch(options){
     const rawQuery=options&&Object.prototype.hasOwnProperty.call(options,'query')?options.query:(jobBoardState.query||$('#jobs-query')?.value||'');
     const query=normalizePrepareText(rawQuery);
     jobBoardState.query=query;
+    jobBoardState.page=1;
     jobBoardState.loading=true;
     jobBoardState.error='';
     jobBoardState.searched=true;
@@ -8903,7 +8917,8 @@ function switchView(v){
     curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
     const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',jobs:'view-jobs',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
     const tm={pipeline:'投递',table:'投递',resumes:'简历文件舱',jobs:'职位发现',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
-    $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${v}"]`)?.classList.add('active');
+    const navView=(v==='pipeline'||v==='table')?'table':v;
+    $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${navView}"]`)?.classList.add('active');
     $('#view-title').textContent=tm[v]||'';
     $('#view-subtitle').textContent=(v==='pipeline'||v==='table')?`${store.apps.length} 条投递`:'';
     renderViewModeSwitcher(v);
@@ -9175,8 +9190,8 @@ function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type
 function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{await chgStatus(a.id,sel.value);renderTable(getBoardSearchQuery());});sel.addEventListener('blur',()=>renderTable(getBoardSearchQuery()));}
 function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{const ok=await store.updateApp(a.id,{preference_level:sel.value});if(ok!==false)renderTable(getBoardSearchQuery());});sel.addEventListener('blur',()=>renderTable(getBoardSearchQuery()));}
 $('#table-group-by').addEventListener('change',()=>renderTable(getBoardSearchQuery()));
-$('#table-sort-column').addEventListener('change',e=>{tableSortColumn=e.target.value||'created_at';renderTable(getBoardSearchQuery());});
-$('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable(getBoardSearchQuery());});
+$('#table-sort-column')?.addEventListener('change',e=>{tableSortColumn=e.target.value||'created_at';renderTable(getBoardSearchQuery());});
+$('#table-sort-direction')?.addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable(getBoardSearchQuery());});
 $('#filter-category').addEventListener('change',()=>renderKanban(getBoardSearchQuery()));
 $('#filter-visa')?.addEventListener('change',()=>renderKanban(getBoardSearchQuery()));
 $('#kanban-sort').addEventListener('change',()=>renderKanban(getBoardSearchQuery()));

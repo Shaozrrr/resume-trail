@@ -9,68 +9,57 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const CACHE_TABLE = 'rt_public_job_board_cache';
 const CACHE_KEY = 'default';
 const DEFAULT_LIMIT = 2600;
-const TENCENT_PAGE_SIZE = 80;
-const BOSS_PAGE_LIMIT = 5;
-const LIEPIN_PAGE_LIMIT = 5;
-const ZHAOPIN_PAGE_SIZE = 90;
-const ZHAOPIN_PAGE_LIMIT = 12;
-const MAINLAND_QUERIES = ['产品经理', 'AI产品经理', '数据产品经理', '商业分析', '产品运营', '增长运营', '算法工程师', '前端开发', '后端开发'];
+const MAINLAND_QUERIES = ['产品经理', 'AI产品经理', '数据产品经理', '商业分析', '产品运营', '增长运营', '前端开发', '后端开发'];
 const TARGET_SOURCE_FLOORS = [
-  { region: 'mainland', source: '腾讯招聘 · 技术研发', min: 100 },
-  { region: 'mainland', source: '腾讯招聘 · 产品运营', min: 100 },
-  { region: 'mainland', source: '腾讯招聘 · 设计创意', min: 100 },
-  { region: 'mainland', source: '腾讯招聘 · 商业增长', min: 100 },
-  { region: 'mainland', source: '腾讯招聘 · 职能支持', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs · Banking', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs · Administration', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs · Human Resources', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs · Education', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs · Engineering', min: 100 },
-  { region: 'northamerica', source: '北美岗位库 · Engineering', min: 100 },
-  { region: 'northamerica', source: '北美岗位库 · Data & AI', min: 100 },
-  { region: 'northamerica', source: '北美岗位库 · Product & Design', min: 100 },
-  { region: 'northamerica', source: '北美岗位库 · Go-to-Market', min: 100 },
-  { region: 'northamerica', source: '北美岗位库 · Operations & Corporate', min: 100 }
-];
-const BOSS_CITIES = [
-  { label: '北京', code: '101010100' },
-  { label: '上海', code: '101020100' },
-  { label: '深圳', code: '101280600' },
-  { label: '广州', code: '101280100' },
-  { label: '杭州', code: '101210100' },
-  { label: '成都', code: '101270100' },
-  { label: '武汉', code: '101200100' },
-  { label: '南京', code: '101190100' },
-  { label: '苏州', code: '101190400' },
-  { label: '西安', code: '101110100' },
-  { label: '香港', code: '101320100' }
+  { region: 'mainland', source: '腾讯招聘', min: 100 },
+  { region: 'mainland', source: '美团招聘', min: 100 },
+  { region: 'mainland', source: '拉勾招聘', min: 60 },
+  { region: 'mainland', source: '实习僧', min: 100 },
+  { region: 'mainland', source: 'Jobrapido 中国', min: 100 },
+  { region: 'mainland', source: 'Talent 中国', min: 100 },
+  { region: 'hongkong', source: 'CTgoodjobs', min: 100 },
+  { region: 'hongkong', source: 'HKSlash', min: 100 },
+  { region: 'hongkong', source: 'Joblum Hong Kong', min: 100 },
+  { region: 'hongkong', source: 'Jobrapido Hong Kong', min: 100 },
+  { region: 'hongkong', source: 'Recruit.com.hk', min: 20 },
+  { region: 'northamerica', source: 'Databricks Careers', min: 100 },
+  { region: 'northamerica', source: 'Stripe Careers', min: 100 },
+  { region: 'northamerica', source: 'Figma Careers', min: 100 },
+  { region: 'northamerica', source: 'Block Careers', min: 100 },
+  { region: 'northamerica', source: 'Robinhood Careers', min: 100 },
+  { region: 'other', source: 'Jobicy', min: 40 },
+  { region: 'other', source: 'Remotive', min: 30 },
+  { region: 'other', source: 'Remote OK', min: 30 }
 ];
 const GREENHOUSE_SOURCES = [
-  { company: 'Databricks', board: 'databricks', source: 'Databricks Careers', region: 'northamerica' },
-  { company: 'Stripe', board: 'stripe', source: 'Stripe Careers', region: 'northamerica' },
-  { company: 'Airbnb', board: 'airbnb', source: 'Airbnb Careers', region: 'northamerica' },
-  { company: 'Asana', board: 'asana', source: 'Asana Careers', region: 'northamerica' },
-  { company: 'Instacart', board: 'instacart', source: 'Instacart Careers', region: 'northamerica' },
-  { company: 'Figma', board: 'figma', source: 'Figma Careers', region: 'northamerica' },
-  { company: 'Coinbase', board: 'coinbase', source: 'Coinbase Careers', region: 'northamerica' }
+  { company: 'Databricks', board: 'databricks', source: 'Databricks Careers' },
+  { company: 'Stripe', board: 'stripe', source: 'Stripe Careers' },
+  { company: 'Figma', board: 'figma', source: 'Figma Careers' },
+  { company: 'Block', board: 'block', source: 'Block Careers' },
+  { company: 'Robinhood', board: 'robinhood', source: 'Robinhood Careers' }
 ];
-const CTGOODJOBS_SOURCES = [
-  { source: 'CTgoodjobs · Banking', url: 'https://jobs.ctgoodjobs.hk/jobs/jobs-in-banking-finance', pages: 6 },
-  { source: 'CTgoodjobs · Administration', url: 'https://jobs.ctgoodjobs.hk/jobs/jobs-in-administration', pages: 6 },
-  { source: 'CTgoodjobs · Human Resources', url: 'https://jobs.ctgoodjobs.hk/jobs/jobs-in-human-resources', pages: 6 },
-  { source: 'CTgoodjobs · Education', url: 'https://jobs.ctgoodjobs.hk/jobs/jobs-in-education', pages: 6 },
-  { source: 'CTgoodjobs · Engineering', url: 'https://jobs.ctgoodjobs.hk/jobs/jobs-in-engineering', pages: 6 }
+const CTGOODJOBS_PAGES = [
+  'https://jobs.ctgoodjobs.hk/jobs/jobs-in-banking-finance',
+  'https://jobs.ctgoodjobs.hk/jobs/jobs-in-administration',
+  'https://jobs.ctgoodjobs.hk/jobs/jobs-in-human-resources',
+  'https://jobs.ctgoodjobs.hk/jobs/jobs-in-education',
+  'https://jobs.ctgoodjobs.hk/jobs/jobs-in-engineering'
 ];
-
+const RECRUIT_PAGES = [
+  'https://www.recruit.com.hk/default.aspx'
+];
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 function decodeHtml(value) {
   return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
     .replace(/&mdash;/gi, '—')
     .replace(/\s+/g, ' ')
     .trim();
@@ -79,9 +68,26 @@ function decodeHtml(value) {
 function classifyRegion(value) {
   const text = normalizeText(value).toLowerCase();
   if (/香港|hong kong|\bhk\b/.test(text)) return 'hongkong';
-  if (/中国|china|mainland|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|西安|厦门|珠海|东莞|天津|重庆/.test(text)) return 'mainland';
-  if (/united states|usa|u\.s\.|canada|north america|new york|san francisco|seattle|boston|austin|chicago|toronto|vancouver|california/.test(text)) return 'northamerica';
+  if (/中国|china|mainland|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|西安|天津|重庆|长沙|青岛|郑州|厦门|珠海|合肥|宁波|佛山/.test(text)) return 'mainland';
+  if (/united states|usa|u\.s\.|canada|new york|san francisco|seattle|boston|austin|chicago|toronto|vancouver|california|redwood city|brooklyn|oakland|bellevue|atlanta|denver|los angeles|washington dc|washington, dc|new jersey|montreal|ottawa|virginia|miami|phoenix|minneapolis|oregon|utah|georgia|massachusetts|illinois|texas|ontario|quebec/.test(text)) return 'northamerica';
+  if (/remote|worldwide|anywhere/.test(text)) return 'other';
   return 'other';
+}
+
+function parseJsonText(text) {
+  const raw = String(text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const start = Math.min(...['{', '['].map((token) => {
+      const index = raw.indexOf(token);
+      return index === -1 ? Number.POSITIVE_INFINITY : index;
+    }));
+    const end = Math.max(raw.lastIndexOf('}'), raw.lastIndexOf(']'));
+    if (!Number.isFinite(start) || end <= start) return {};
+    return JSON.parse(raw.slice(start, end + 1));
+  }
 }
 
 function normalizePosting(input) {
@@ -90,7 +96,7 @@ function normalizePosting(input) {
   const url = normalizeText(input.url);
   if (!title || !company || !url) return null;
   const location = normalizeText(input.location);
-  const summary = decodeHtml(input.summary || input.jd_text || '').slice(0, 220);
+  const jdText = decodeHtml(input.jd_text || '').slice(0, 1800);
   return {
     id: `job_${company}_${title}_${url}`.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_').slice(0, 120),
     title,
@@ -99,8 +105,8 @@ function normalizePosting(input) {
     region: input.region || classifyRegion(`${location} ${company}`),
     source: normalizeText(input.source || '公开职位'),
     url,
-    jd_text: normalizeText(decodeHtml(input.jd_text || '')),
-    summary,
+    jd_text: jdText,
+    summary: decodeHtml(input.summary || jdText).slice(0, 260),
     updated_at: normalizeText(input.updated_at || '')
   };
 }
@@ -114,41 +120,6 @@ function compareAlpha(a, b) {
   return String(a.location || '').localeCompare(String(b.location || ''), locale, { numeric: true, sensitivity: 'base' });
 }
 
-function sortJobs(items) {
-  const rank = { mainland: 0, hongkong: 1, northamerica: 2, other: 3 };
-  return [...items].sort((a, b) => {
-    const regionCmp = (rank[a.region] ?? 9) - (rank[b.region] ?? 9);
-    if (regionCmp) return regionCmp;
-    return compareAlpha(a, b);
-  });
-}
-
-function getTencentSourceLabel(item) {
-  const text = normalizeText(item?.CategoryName || item?.RecruitPostName || item?.ProductName || '');
-  if (/技术|开发|工程|算法|测试|运维|数据|研究/.test(text)) return '腾讯招聘 · 技术研发';
-  if (/产品|策划|运营/.test(text)) return '腾讯招聘 · 产品运营';
-  if (/设计|美术|创意|动画|视觉/.test(text)) return '腾讯招聘 · 设计创意';
-  if (/市场|商务|销售|增长|公关|品牌|内容/.test(text)) return '腾讯招聘 · 商业增长';
-  return '腾讯招聘 · 职能支持';
-}
-
-function getNorthAmericaSourceLabel(item) {
-  const text = normalizeText(`${item?.title || ''} ${item?.location?.name || ''}`).toLowerCase();
-  if (/\b(data|analytics|scientist|analysis|machine learning|ml | ai |research scientist|applied scientist|economist|experimentation|insights|visualization|quant|risk analytics|intelligence)\b/.test(text)) {
-    return '北美岗位库 · Data & AI';
-  }
-  if (/\b(product|designer|design|ux|ui|user research|program manager|technical program manager|producer|release manager|platform manager|localization manager|creative)\b/.test(text)) {
-    return '北美岗位库 · Product & Design';
-  }
-  if (/\b(sales|marketing|growth|account|customer success|business development|partnership|revenue|commercial|solutions|field|acquisition|market|communications|partner|supply|government relations|policy)\b/.test(text)) {
-    return '北美岗位库 · Go-to-Market';
-  }
-  if (/\b(finance|legal|recruit|talent|people|human resources|hr\b|operations|strategy|procurement|compliance|workplace|support|trust)\b/.test(text)) {
-    return '北美岗位库 · Operations & Corporate';
-  }
-  return '北美岗位库 · Engineering';
-}
-
 function dedupe(items) {
   const seen = new Set();
   return items.filter((item) => {
@@ -160,27 +131,20 @@ function dedupe(items) {
   });
 }
 
+function sortJobs(items) {
+  const rank = { mainland: 0, hongkong: 1, northamerica: 2, other: 3 };
+  return [...items].sort((a, b) => {
+    const regionCmp = (rank[a.region] ?? 9) - (rank[b.region] ?? 9);
+    if (regionCmp) return regionCmp;
+    return compareAlpha(a, b);
+  });
+}
+
 function buildMirrorUrl(url) {
   return `https://r.jina.ai/http://${String(url || '').replace(/^https?:\/\//i, '')}`;
 }
 
-function parseJsonText(text) {
-  const raw = String(text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    const jsonStart = Math.min(...['{', '['].map((token) => {
-      const index = raw.indexOf(token);
-      return index === -1 ? Number.POSITIVE_INFINITY : index;
-    }));
-    const jsonEnd = Math.max(raw.lastIndexOf('}'), raw.lastIndexOf(']'));
-    if (!Number.isFinite(jsonStart) || jsonEnd <= jsonStart) return {};
-    return JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
-  }
-}
-
-function sleep(ms) {
+function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -207,144 +171,194 @@ async function fetchJson(url, label, timeoutMs = 16000) {
   return parseJsonText(text);
 }
 
-async function fetchTencentPage(pageIndex, keyword = '') {
-  const url = `https://careers.tencent.com/tencentcareer/api/post/Query?timestamp=${Date.now() + pageIndex}&keyword=${encodeURIComponent(keyword)}&pageIndex=${pageIndex}&pageSize=${TENCENT_PAGE_SIZE}&language=zh-cn&area=cn`;
+async function fetchTencentJobs() {
+  const url = `https://careers.tencent.com/tencentcareer/api/post/Query?timestamp=${Date.now()}&pageIndex=1&pageSize=160&language=zh-cn&area=cn`;
+  let payload = null;
   try {
-    return await fetchJson(url, `腾讯招聘 ${pageIndex}`);
+    payload = await fetchJson(url, '腾讯招聘 1', 18000);
   } catch {
-    await sleep(160);
-    try {
-      return await fetchJson(url, `腾讯招聘重试 ${pageIndex}`);
-    } catch {
-      const mirrored = await fetchText(buildMirrorUrl(url), `腾讯招聘镜像 ${pageIndex}`);
-      return parseJsonText(mirrored);
-    }
+    payload = parseJsonText(await fetchText(buildMirrorUrl(url), '腾讯招聘镜像 1', 18000));
   }
-}
-
-function normalizeTencentPosts(data) {
-  return (data?.Data?.Posts || data?.data?.posts || []).map((item) => {
-    const postId = normalizeText(item.PostId || item.postId || '');
-    return normalizePosting({
-      title: item.RecruitPostName || item.postName || item.title,
+  const list = payload?.Data?.Posts || [];
+  return list.map((item) => normalizePosting({
+      title: item.RecruitPostName,
       company: '腾讯',
       location: [item.CountryName, item.LocationName, item.WorkPlace].filter(Boolean).join(' · '),
-      source: getTencentSourceLabel(item),
-      url: postId ? `https://careers.tencent.com/jobdesc.html?postId=${encodeURIComponent(postId)}` : 'https://careers.tencent.com/search.html',
+      region: 'mainland',
+      source: '腾讯招聘',
+      url: item.PostId ? `https://careers.tencent.com/jobdesc.html?postId=${encodeURIComponent(item.PostId)}` : 'https://careers.tencent.com/search.html',
       jd_text: [item.Responsibility, item.Requirement].filter(Boolean).join('\n\n'),
-      summary: item.Responsibility || item.Requirement || '',
       updated_at: item.LastUpdateTime || ''
+  })).filter(Boolean);
+}
+
+async function fetchMeituanJobs() {
+  const jobs = [];
+  for (const keyword of MAINLAND_QUERIES) {
+    for (let pageNo = 1; pageNo <= 10; pageNo += 1) {
+      const response = await fetch('https://zhaopin.meituan.com/api/official/job/getJobList', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          origin: 'https://zhaopin.meituan.com',
+          referer: 'https://zhaopin.meituan.com/web/position'
+        },
+        body: JSON.stringify({
+          page: { pageNo, pageSize: 30 },
+          keywords: keyword
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      const list = Array.isArray(payload?.data?.list) ? payload.data.list : [];
+      if (!list.length) break;
+      jobs.push(...list.map((item) => normalizePosting({
+        title: item.name,
+        company: '美团',
+        location: (item.cityList || []).map((city) => city?.name).filter(Boolean).join(' · '),
+        region: 'mainland',
+        source: '美团招聘',
+        url: item.jobUnionId ? `https://zhaopin.meituan.com/web/position/detail?jobUnionId=${encodeURIComponent(item.jobUnionId)}` : 'https://zhaopin.meituan.com/web/position',
+        jd_text: [item.jobDuty, item.jobRequirement, item.highLight].filter(Boolean).join('\n\n'),
+        summary: [item.jobFamily, item.department?.[0]?.name, item.highLight].filter(Boolean).join(' · ')
+      })).filter(Boolean));
+    }
+  }
+  return jobs;
+}
+
+function extractLagouJobsFromPage(text) {
+  const match = String(text || '').match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/i);
+  if (!match) return [];
+  const payload = parseJsonText(match[1]);
+  const list = payload?.props?.pageProps?.initData?.content?.positionResult?.result || [];
+  return (Array.isArray(list) ? list : []).map((item) => normalizePosting({
+    title: item.positionName,
+    company: item.companyShortName || item.companyFullName,
+    location: [item.city, item.district].filter(Boolean).join(' · '),
+    region: 'mainland',
+    source: '拉勾招聘',
+    url: item.positionId ? `https://www.lagou.com/wn/jobs/${encodeURIComponent(item.positionId)}.html` : 'https://www.lagou.com/wn/jobs',
+    jd_text: item.positionDetail || '',
+    summary: [item.salary, item.workYear, item.education, item.positionAdvantage].filter(Boolean).join(' · '),
+    updated_at: item.createTime || item.formatCreateTime || ''
+  })).filter(Boolean);
+}
+
+async function fetchLagouJobs() {
+  const jobs = [];
+  for (const keyword of MAINLAND_QUERIES.slice(0, 4)) {
+    for (let page = 1; page <= 5; page += 1) {
+      const url = `https://www.lagou.com/wn/jobs?cl=false&fromSearch=true&kd=${encodeURIComponent(keyword)}&pn=${page}`;
+      try {
+        const text = await fetchText(url, `拉勾招聘 ${keyword} 第 ${page} 页`, 18000);
+        jobs.push(...extractLagouJobsFromPage(text));
+      } catch {}
+      await delay(160);
+    }
+  }
+  return jobs;
+}
+
+function extractShixisengJobsFromText(text) {
+  const blocks = String(text || '').split(/\n(?=\[[^\]]+\]\(https:\/\/www\.shixiseng\.com\/intern\/)/g);
+  return blocks.map((block) => {
+    const titleMatch = block.match(/^\[([^\]]+)\]\((https:\/\/www\.shixiseng\.com\/intern\/[^ )]+)[^)]*\)/m);
+    if (!titleMatch) return null;
+    const companyMatch = block.match(/\n\[([^\]\n]+)\]\(javascript:; "[^"]+"\)/);
+    const locationMatch = block.match(/\n([^\n|]+)\|/);
+    return normalizePosting({
+      title: titleMatch[1].replace(//g, '').trim(),
+      company: companyMatch ? companyMatch[1].trim() : '实习僧',
+      location: locationMatch ? locationMatch[1].trim() : '中国',
+      region: 'mainland',
+      source: '实习僧',
+      url: titleMatch[2],
+      summary: block.split('\n').slice(0, 6).join(' ').replace(/\s+/g, ' ').trim()
     });
   }).filter(Boolean);
 }
 
-async function fetchTencentJobs() {
-  const firstPage = await fetchTencentPage(1, '');
-  const totalCount = Number(firstPage?.Data?.Count || firstPage?.data?.count || 0) || 0;
-  const totalPages = Math.max(1, Math.ceil(totalCount / TENCENT_PAGE_SIZE));
-  const results = [...normalizeTencentPosts(firstPage)];
-  const concurrency = 4;
-  for (let page = 2; page <= totalPages; page += concurrency) {
-    const pages = [];
-    for (let cursor = page; cursor < page + concurrency && cursor <= totalPages; cursor += 1) {
-      pages.push(cursor);
-    }
-    const settled = await Promise.all(pages.map((cursor) => fetchTencentPage(cursor, '').catch(() => null)));
-    results.push(...settled.flatMap((data) => normalizeTencentPosts(data)));
-    await sleep(120);
-  }
-  return results;
-}
-
-function getZhaopinJobUrl(item) {
-  const direct = normalizeText(item.positionURL || item.jobUrl || item.url || '');
-  if (/^https?:\/\//i.test(direct)) return direct;
-  const number = normalizeText(item.number || item.positionNumber || item.jobNumber || '');
-  return number && /^\d+$/.test(number) ? `https://jobs.zhaopin.com/${number}.htm` : 'https://www.zhaopin.com/';
-}
-
-function mapZhaopinJob(item) {
-  if (!item || typeof item !== 'object') return null;
-  const labels = [
-    ...(Array.isArray(item.jobLabels) ? item.jobLabels : []),
-    ...(Array.isArray(item.welfareTagList) ? item.welfareTagList : [])
-  ].map((label) => (typeof label === 'string' ? label : (label?.name || label?.value || ''))).filter(Boolean);
-  return normalizePosting({
-    title: item.jobName || item.positionName || item.jobTitle || item.name,
-    company: item.companyName || item.company?.name || item.companyTitle || item.company?.title,
-    location: [
-      item.cityName,
-      item.areaDistrictName,
-      item.workCity,
-      item.workingCity,
-      item.regionCity
-    ].filter(Boolean).join(' · '),
-    source: '智联招聘',
-    url: getZhaopinJobUrl(item),
-    jd_text: [
-      item.jobSummary,
-      item.positionLabel,
-      labels.join(' / ')
-    ].filter(Boolean).join('\n\n'),
-    summary: [
-      item.jobSummary,
-      item.salaryReal,
-      item.workingExp?.name || item.workingExpName,
-      item.education?.name || item.educationName
-    ].filter(Boolean).join(' · '),
-    updated_at: item.updateDate || item.refreshTime || item.createTime || ''
-  });
-}
-
-async function fetchZhaopinJobs() {
+async function fetchShixisengJobs() {
   const tasks = [];
-  for (const keyword of MAINLAND_QUERIES) {
-    for (let page = 0; page < ZHAOPIN_PAGE_LIMIT; page += 1) {
-      const start = page * ZHAOPIN_PAGE_SIZE;
-      const url = `https://fe-api.zhaopin.com/c/i/sou?pageSize=${ZHAOPIN_PAGE_SIZE}&cityId=489&kw=${encodeURIComponent(keyword)}&start=${start}`;
-      tasks.push(
-        fetchText(buildMirrorUrl(url), `智联招聘 ${keyword} 偏移 ${start}`, 18000)
-          .then((text) => parseJsonText(text))
-          .then((data) => {
-            const list = data?.data?.results || data?.data?.list || data?.data?.positions || data?.results || data?.list || [];
-            return (Array.isArray(list) ? list : []).map(mapZhaopinJob).filter(Boolean);
-          })
-          .catch(() => [])
-      );
+  for (const keyword of MAINLAND_QUERIES.slice(0, 6)) {
+    for (let page = 1; page <= 10; page += 1) {
+      const url = `https://r.jina.ai/http://www.shixiseng.com/interns?keyword=${encodeURIComponent(keyword)}&type=intern&city=%E5%85%A8%E5%9B%BD&page=${page}`;
+      tasks.push(fetchText(url, `实习僧 ${keyword} 第 ${page} 页`, 18000).then(extractShixisengJobsFromText).catch(() => []));
     }
   }
   return (await Promise.all(tasks)).flat();
+}
+
+function extractJobrapidoJobs(text, source, region) {
+  const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const jobs = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const previewMatch = line.match(/^\[(?:打开职位预览：|Open job preview for:)\s*:?\s*([^\]]+?)\]\((https?:\/\/[^)\s]+)\)$/i);
+    if (!previewMatch) continue;
+    if (!(lines[index + 1] && /^###\s+/.test(lines[index + 1]))) continue;
+    const titleLine = lines[index + 1].replace(/^###\s+/, '');
+    const locationLine = lines[index + 2] || '';
+    const companyLine = lines[index + 3] || '';
+    const title = decodeHtml(titleLine.replace(/\*\*/g, '').replace(/\s+-\s+[^-]+$/, '').trim());
+    const location = decodeHtml(locationLine.replace(/\*\*/g, '').trim());
+    const company = decodeHtml(companyLine.replace(/\*\*/g, '').trim());
+    if (!title || !company || !location) continue;
+    jobs.push(normalizePosting({
+      title,
+      company,
+      location,
+      region,
+      source,
+      url: previewMatch[2],
+      summary: `${company} · ${location}`
+    }));
+  }
+  return jobs.filter(Boolean);
+}
+
+async function fetchJobrapidoMainlandJobs() {
+  const jobs = [];
+  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E8%BF%90%E8%90%A5', '%E5%BC%80%E5%8F%91', '%E5%B7%A5%E7%A8%8B%E5%B8%88', '%E5%B8%82%E5%9C%BA'];
+  for (const query of queries) {
+    for (let page = 1; page <= 4; page += 1) {
+      const url = `https://r.jina.ai/http://cn.jobrapido.com/?q=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
+      try {
+        const text = await fetchText(url, `Jobrapido 中国 ${query} ${page}`, 18000);
+        jobs.push(...extractJobrapidoJobs(text, 'Jobrapido 中国', 'mainland'));
+      } catch {}
+      await delay(160);
+    }
+  }
+  return jobs;
 }
 
 async function fetchGreenhouseJobs() {
   const tasks = GREENHOUSE_SOURCES.map(async (source) => {
-    try {
-      const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(source.board)}/jobs?content=true`, `${source.company} Greenhouse`);
-      return (data?.jobs || []).map((item) => normalizePosting({
-        title: item.title,
-        company: source.company,
-        location: item.location?.name || '',
-        region: source.region || classifyRegion(item.location?.name || ''),
-        source: getNorthAmericaSourceLabel(item),
-        url: item.absolute_url,
-        jd_text: decodeHtml(item.content || ''),
-        updated_at: item.updated_at || ''
-      })).filter(Boolean);
-    } catch {
-      return [];
-    }
+    const data = await fetchJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(source.board)}/jobs?content=true`, source.source);
+    return (data?.jobs || []).map((item) => normalizePosting({
+      title: item.title,
+      company: source.company,
+      location: item.location?.name || '',
+      source: source.source,
+      url: item.absolute_url,
+      jd_text: decodeHtml(item.content || ''),
+      updated_at: item.updated_at || ''
+    })).filter(Boolean);
   });
   return (await Promise.all(tasks)).flat();
 }
 
-function extractCtgoodjobsJobsFromPage(text, sourceLabel) {
+function extractCtgoodjobsJobsFromPage(text) {
   const raw = String(text || '');
   const ldMatch = raw.match(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
   if (ldMatch) {
     try {
       const schema = JSON.parse(ldMatch[1]);
       const items = Array.isArray(schema?.itemListElement) ? schema.itemListElement : [];
-      const mapped = items.map((item) => {
+      return items.map((item) => {
         const rawName = normalizeText(item?.name || '');
         const rawUrl = normalizeText(item?.url || '');
         if (!rawName || !rawUrl) return null;
@@ -356,211 +370,257 @@ function extractCtgoodjobsJobsFromPage(text, sourceLabel) {
           company,
           location: 'Hong Kong',
           region: 'hongkong',
-          source: sourceLabel,
+          source: 'CTgoodjobs',
           url: rawUrl,
           summary: `${company} · Hong Kong`
         });
       }).filter(Boolean);
-      if (mapped.length) return mapped;
     } catch {
-      // Fall through to the line-based parser when schema extraction is unavailable.
+      return [];
     }
   }
-  const lines = raw.split(/\r?\n/);
-  const jobs = [];
-  let currentCompany = '';
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-    const companyMatches = [...line.matchAll(/\[([^\]]+)\]\(https:\/\/jobs\.ctgoodjobs\.hk\/company-jobs\/[^)]+\)/g)];
-    if (companyMatches.length) {
-      currentCompany = normalizeText(companyMatches[companyMatches.length - 1][1]);
-      continue;
+  return [];
+}
+
+async function fetchCtgoodjobsJobs() {
+  const tasks = [];
+  for (const base of CTGOODJOBS_PAGES) {
+    for (let page = 1; page <= 6; page += 1) {
+      const url = page === 1 ? base : `${base}?page=${page}`;
+      tasks.push(fetchText(url, `CTgoodjobs ${page}`, 18000).then(extractCtgoodjobsJobsFromPage).catch(() => []));
     }
-    const titleMatch = line.match(/^## \[(.+?)\]\((https:\/\/jobs\.ctgoodjobs\.hk\/job\/[^)]+)\)$/);
-    if (!titleMatch) continue;
-    let location = 'Hong Kong';
-    for (let cursor = index + 1; cursor < Math.min(lines.length, index + 8); cursor += 1) {
-      const probe = normalizeText(lines[cursor]);
-      if (!probe || /^[-–—]$/.test(probe)) continue;
-      if (/^\d+\s*yr/.test(probe) || /\d+d ago$/i.test(probe) || /Promoted/i.test(probe) || /^\d/.test(probe) && /hr|month|year/i.test(probe)) continue;
-      if (/^\[/.test(probe) || /^!/.test(probe) || /^### /.test(probe)) continue;
-      if (/Jobs Matched/.test(probe) || /Apply Now|View Job|New Tab|Save Job/.test(probe)) continue;
-      if (/^Image:/i.test(probe) || /^https?:\/\//i.test(probe)) continue;
-      location = probe;
-      break;
-    }
-    jobs.push(normalizePosting({
-      title: titleMatch[1],
-      company: currentCompany || 'CTgoodjobs',
-      location,
+  }
+  return (await Promise.all(tasks)).flat();
+}
+
+function extractHkSlashJobsFromPage(text) {
+  const match = String(text || '').match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/i);
+  if (!match) return [];
+  const payload = parseJsonText(match[1]);
+  const list = payload?.props?.initialState?.jobs?.data?.elements || [];
+  return (Array.isArray(list) ? list : []).map((item) => normalizePosting({
+    title: item.name,
+    company: item.user?.name || 'HKSlash',
+    location: (item.locations || []).map((location) => location?.name || location?.text).filter(Boolean).join(' · ') || 'Hong Kong',
+    region: 'hongkong',
+    source: 'HKSlash',
+    url: item.id ? `https://www.hkslash.com/zh/job/${encodeURIComponent(item.id)}` : 'https://www.hkslash.com/zh/jobs',
+    jd_text: item.description || '',
+    summary: [item.education?.text, item.salaryCurrency?.text].filter(Boolean).join(' · ')
+  })).filter(Boolean);
+}
+
+async function fetchHkSlashJobs() {
+  const tasks = [];
+  for (let page = 1; page <= 10; page += 1) {
+    tasks.push(fetchText(`https://www.hkslash.com/zh/jobs?page=${page}`, `HKSlash ${page}`, 18000).then(extractHkSlashJobsFromPage).catch(() => []));
+  }
+  return (await Promise.all(tasks)).flat();
+}
+
+function extractJoblumHongKongJobsFromPage(text) {
+  return [...String(text || '').matchAll(/<div class="result-wrp row">[\s\S]*?<h2 class="job-title">[\s\S]*?<a[\s\S]*?title="([^"]+)"[\s\S]*?href="([^"]+)"[\s\S]*?<span class="company-name">[\s\S]*?<span>\s*([^<]+)\s*<\/span>[\s\S]*?<span class="location(?: location-desktop)?">\s*<span>\s*([^<]+)\s*<\/span>/gi)]
+    .map((match) => normalizePosting({
+      title: decodeHtml(match[1]),
+      company: decodeHtml(match[3]),
+      location: decodeHtml(match[4]),
       region: 'hongkong',
-      source: sourceLabel,
-      url: titleMatch[2],
-      summary: `${currentCompany || 'CTgoodjobs'} · ${location}`
+      source: 'Joblum Hong Kong',
+      url: match[2].startsWith('http') ? match[2] : `https://hk.joblum.com${match[2]}`,
+      summary: `${decodeHtml(match[3])} · ${decodeHtml(match[4])}`
+    }))
+    .filter(Boolean);
+}
+
+async function fetchJoblumHongKongJobs() {
+  const tasks = [];
+  for (let page = 1; page <= 12; page += 1) {
+    tasks.push(fetchText(`https://hk.joblum.com/jobs?page=${page}`, `Joblum Hong Kong ${page}`, 18000).then(extractJoblumHongKongJobsFromPage).catch(() => []));
+  }
+  return (await Promise.all(tasks)).flat();
+}
+
+async function fetchJobrapidoHongKongJobs() {
+  const jobs = [];
+  const queries = ['product', 'manager', 'analyst', 'operation'];
+  for (const query of queries) {
+    for (let page = 1; page <= 4; page += 1) {
+      const url = `https://r.jina.ai/http://hk.jobrapido.com/?q=${encodeURIComponent(query)}&l=hong-kong&p=${page}`;
+      try {
+        const text = await fetchText(url, `Jobrapido Hong Kong ${query} ${page}`, 18000);
+        jobs.push(...extractJobrapidoJobs(text, 'Jobrapido Hong Kong', 'hongkong'));
+      } catch {}
+      await delay(160);
+    }
+  }
+  return jobs;
+}
+
+function extractRecruitJobsFromPage(text) {
+  return [...String(text || '').matchAll(/<a[^>]+class='[^']*ArticleSectionLink[^']*'[^>]*>([^<]+)<\/a>[\s\S]{0,400}?<a[^>]+href='([^']*job[^']*)'[^>]*>[\s\S]{0,200}?<h3[^>]*>([^<]+)<\/h3>/gi)]
+    .map((match) => normalizePosting({
+      title: decodeHtml(match[3]),
+      company: decodeHtml(match[1]),
+      location: 'Hong Kong',
+      region: 'hongkong',
+      source: 'Recruit.com.hk',
+      url: match[2].startsWith('http') ? match[2] : `https://www.recruit.com.hk${match[2]}`,
+      summary: `${decodeHtml(match[1])} · Hong Kong`
+    }))
+    .filter(Boolean);
+}
+
+async function fetchRecruitHongKongJobs() {
+  const jobs = [];
+  for (const url of RECRUIT_PAGES) {
+    try {
+      const text = await fetchText(url, url, 18000);
+      jobs.push(...extractRecruitJobsFromPage(text));
+    } catch {}
+    await delay(120);
+  }
+  return jobs;
+}
+
+function extractTalentJobs(text, source, region) {
+  const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const jobs = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/^##\s+/.test(line)) continue;
+    const title = decodeHtml(line.replace(/^##\s+/, '').replace(/\*\*/g, '').trim());
+    const meta = lines[index + 1] || '';
+    const metaMatch = meta.match(/^(.+?)•(.+)$/);
+    if (!metaMatch) continue;
+    const company = decodeHtml(metaMatch[1]).trim();
+    const location = decodeHtml(metaMatch[2]).trim();
+    let description = '';
+    let url = '';
+    for (let scan = index + 2; scan < Math.min(lines.length, index + 10); scan += 1) {
+      const moreMatch = lines[scan].match(/\[(?:展示更多|Show more)\]\((https?:\/\/[^)\s]+|http:\/\/[^)\s]+)\)/i);
+      if (moreMatch) {
+        url = moreMatch[1];
+        break;
+      }
+      description += `${description ? ' ' : ''}${lines[scan]}`;
+    }
+    if (!title || !company || !location || !url) continue;
+    jobs.push(normalizePosting({
+      title,
+      company,
+      location,
+      region,
+      source,
+      url,
+      jd_text: description,
+      summary: decodeHtml(description).slice(0, 220)
     }));
   }
   return jobs.filter(Boolean);
 }
 
-async function fetchCtgoodjobsJobs() {
-  const tasks = [];
-  for (const source of CTGOODJOBS_SOURCES) {
-    for (let page = 1; page <= source.pages; page += 1) {
-      const url = page === 1 ? source.url : `${source.url}?page=${page}`;
-      tasks.push(
-        fetchText(url, `${source.source} 第 ${page} 页`, 18000)
-          .then((text) => extractCtgoodjobsJobsFromPage(text, source.source))
-          .catch(() => [])
-      );
+async function fetchTalentHongKongJobs() {
+  const jobs = [];
+  const queries = ['product', 'manager', 'business', 'data'];
+  for (const query of queries) {
+    for (let page = 1; page <= 6; page += 1) {
+      const url = `https://r.jina.ai/http://hk.talent.com/jobs?k=${encodeURIComponent(query)}&l=hong+kong&p=${page}`;
+      try {
+        const text = await fetchText(url, `Talent Hong Kong ${query} ${page}`, 18000);
+        jobs.push(...extractTalentJobs(text, 'Talent Hong Kong', 'hongkong'));
+      } catch {}
+      await delay(180);
     }
   }
-  return (await Promise.all(tasks)).flat();
+  return jobs;
+}
+
+async function fetchTalentChinaJobs() {
+  const jobs = [];
+  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5'];
+  for (const query of queries) {
+    for (let page = 1; page <= 6; page += 1) {
+      const url = `https://r.jina.ai/http://cn.talent.com/jobs?k=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
+      try {
+        const text = await fetchText(url, `Talent 中国 ${query} ${page}`, 18000);
+        jobs.push(...extractTalentJobs(text, 'Talent 中国', 'mainland'));
+      } catch {}
+      await delay(180);
+    }
+  }
+  return jobs;
+}
+
+async function fetchRemotiveJobs() {
+  const data = await fetchJson('https://remotive.com/api/remote-jobs', 'Remotive');
+  return (data?.jobs || []).slice(0, 120).map((item) => normalizePosting({
+    title: item.title,
+    company: item.company_name,
+    location: item.candidate_required_location || 'Remote',
+    region: 'other',
+    source: 'Remotive',
+    url: item.url,
+    jd_text: decodeHtml(item.description || ''),
+    updated_at: item.publication_date || ''
+  })).filter(Boolean);
+}
+
+async function fetchJobicyJobs() {
+  const data = await fetchJson('https://jobicy.com/api/v2/remote-jobs?count=120', 'Jobicy');
+  const list = Array.isArray(data?.jobs) ? data.jobs : [];
+  return list.map((item) => normalizePosting({
+    title: item.jobTitle || item.title,
+    company: item.companyName || item.company || 'Jobicy',
+    location: item.jobGeo || item.candidateRequiredLocation || 'Remote',
+    region: 'other',
+    source: 'Jobicy',
+    url: item.url || item.jobUrl,
+    jd_text: decodeHtml(item.jobDescription || ''),
+    updated_at: item.pubDate || ''
+  })).filter(Boolean);
+}
+
+async function fetchRemoteOkJobs() {
+  const data = await fetchJson('https://remoteok.com/api', 'Remote OK');
+  const list = Array.isArray(data) ? data.slice(1) : [];
+  return list.map((item) => normalizePosting({
+    title: item.position || item.title,
+    company: item.company || 'Remote OK',
+    location: item.location || 'Remote',
+    region: 'other',
+    source: 'Remote OK',
+    url: item.url ? `https://remoteok.com${item.url}` : item.apply_url,
+    jd_text: decodeHtml(item.description || ''),
+    updated_at: item.date || ''
+  })).filter(Boolean);
 }
 
 function selectJobsWithSourceFloors(items, limit = DEFAULT_LIMIT) {
   const sorted = sortJobs(dedupe(items));
-  const selected = [];
-  const selectedIds = new Set();
+  const picked = [];
+  const pickedIds = new Set();
   for (const floor of TARGET_SOURCE_FLOORS) {
-    const matches = sorted.filter((job) => job.region === floor.region && job.source === floor.source);
-    const picked = matches.slice(0, floor.min).map((job) => ({ ...job, source: floor.source }));
-    if (picked.length < floor.min) {
-      const deficit = floor.min - picked.length;
-      const supplements = sorted
-        .filter((job) => job.region === floor.region && !selectedIds.has(job.id) && !matches.some((match) => match.id === job.id))
-        .slice(0, deficit)
-        .map((job) => ({ ...job, source: floor.source }));
-      if (supplements.length) {
-        picked.push(...supplements);
-      }
+    const matches = sorted.filter((job) => job.region === floor.region && job.source === floor.source).slice(0, floor.min);
+    if (matches.length < floor.min) {
+      console.warn(`[job-cache] source floor not met: ${floor.source} ${matches.length}/${floor.min}`);
     }
-    if (picked.length < floor.min) {
-      console.warn(`[job-cache] source floor not met: ${floor.source} ${picked.length}/${floor.min}`);
-    }
-    for (const job of picked) {
-      if (selectedIds.has(job.id)) continue;
-      selectedIds.add(job.id);
-      selected.push(job);
+    for (const job of matches) {
+      if (pickedIds.has(job.id)) continue;
+      pickedIds.add(job.id);
+      picked.push(job);
     }
   }
   for (const job of sorted) {
-    if (selected.length >= limit) break;
-    if (selectedIds.has(job.id)) continue;
-    selectedIds.add(job.id);
-    selected.push(job);
+    if (picked.length >= limit) break;
+    if (pickedIds.has(job.id)) continue;
+    pickedIds.add(job.id);
+    picked.push(job);
   }
-  const topUps = [];
-  for (const floor of TARGET_SOURCE_FLOORS) {
-    const currentCount = selected.reduce((count, job) => {
-      return count + (job.region === floor.region && job.source === floor.source ? 1 : 0);
-    }, 0);
-    if (currentCount >= floor.min) continue;
-    const deficit = floor.min - currentCount;
-    const donors = selected
-      .filter((job) => job.region === floor.region)
-      .slice(0, deficit)
-      .map((job, index) => ({
-        ...job,
-        id: `${job.id}__topup_${index}_${floor.source}`.replace(/[^a-z0-9_\u4e00-\u9fa5]+/gi, '_'),
-        source: floor.source
-      }));
-    if (donors.length < deficit) {
-      console.warn(`[job-cache] source floor not met: ${floor.source} ${currentCount + donors.length}/${floor.min}`);
-    }
-    topUps.push(...donors);
-  }
-  return [...topUps, ...selected].slice(0, limit);
-}
-
-async function fetchRemotiveJobs() {
-  try {
-    const data = await fetchJson('https://remotive.com/api/remote-jobs?search=product', 'Remotive');
-    return (data?.jobs || []).slice(0, 40).map((item) => normalizePosting({
-      title: item.title,
-      company: item.company_name,
-      location: item.candidate_required_location || 'Remote',
-      region: 'northamerica',
-      source: getNorthAmericaSourceLabel({ title: item.title, location: { name: item.candidate_required_location || 'Remote' } }),
-      url: item.url,
-      jd_text: decodeHtml(item.description || ''),
-      updated_at: item.publication_date || ''
-    })).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function extractBossJobsFromPage(text, cityLabel) {
-  const matches = [];
-  const raw = String(text || '');
-  const pattern = /"jobName":"([^"]+)".+?"brandName":"([^"]+)".+?"locationName":"([^"]*)".+?"jobUrl":"([^"]+)"/g;
-  let match;
-  while ((match = pattern.exec(raw))) {
-    matches.push(normalizePosting({
-      title: match[1],
-      company: match[2],
-      location: match[3] || cityLabel,
-      source: 'Boss直聘',
-      url: match[4].startsWith('http') ? match[4] : `https://www.zhipin.com${match[4]}`,
-      summary: `${match[1]} · ${match[2]}`
-    }));
-  }
-  return matches.filter(Boolean);
-}
-
-async function fetchBossJobs() {
-  const tasks = [];
-  for (const city of BOSS_CITIES) {
-    for (const keyword of MAINLAND_QUERIES) {
-      for (let page = 1; page <= BOSS_PAGE_LIMIT; page += 1) {
-        const url = `https://www.zhipin.com/web/geek/job?query=${encodeURIComponent(keyword)}&city=${city.code}&page=${page}`;
-        tasks.push(
-          fetchText(buildMirrorUrl(url), `Boss直聘 ${city.label} ${keyword} 第 ${page} 页`, 18000)
-          .then((text) => extractBossJobsFromPage(text, city.label))
-          .catch(() => [])
-        );
-      }
-    }
-  }
-  return (await Promise.all(tasks)).flat();
-}
-
-function extractLiepinJobsFromPage(text) {
-  const matches = [];
-  const raw = String(text || '');
-  const pattern = /"title":"([^"]+)".+?"compName":"([^"]+)".+?"dq":"([^"]*)".+?"link":"([^"]+)"/g;
-  let match;
-  while ((match = pattern.exec(raw))) {
-    matches.push(normalizePosting({
-      title: match[1],
-      company: match[2],
-      location: match[3],
-      source: '猎聘',
-      url: match[4].startsWith('http') ? match[4] : `https://www.liepin.com${match[4]}`,
-      summary: `${match[1]} · ${match[2]}`
-    }));
-  }
-  return matches.filter(Boolean);
-}
-
-async function fetchLiepinJobs() {
-  const tasks = [];
-  for (const keyword of MAINLAND_QUERIES) {
-    for (let page = 1; page <= LIEPIN_PAGE_LIMIT; page += 1) {
-      const url = `https://www.liepin.com/zhaopin/?key=${encodeURIComponent(keyword)}&curPage=${page}`;
-      tasks.push(
-        fetchText(buildMirrorUrl(url), `猎聘 ${keyword} 第 ${page} 页`, 18000)
-          .then((text) => extractLiepinJobsFromPage(text))
-          .catch(() => [])
-      );
-    }
-  }
-  return (await Promise.all(tasks)).flat();
+  return picked.slice(0, limit);
 }
 
 async function writeLocalCache(payload) {
-  const js = `window.RT_JOB_BOARD_CACHE = ${JSON.stringify(payload, null, 2)};\n`;
-  await fs.writeFile(OUTPUT_JS, js, 'utf8');
+  await fs.writeFile(OUTPUT_JS, `window.RT_JOB_BOARD_CACHE = ${JSON.stringify(payload, null, 2)};\n`, 'utf8');
   await fs.writeFile(OUTPUT_JSON, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
@@ -588,30 +648,32 @@ async function upsertRemoteCache(payload) {
 }
 
 async function main() {
-  const settled = await Promise.allSettled([
-    fetchTencentJobs(),
-    fetchZhaopinJobs(),
-    fetchGreenhouseJobs(),
-    fetchRemotiveJobs(),
-    fetchBossJobs(),
-    fetchLiepinJobs(),
-    fetchCtgoodjobsJobs()
-  ]);
-  const [tencent, zhaopin, greenhouse, remotive, boss, liepin, ctgoodjobs] = settled.map((result, index) => {
-    if (result.status === 'fulfilled') return result.value || [];
-    const labels = ['腾讯招聘', '智联招聘', 'Greenhouse', 'Remotive', 'Boss直聘', '猎聘', 'CTgoodjobs'];
-    console.warn(`[job-cache] ${labels[index]} skipped: ${result.reason?.message || result.reason || 'unknown error'}`);
-    return [];
-  });
-  const jobs = selectJobsWithSourceFloors([
-    ...tencent,
-    ...zhaopin,
-    ...greenhouse,
-    ...remotive,
-    ...boss,
-    ...liepin,
-    ...ctgoodjobs
-  ], DEFAULT_LIMIT);
+  async function safeFetch(label, task) {
+    try {
+      return await task();
+    } catch (error) {
+      console.warn(`[job-cache] ${label} skipped: ${error?.message || error || 'unknown error'}`);
+      return [];
+    }
+  }
+
+  const buckets = [];
+  buckets.push(await safeFetch('Jobrapido 中国', fetchJobrapidoMainlandJobs));
+  buckets.push(await safeFetch('Talent 中国', fetchTalentChinaJobs));
+  buckets.push(await safeFetch('Jobrapido Hong Kong', fetchJobrapidoHongKongJobs));
+  buckets.push(await safeFetch('Joblum Hong Kong', fetchJoblumHongKongJobs));
+  buckets.push(await safeFetch('Recruit.com.hk', fetchRecruitHongKongJobs));
+  buckets.push(await safeFetch('腾讯招聘', fetchTencentJobs));
+  buckets.push(await safeFetch('美团招聘', fetchMeituanJobs));
+  buckets.push(await safeFetch('拉勾招聘', fetchLagouJobs));
+  buckets.push(await safeFetch('实习僧', fetchShixisengJobs));
+  buckets.push(await safeFetch('Greenhouse', fetchGreenhouseJobs));
+  buckets.push(await safeFetch('CTgoodjobs', fetchCtgoodjobsJobs));
+  buckets.push(await safeFetch('HKSlash', fetchHkSlashJobs));
+  buckets.push(await safeFetch('Remotive', fetchRemotiveJobs));
+  buckets.push(await safeFetch('Jobicy', fetchJobicyJobs));
+  buckets.push(await safeFetch('Remote OK', fetchRemoteOkJobs));
+  const jobs = selectJobsWithSourceFloors(buckets.flat(), DEFAULT_LIMIT);
   const payload = {
     updated_at: new Date().toISOString(),
     source_label: '最近更新职位池',

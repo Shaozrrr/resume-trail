@@ -39,15 +39,14 @@ function getPriceId(planKey: string) {
 }
 
 function getPaymentMethodTypes(methodKey?: string) {
-  if (methodKey === 'wechat') return ['wechat_pay']
   if (methodKey === 'alipay') return ['alipay']
-  return ['wechat_pay', 'alipay', 'card']
+  return ['alipay']
 }
 
 function normalizeErrorMessage(error: unknown) {
   if (error instanceof Stripe.errors.StripeError) {
     if (error.param === 'payment_method_types') {
-      return '当前 Stripe 账号还没有启用你选择的支付方式。请先到 Stripe Dashboard 的 Payment method settings 打开微信支付或支付宝，然后再试。'
+      return '当前 Stripe 账号还没有启用支付宝。请先到 Stripe Dashboard 的 Payment method settings 打开支付宝，然后再试。'
     }
     return error.message || 'Stripe 返回了一个未知错误。'
   }

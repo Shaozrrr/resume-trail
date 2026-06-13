@@ -777,7 +777,7 @@ const rtAccountService={
     const functionName=options&&options.functionName||'stripe-create-checkout';
     const result=await rtInvokeEdgeFunction(functionName,{
       plan_key:planKey,
-      method_key:options&&options.methodKey||'wechat',
+      method_key:options&&options.methodKey||'alipay',
       account_id:account.id,
       return_url:window.location.href
     },this.getSessionToken());

@@ -6,15 +6,15 @@
     <title>履迹 · 运营后台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="admin-console.css?v=20260531-admin-console-08">
+    <link rel="stylesheet" href="admin-console.css?v=20260612-admin-console-13">
 </head>
 <body>
     <div class="admin-shell">
         <header class="admin-header">
             <div>
-                <div class="admin-kicker">Local Console</div>
-                <h1>履迹运营后台</h1>
-                <p>只在你本机打开的独立后台。这里统一看用户进入、登录注册、创建、准备消耗、会员状态与授权，并且可以直接改账号状态。</p>
+                <div class="admin-kicker">Admin</div>
+                <h1>履迹管理后台</h1>
+                <p>看用户、看资料、改权益。</p>
             </div>
             <div class="admin-header-actions">
                 <div class="admin-sync-pill" id="admin-sync-pill">实时同步已开启</div>
@@ -25,7 +25,7 @@
 
         <section class="admin-status-card" id="admin-status-card">
             <h2 id="admin-status-title">正在连接独立后台…</h2>
-            <p id="admin-status-desc">如果你已经在本地填好了后台 service role key，这里会直接进入实时可编辑状态；否则先展示历史快照。</p>
+            <p id="admin-status-desc">本地连上就实时可写；没连上时先看快照。</p>
         </section>
 
         <main class="admin-main" id="admin-main" hidden>
@@ -53,12 +53,12 @@
                         </select>
                     </label>
                     <label class="admin-field">
-                        <span>状态</span>
-                        <select id="admin-status-filter">
+                        <span>资料筛选</span>
+                        <select id="admin-asset-filter">
                             <option value="all">全部</option>
-                            <option value="active">活跃</option>
-                            <option value="pending">待激活</option>
-                            <option value="paused">暂停</option>
+                            <option value="has_resume">有简历</option>
+                            <option value="has_real_app">有真实投递</option>
+                            <option value="has_prepare">有准备</option>
                         </select>
                     </label>
                     <label class="admin-field">
@@ -85,17 +85,12 @@
                 </div>
             </section>
 
-            <section class="admin-hero">
-                <div class="admin-metric-grid" id="admin-metric-grid"></div>
-                <div class="admin-trend-board" id="admin-trend-board"></div>
-            </section>
-
-            <section class="admin-grid">
-                <section class="admin-card admin-card-wide">
+            <section class="admin-workspace">
+                <section class="admin-card admin-card-wide admin-card-users">
                     <div class="admin-card-head">
                         <div>
-                            <h2>账号列表</h2>
-                            <p>每个用户都带独立账号 ID，支持搜索、筛选、批量授权和单独操作。</p>
+                            <h2>用户目录</h2>
+                            <p>先筛人，再看详情。</p>
                         </div>
                         <div class="admin-card-meta" id="admin-account-meta">--</div>
                     </div>
@@ -109,14 +104,50 @@
                     <div class="admin-account-list" id="admin-account-list"></div>
                 </section>
 
-                <section class="admin-card">
+                <section class="admin-card admin-detail-card">
                     <div class="admin-card-head">
                         <div>
-                            <h2>最近事件</h2>
-                            <p>按当前时间范围看真实后台事件流。</p>
+                            <h2>用户档案</h2>
+                            <p>一屏看完关键信息。</p>
                         </div>
                     </div>
-                    <div class="admin-event-feed" id="admin-event-feed"></div>
+                    <div class="admin-user-detail" id="admin-user-detail"></div>
+                </section>
+            </section>
+
+            <section class="admin-overview">
+                <section class="admin-card admin-overview-card">
+                    <div class="admin-card-head admin-card-head-tight">
+                        <div>
+                            <h2>简要概览</h2>
+                            <p>只留最常用的数据。</p>
+                        </div>
+                    </div>
+                    <div class="admin-metric-grid" id="admin-metric-grid"></div>
+                </section>
+
+                <section class="admin-card admin-qr-card">
+                    <div class="admin-card-head admin-card-head-tight">
+                        <div>
+                            <h2>用户共创群二维码</h2>
+                            <p>换一次，两边一起生效。</p>
+                        </div>
+                        <div class="admin-card-meta" id="admin-mode-note">--</div>
+                    </div>
+                    <div class="admin-qr-single">
+                        <div class="admin-qr-preview-shell admin-qr-preview-shell-large">
+                            <img id="admin-qr-preview-shared" class="admin-qr-preview" alt="用户共创群二维码预览">
+                        </div>
+                        <div class="admin-qr-copy">
+                            <strong>当前使用中的二维码</strong>
+                            <span>适合直接替换群图，不需要再分别维护两个入口。</span>
+                        </div>
+                        <div class="admin-qr-actions">
+                            <button type="button" class="admin-action-btn" data-qr-upload="shared">上传替换</button>
+                            <button type="button" class="admin-action-btn" data-style="calm" data-qr-reset="shared">恢复默认</button>
+                        </div>
+                        <input id="admin-qr-input-shared" type="file" accept="image/*" hidden>
+                    </div>
                 </section>
             </section>
         </main>
@@ -125,8 +156,9 @@
     <div class="admin-toast-stack" id="admin-toast-stack" aria-live="polite" aria-atomic="true"></div>
 
     <script src="ops-dashboard-data.js"></script>
+    <script src="rt-runtime-settings.js?v=20260613-runtime-remote-01"></script>
     <script src=".admin-console.local.js"></script>
     <script src="supabase.js"></script>
-    <script src="admin-console.js?v=20260531-admin-console-08"></script>
+    <script src="admin-console.js?v=20260612-admin-console-13"></script>
 </body>
 </html>

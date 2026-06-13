@@ -141,7 +141,7 @@ function enterGuestMode(){
     if(typeof initFilters==='function')initFilters();
     if(typeof updIntl==='function')updIntl();
     if(typeof refresh==='function')refresh();
-    if(typeof switchView==='function')switchView('pipeline');
+    if(typeof switchView==='function')switchView('table');
     if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
         window.rtAccountService.ensureAccount({input_source_channel:'guest_mode'}).catch(function(err){
             console.warn('[RT auth] guest ensure account failed',err);
@@ -200,7 +200,7 @@ async function checkAuth(){
             if(typeof initFilters==='function')initFilters();
             if(typeof updIntl==='function')updIntl();
             if(typeof refresh==='function')refresh();
-            if(typeof switchView==='function')switchView('pipeline');
+            if(typeof switchView==='function')switchView('table');
             if(typeof window.rtTrackEvent==='function')window.rtTrackEvent('rt_workspace_entered',{
                 entry:'email_auth',
                 application_count:store.apps.length,
@@ -637,6 +637,10 @@ async function resolveGuestMigrationDecision(session){
     if(!window.rtGuestStore||!window.rtAccountService||!session||!session.user)return false;
     var pending=typeof window.rtReadGuestMigrationPending==='function'?window.rtReadGuestMigrationPending():null;
     if(!pending)return false;
+    if(typeof window.rtHasResolvedGuestMigration==='function'&&window.rtHasResolvedGuestMigration(pending)){
+        if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
+        return false;
+    }
     var guestData=window.rtGuestStore.load();
     if(!hasGuestBusinessData(guestData)){
         if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
@@ -646,12 +650,14 @@ async function resolveGuestMigrationDecision(session){
     if(choice==='inherit'){
         var migrated=await migrateGuestStateToAccount(session);
         if(migrated){
+            if(typeof window.rtMarkResolvedGuestMigration==='function')window.rtMarkResolvedGuestMigration(pending);
             showMsg('已继承刚才的体验数据，正在继续进入账号。',false);
         }else{
             showMsg('体验数据暂时没有迁移成功，你可以先继续使用账号。',true);
         }
         return migrated;
     }
+    if(typeof window.rtMarkResolvedGuestMigration==='function')window.rtMarkResolvedGuestMigration(pending);
     if(typeof window.rtClearGuestMigrationPending==='function')window.rtClearGuestMigrationPending();
     showMsg('已按新账号继续，刚才的体验草稿仍保留在这台设备。',false);
     return false;
@@ -704,7 +710,12 @@ async function migrateGuestStateToAccount(session){
 
 function onSuccess(result,meta){
     var guestWasActive=!!(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled());
-    if(guestWasActive&&typeof window.rtMarkGuestMigrationPending==='function')window.rtMarkGuestMigrationPending({reason:'signup_or_login'});
+    if(guestWasActive&&typeof window.rtMarkGuestMigrationPending==='function'){
+        var pendingMeta=window.rtMarkGuestMigrationPending({reason:'signup_or_login'});
+        if(pendingMeta&&typeof window.rtHasResolvedGuestMigration==='function'&&window.rtHasResolvedGuestMigration(pendingMeta)&&typeof window.rtClearGuestMigrationPending==='function'){
+            window.rtClearGuestMigrationPending();
+        }
+    }
     if(window.rtGuestStore)window.rtGuestStore.disable();
     if(typeof window.rtResetGuestIdentityId==='function')window.rtResetGuestIdentityId();
     clearLocalBusinessData();
@@ -926,7 +937,12 @@ function closeForgotModal(){
 
 window.rtStartUpgradeRegistration=function(){
     if(window.rtGuestStore&&window.rtGuestStore.isEnabled&&window.rtGuestStore.isEnabled()){
-        if(typeof window.rtMarkGuestMigrationPending==='function')window.rtMarkGuestMigrationPending({reason:'membership_upgrade'});
+        if(typeof window.rtMarkGuestMigrationPending==='function'){
+            var pendingMeta=window.rtMarkGuestMigrationPending({reason:'membership_upgrade'});
+            if(pendingMeta&&typeof window.rtHasResolvedGuestMigration==='function'&&window.rtHasResolvedGuestMigration(pendingMeta)&&typeof window.rtClearGuestMigrationPending==='function'){
+                window.rtClearGuestMigrationPending();
+            }
+        }
         window.rtGuestStore.disable();
     }
     updateAppShell(false);
