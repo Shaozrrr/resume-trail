@@ -78,6 +78,7 @@ const RT_GUEST_DATA_KEY='rt_guest_data';
 const RT_GUEST_IDENTITY_KEY='rt_guest_identity_id';
 const RT_ACCOUNT_CACHE_KEY='rt_account_cache';
 const RT_PENDING_GUEST_MIGRATION_KEY='rt_pending_guest_migration';
+const RT_RESOLVED_GUEST_MIGRATION_KEY='rt_resolved_guest_migration';
 const RT_THEME_MODE_KEY='rt_theme_mode';
 const RT_THEME_DIRTY_KEY='rt_theme_dirty';
 const HIDDEN_VISA_VALUE='UNKNOWN';
@@ -85,19 +86,26 @@ const PREPARE_SESSION_HISTORY_LIMIT=5;
 const PREPARE_INTELLIGENCE_CACHE_KEY='rt_prepare_intelligence_cache_v1';
 const PREPARE_INTELLIGENCE_TIMEOUT_MS=2200;
 const PREPARE_JD_READER_TIMEOUT_MS=10000;
-const PREPARE_JOB_RADAR_TIMEOUT_MS=7000;
-const PREPARE_MAINLAND_HK_CAREER_SOURCES=[
-    {company:'腾讯',region:'中国大陆',url:'https://careers.tencent.com/search.html?query={query}'},
-    {company:'字节跳动',region:'中国大陆 / 香港',url:'https://jobs.bytedance.com/zh/position?keywords={query}'},
-    {company:'阿里巴巴',region:'中国大陆',url:'https://talent.alibaba.com/off-campus/position-list?keyword={query}'},
-    {company:'美团',region:'中国大陆',url:'https://zhaopin.meituan.com/web/position?keyword={query}'},
-    {company:'小米',region:'中国大陆',url:'https://xiaomi.jobs.f.mioffice.cn/referral/position'},
-    {company:'香港交易所 HKEX',region:'香港',url:'https://www.hkexgroup.com/Careers/Job-Opportunities?sc_lang=zh-HK'},
-    {company:'汇丰 HSBC Hong Kong',region:'香港',url:'https://www.hsbc.com/careers/where-we-hire/hong-kong'},
-    {company:'友邦 AIA',region:'香港',url:'https://www.aia.com/en/careers'},
-    {company:'数码港 Cyberport',region:'香港',url:'https://www.cyberport.hk/en/careers'},
-    {company:'香港科技园 HKSTP',region:'香港',url:'https://www.hkstp.org/careers/'}
+const JOB_BOARD_TIMEOUT_MS=8500;
+const JOB_BOARD_REGIONS=[
+    {key:'mainland',label:'中国大陆'},
+    {key:'hongkong',label:'香港'},
+    {key:'northamerica',label:'北美'},
+    {key:'other',label:'其他地区'}
 ];
+const JOB_BOARD_GREENHOUSE_SOURCES=[
+    {company:'Figma',board:'figma'},
+    {company:'Stripe',board:'stripe'},
+    {company:'Databricks',board:'databricks'},
+    {company:'Airbnb',board:'airbnb'},
+    {company:'Coinbase',board:'coinbase'},
+    {company:'Asana',board:'asana'},
+    {company:'Instacart',board:'instacart'}
+];
+const JOB_BOARD_DEFAULT_LIMIT=2600;
+const JOB_BOARD_REMOTE_TABLE='rt_public_job_board_cache';
+const JOB_BOARD_REMOTE_CACHE_KEY='default';
+const JOB_BOARD_CACHE_MAX_AGE_MS=24*60*60*1000;
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -165,6 +173,28 @@ function resetGuestIdentityId(){
         localStorage.removeItem(RT_GUEST_IDENTITY_KEY);
     }catch(err){}
 }
+function getGuestMigrationDataSignature(data){
+    const source=data&&typeof data==='object'?data:{};
+    const collect=function(list){
+        return Array.isArray(list)?list:[];
+    };
+    const signatures=[
+        collect(source.apps).length,
+        collect(source.resumes).length,
+        collect(source.prepare_sessions).length,
+        collect(source.refs).length,
+        collect(source.logs).length,
+        collect(source.categories).length
+    ];
+    const samples=[
+        collect(source.apps)[0]?.id||'',
+        collect(source.resumes)[0]?.id||'',
+        collect(source.prepare_sessions)[0]?.id||'',
+        collect(source.refs)[0]?.id||'',
+        collect(source.logs)[0]?.id||''
+    ];
+    return `${signatures.join('-')}|${samples.join('|')}`;
+}
 
 function readCachedAccount(){
     try{
@@ -187,9 +217,13 @@ function writeCachedAccount(account){
 
 function markGuestMigrationPending(meta){
     try{
+        const guestData=window.rtGuestStore&&typeof window.rtGuestStore.load==='function'
+            ? window.rtGuestStore.load()
+            : null;
         const payload=Object.assign({
             guest_id:getGuestIdentityId(),
-            created_at:new Date().toISOString()
+            created_at:new Date().toISOString(),
+            data_signature:getGuestMigrationDataSignature(guestData)
         },meta||{});
         localStorage.setItem(RT_PENDING_GUEST_MIGRATION_KEY,JSON.stringify(payload));
         return payload;
@@ -212,6 +246,40 @@ function clearGuestMigrationPending(){
         localStorage.removeItem(RT_PENDING_GUEST_MIGRATION_KEY);
     }catch(err){}
 }
+function readResolvedGuestMigration(){
+    try{
+        const raw=localStorage.getItem(RT_RESOLVED_GUEST_MIGRATION_KEY);
+        return raw?JSON.parse(raw):null;
+    }catch(err){
+        return null;
+    }
+}
+function markResolvedGuestMigration(meta){
+    try{
+        const guestData=window.rtGuestStore&&typeof window.rtGuestStore.load==='function'
+            ? window.rtGuestStore.load()
+            : null;
+        const payload=Object.assign({
+            guest_id:getGuestIdentityId(),
+            resolved_at:new Date().toISOString(),
+            data_signature:getGuestMigrationDataSignature(guestData)
+        },meta||{});
+        localStorage.setItem(RT_RESOLVED_GUEST_MIGRATION_KEY,JSON.stringify(payload));
+        return payload;
+    }catch(err){
+        return null;
+    }
+}
+function hasResolvedGuestMigration(meta){
+    const resolved=readResolvedGuestMigration();
+    if(!resolved||!meta)return false;
+    return resolved.guest_id===meta.guest_id&&resolved.data_signature===meta.data_signature;
+}
+function clearResolvedGuestMigration(){
+    try{
+        localStorage.removeItem(RT_RESOLVED_GUEST_MIGRATION_KEY);
+    }catch(err){}
+}
 
 window.rtGetGuestIdentityId=getGuestIdentityId;
 window.rtResetGuestIdentityId=resetGuestIdentityId;
@@ -220,6 +288,10 @@ window.rtWriteCachedAccount=writeCachedAccount;
 window.rtMarkGuestMigrationPending=markGuestMigrationPending;
 window.rtReadGuestMigrationPending=readGuestMigrationPending;
 window.rtClearGuestMigrationPending=clearGuestMigrationPending;
+window.rtMarkResolvedGuestMigration=markResolvedGuestMigration;
+window.rtReadResolvedGuestMigration=readResolvedGuestMigration;
+window.rtHasResolvedGuestMigration=hasResolvedGuestMigration;
+window.rtClearResolvedGuestMigration=clearResolvedGuestMigration;
 window.rtGetAccountMembershipLabel=getAccountMembershipLabel;
 window.rtGetAccountEntitlementText=getAccountEntitlementText;
 window.rtOpenPrepareUpgradeModal=openPrepareUpgradeModal;
@@ -1499,7 +1571,7 @@ async function callAI(prompt,fallbackText){
         badge:'当前版本仅使用本地内置分析，不会在前端暴露第三方模型密钥。'
     };
 }
-let curView='pipeline',curTab='info';
+let curView='table',curTab='info';
 let tableQuickEdit=false;
 let tableSortColumn='created_at';
 let tableSortDirection='desc';
@@ -1548,11 +1620,7 @@ const prepareState={
     supplementalExperienceDraft:'',
     showSupplementModal:false,
     jdReaderLoadingKey:'',
-    jdReaderError:'',
-    jobRadarQuery:'',
-    jobRadarLoading:false,
-    jobRadarResults:[],
-    jobRadarError:''
+    jdReaderError:''
 };
 const prepareMockState={
     sessionId:'',
@@ -1578,6 +1646,18 @@ const prepareMockState={
     recognition:null,
     showResumeGate:false
 };
+const jobBoardState={
+    query:'',
+    activeRegion:'all',
+    loading:false,
+    error:'',
+    jobs:[],
+    searched:false,
+    lastFetchedAt:'',
+    bootstrapped:false,
+    sourceLabel:'',
+    cacheReady:false
+};
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
 const PREPARE_RUNTIME_CONFIG_KEY='rt_prepare_runtime_config';
@@ -1590,22 +1670,20 @@ const PREPARE_MEMBERSHIP_PLANS=[
     {key:'lifetime',label:'49.9 买断',price:'¥49.9 买断',summary:'一次开通，长期使用',membershipTier:'lifetime'}
 ];
 const DEFAULT_BILLING_CONFIG={
-    provider:'Stripe Checkout',
+    provider:'支付宝',
     mode:'supabase_edge',
     functionName:'stripe-create-checkout',
-    note:'支持微信支付与支付宝。支付成功后会自动开通对应会员权益。',
+    note:'仅支持支付宝，支付成功后会自动开通对应会员权益。',
     plans:{
         monthly:{
             label:'9.9 / 30天',
             methods:[
-                {key:'wechat',label:'微信支付'},
                 {key:'alipay',label:'支付宝'}
             ]
         },
         lifetime:{
             label:'49.9 买断',
             methods:[
-                {key:'wechat',label:'微信支付'},
                 {key:'alipay',label:'支付宝'}
             ]
         }
@@ -1723,23 +1801,34 @@ function isGuestExperienceMode(){
 
 function getPrepareBillingConfig(){
     const runtime=window.RT_BILLING_CONFIG||{};
+    const normalizeMethods=function(methods){
+        const list=Array.isArray(methods)?methods:[];
+        const alipay=list.find(function(method){
+            return normalizePrepareText(method&&method.key||'').toLowerCase()==='alipay';
+        });
+        return [alipay||{key:'alipay',label:'支付宝'}];
+    };
     return {
         provider:runtime.provider||DEFAULT_BILLING_CONFIG.provider,
         mode:runtime.mode||DEFAULT_BILLING_CONFIG.mode,
         functionName:runtime.functionName||DEFAULT_BILLING_CONFIG.functionName,
-        note:runtime.note||DEFAULT_BILLING_CONFIG.note,
+        note:DEFAULT_BILLING_CONFIG.note,
         plans:{
             monthly:{
                 label:runtime?.plans?.monthly?.label||DEFAULT_BILLING_CONFIG.plans.monthly.label,
-                methods:Array.isArray(runtime?.plans?.monthly?.methods)&&runtime.plans.monthly.methods.length
-                    ? runtime.plans.monthly.methods
-                    : DEFAULT_BILLING_CONFIG.plans.monthly.methods
+                methods:normalizeMethods(
+                    Array.isArray(runtime?.plans?.monthly?.methods)&&runtime.plans.monthly.methods.length
+                        ? runtime.plans.monthly.methods
+                        : DEFAULT_BILLING_CONFIG.plans.monthly.methods
+                )
             },
             lifetime:{
                 label:runtime?.plans?.lifetime?.label||DEFAULT_BILLING_CONFIG.plans.lifetime.label,
-                methods:Array.isArray(runtime?.plans?.lifetime?.methods)&&runtime.plans.lifetime.methods.length
-                    ? runtime.plans.lifetime.methods
-                    : DEFAULT_BILLING_CONFIG.plans.lifetime.methods
+                methods:normalizeMethods(
+                    Array.isArray(runtime?.plans?.lifetime?.methods)&&runtime.plans.lifetime.methods.length
+                        ? runtime.plans.lifetime.methods
+                        : DEFAULT_BILLING_CONFIG.plans.lifetime.methods
+                )
             }
         }
     };
@@ -1944,7 +2033,7 @@ function openPrepareUpgradeModal(accessPayload){
     }
     if(paymentNote){
         paymentNote.style.display='block';
-        paymentNote.textContent=`支付方式：${billingConfig.provider} · ${billingConfig.note}`;
+        paymentNote.textContent=`支付方式：${billingConfig.note}`;
     }
     if(registerBtn)registerBtn.style.display=isGuestExperienceMode()?'inline-flex':'none';
     if(cards){
@@ -1970,7 +2059,7 @@ function openPrepareUpgradeModal(accessPayload){
         $$('[data-upgrade-plan]').forEach(function(button){
             button.addEventListener('click',function(){
                 const plan=this.dataset.upgradePlan||'monthly';
-                const method=this.dataset.upgradeMethod||'wechat';
+                const method=this.dataset.upgradeMethod||'alipay';
                 openMembershipCheckout(plan,method);
             });
         });
@@ -2169,7 +2258,7 @@ function setTableSort(columnId){
     if(dirBtn)dirBtn.textContent=tableSortDirection==='asc'?'↑':'↓';
     const sortSelect=document.getElementById('table-sort-column');
     if(sortSelect)sortSelect.value=columnId;
-    renderTable($('#global-search').value.toLowerCase().trim());
+    renderTable(getBoardSearchQuery());
 }
 
 function getTableComparableValue(app,colId){
@@ -2196,6 +2285,10 @@ function getTableFilterText(app,colId){
     return String(value).toLowerCase();
 }
 
+function getBoardSearchQuery(){
+    return '';
+}
+
 function renderSourceCell(td,app){
     const label=app.source_channel||'—';
     const href=safeHttpUrl(app.source_link);
@@ -2215,23 +2308,7 @@ function renderSourceCell(td,app){
 
 function renderTableControlOptions(){
     const cols=store.tableCols.filter(c=>c.id!=='actions');
-    const filterCol=document.getElementById('table-filter-column');
     const sortCol=document.getElementById('table-sort-column');
-    if(filterCol){
-        const prev=filterCol.value;
-        filterCol.textContent='';
-        const placeholder=document.createElement('option');
-        placeholder.value='';
-        placeholder.textContent='筛选列';
-        filterCol.appendChild(placeholder);
-        cols.filter(c=>c.id!=='jd').forEach(function(col){
-            const option=document.createElement('option');
-            option.value=col.id;
-            option.textContent=col.label;
-            filterCol.appendChild(option);
-        });
-        filterCol.value=cols.some(c=>c.id===prev)?prev:'';
-    }
     if(sortCol){
         const prevSort=tableSortColumn;
         if(prevSort!=='created_at'&&!cols.some(c=>c.id===prevSort))tableSortColumn='created_at';
@@ -2774,14 +2851,48 @@ function normalizePrepareReaderText(value){
         .trim()
         .slice(0,16000);
 }
+function buildPrepareJdExtractionMessages(rawUrl,rawText){
+    const payload={
+        jd_url:normalizePrepareUrl(rawUrl),
+        raw_text:normalizePrepareReaderText(rawText)
+    };
+    return[
+        {
+            role:'system',
+            content:'你是中文招聘信息清洗助手。任务是从网页抓取出来的脏文本里，只保留真正的 JD 正文，并剔除导航、页脚、版权、推荐职位、广告、公司百科、投递按钮文案、乱码、重复段落和无关说明。保留内容优先级：岗位职责、任职要求、加分项、团队介绍、工作地点、汇报对象、核心业务场景。输出必须是纯 JSON，不要 markdown，不要代码块，不要额外解释。schema: {"jd_text":"string"}。要求：1）结果必须是可直接粘贴到面试准备里的 JD 正文；2）不要总结，不要改写成点评，只做提纯；3）如果原文里混有英文、符号或轻微乱码，按最自然的招聘语义修正；4）如果某段明显不是 JD，就删掉；5）如果抓取文本里只有一部分像 JD，也只保留那一部分。'
+        },
+        {
+            role:'user',
+            content:`请提纯这段 JD 抓取文本：\n${JSON.stringify(payload,null,2)}`
+        }
+    ];
+}
+async function extractPrepareJdTextWithAI(rawUrl,rawText){
+    const cleanedRaw=normalizePrepareReaderText(rawText);
+    if(cleanedRaw.length<PREP_MIN_JD_LENGTH)return cleanedRaw;
+    const output=await requestPrepareCustomAI(
+        buildPrepareJdExtractionMessages(rawUrl,cleanedRaw),
+        'jd_extract',
+        {jd_url:normalizePrepareUrl(rawUrl),raw_text:cleanedRaw}
+    );
+    const candidate=normalizePrepareReaderText(output?.jd_text||output?.content||output?.text||'');
+    if(candidate.length>=PREP_MIN_JD_LENGTH)return candidate;
+    throw new Error('AI 没有提取出足够完整的 JD 正文。');
+}
 async function readPrepareJdFromUrl(rawUrl){
     const attempts=buildPrepareJdReaderUrls(rawUrl);
     if(!attempts.length)throw new Error('请先填 JD 链接。');
     let lastError=null;
     for(const url of attempts){
         try{
-            const text=normalizePrepareReaderText(await fetchPrepareTextWithTimeout(url,'JD 链接读取',PREPARE_JD_READER_TIMEOUT_MS));
-            if(text.length>=PREP_MIN_JD_LENGTH)return text;
+            const rawText=normalizePrepareReaderText(await fetchPrepareTextWithTimeout(url,'JD 链接读取',PREPARE_JD_READER_TIMEOUT_MS));
+            if(rawText.length>=PREP_MIN_JD_LENGTH){
+                try{
+                    return await extractPrepareJdTextWithAI(rawUrl,rawText);
+                }catch(error){
+                    return rawText;
+                }
+            }
         }catch(error){
             lastError=error;
         }
@@ -2945,45 +3056,351 @@ async function buildPrepareAugmentedPayload(payload,kind){
         return Object.assign({},payload,{intelligence_context:{error:'外部增强暂时不可用，已按本地 JD 与简历继续生成。'}});
     }
 }
-function buildPrepareOfficialCareerUrl(template,query){
-    return template.replace('{query}',encodeURIComponent(query||''));
-}
-async function fetchPrepareHongKongJobSources(query){
-    const keyword=normalizePrepareText(query||'job vacancies');
+async function fetchJobBoardJson(url,label,options){
+    const timeoutMs=options&&options.timeoutMs?options.timeoutMs:JOB_BOARD_TIMEOUT_MS;
+    const fetchOptions=Object.assign({},options||{});
+    if(Object.prototype.hasOwnProperty.call(fetchOptions,'timeoutMs'))delete fetchOptions.timeoutMs;
+    const controller=typeof AbortController!=='undefined'?new AbortController():null;
+    const timeoutId=controller?setTimeout(function(){
+        try{controller.abort();}catch(error){}
+    },timeoutMs):null;
     try{
-        const raw=await fetchPrepareTextWithTimeout(`https://data.gov.hk/api/3/action/package_search?q=${encodeURIComponent(`${keyword} job vacancies recruitment`)}&rows=5`,'data.gov.hk 职位数据目录',PREPARE_JOB_RADAR_TIMEOUT_MS);
-        const data=JSON.parse(raw||'{}');
-        return (data?.result?.results||[]).slice(0,5).map(function(item){
-            const resource=(item.resources||[]).find(function(res){
-                return /json|csv|api/i.test(`${res.format||''} ${res.url||''}`);
-            })||(item.resources||[])[0]||{};
-            return{
-                title:normalizePrepareText(item.title||item.name||'香港公开职位数据'),
-                company:'香港公开数据',
-                region:'香港',
-                source:'data.gov.hk API',
-                url:normalizePrepareText(resource.url||`https://data.gov.hk/en-data/dataset/${item.name||''}`),
-                summary:normalizePrepareText(item.notes||'来自香港政府公开数据目录，可继续打开查看数据源和职位相关信息。').slice(0,120)
-            };
-        }).filter(function(item){return item.title&&item.url;});
+        const response=await fetch(url,Object.assign({
+            headers:{Accept:'application/json'},
+            signal:controller?controller.signal:undefined
+        },fetchOptions));
+        const data=await response.json().catch(function(){return{};});
+        if(!response.ok)throw new Error(`${label||'职位源'} 请求失败（${response.status}）`);
+        return data||{};
+    }finally{
+        if(timeoutId)clearTimeout(timeoutId);
+    }
+}
+async function fetchJobBoardText(url,label,options){
+    const timeoutMs=options&&options.timeoutMs?options.timeoutMs:JOB_BOARD_TIMEOUT_MS;
+    const fetchOptions=Object.assign({},options||{});
+    if(Object.prototype.hasOwnProperty.call(fetchOptions,'timeoutMs'))delete fetchOptions.timeoutMs;
+    const controller=typeof AbortController!=='undefined'?new AbortController():null;
+    const timeoutId=controller?setTimeout(function(){
+        try{controller.abort();}catch(error){}
+    },timeoutMs):null;
+    try{
+        const response=await fetch(url,Object.assign({
+            headers:{Accept:'text/plain, application/json;q=0.9, */*;q=0.8'},
+            signal:controller?controller.signal:undefined
+        },fetchOptions));
+        const text=await response.text();
+        if(!response.ok)throw new Error(`${label||'职位源'} 请求失败（${response.status}）`);
+        return text||'';
+    }finally{
+        if(timeoutId)clearTimeout(timeoutId);
+    }
+}
+function buildJinaMirrorUrl(url){
+    return `https://r.jina.ai/http://${String(url||'').replace(/^https?:\/\//i,'')}`;
+}
+function parseJobBoardJsonText(text){
+    const raw=String(text||'').trim().replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/\s*```$/,'');
+    if(!raw)return{};
+    try{
+        return JSON.parse(raw);
+    }catch(error){
+        const startCandidates=['{','['].map(function(token){
+            const index=raw.indexOf(token);
+            return index===-1?Number.POSITIVE_INFINITY:index;
+        });
+        const jsonStart=Math.min.apply(null,startCandidates);
+        const jsonEnd=Math.max(raw.lastIndexOf('}'),raw.lastIndexOf(']'));
+        if(!Number.isFinite(jsonStart)||jsonEnd<=jsonStart)throw error;
+        return JSON.parse(raw.slice(jsonStart,jsonEnd+1));
+    }
+}
+function classifyJobRegion(value){
+    const text=String(value||'').toLowerCase();
+    if(/香港|hong kong|\bhk\b/.test(text))return'hongkong';
+    if(/中国|china|mainland|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|西安|厦门|珠海|东莞|天津|重庆/.test(text))return'mainland';
+    if(/united states|usa|u\.s\.| us |canada|north america|new york|san francisco|seattle|boston|austin|chicago|toronto|vancouver|california|remote.*(us|canada|north america)/.test(` ${text} `))return'northamerica';
+    return'other';
+}
+function normalizeJobBoardText(value){
+    return decodePrepareHtml(String(value||''))
+        .replace(/<[^>]+>/g,' ')
+        .replace(/\u00a0/g,' ')
+        .replace(/&nbsp;/gi,' ')
+        .replace(/&amp;/gi,'&')
+        .replace(/&mdash;/gi,'—')
+        .replace(/\s+/g,' ')
+        .trim();
+}
+function normalizeJobPosting(input){
+    const title=normalizePrepareText(input.title);
+    const company=normalizePrepareText(input.company);
+    const location=normalizePrepareText(input.location);
+    const url=normalizePrepareText(input.url);
+    if(!title||!company||!url)return null;
+    const region=input.region||classifyJobRegion(`${location} ${company}`);
+    return{
+        id:`job_${company}_${title}_${url}`.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g,'_').slice(0,120),
+        title,
+        company,
+        location,
+        region,
+        source:normalizePrepareText(input.source||'公开职位 API'),
+        url,
+        jd_text:normalizePrepareText(input.jd_text||''),
+        summary:normalizeJobBoardText(input.summary||input.jd_text||'').slice(0,220),
+        updated_at:normalizePrepareText(input.updated_at||'')
+    };
+}
+function getJobBoardRegionLabel(regionKey){
+    const region=JOB_BOARD_REGIONS.find(function(item){return item.key===regionKey;});
+    return region&&region.label||'其他地区';
+}
+function getJobBoardVisibleSummary(job){
+    const text=normalizeJobBoardText(job&&job.summary||job&&job.jd_text||'');
+    return text.length>108?`${text.slice(0,108)}…`:text;
+}
+function jobMatchesQuery(job,query){
+    const q=normalizePrepareText(query).toLowerCase();
+    if(!q)return true;
+    return [job.title,job.company,job.location,job.summary,job.jd_text].join(' ').toLowerCase().includes(q);
+}
+function dedupeJobPostings(items){
+    const seen=new Set();
+    return(items||[]).filter(function(job){
+        if(!job)return false;
+        const key=`${job.company}|${job.title}|${job.location}|${job.url}`.toLowerCase();
+        if(seen.has(key))return false;
+        seen.add(key);
+        return true;
+    });
+}
+function compareJobBoardAlpha(a,b){
+    const locale=['zh-Hans-CN','en'];
+    const companyCmp=String(a.company||'').localeCompare(String(b.company||''),locale,{numeric:true,sensitivity:'base'});
+    if(companyCmp)return companyCmp;
+    const titleCmp=String(a.title||'').localeCompare(String(b.title||''),locale,{numeric:true,sensitivity:'base'});
+    if(titleCmp)return titleCmp;
+    const locationCmp=String(a.location||'').localeCompare(String(b.location||''),locale,{numeric:true,sensitivity:'base'});
+    if(locationCmp)return locationCmp;
+    return String(a.url||'').localeCompare(String(b.url||''),locale,{numeric:true,sensitivity:'base'});
+}
+function sortJobBoardPostings(items){
+    const regionRank={mainland:0,hongkong:1,northamerica:2,other:3};
+    return(items||[]).slice().sort(function(a,b){
+        const regionCmp=(regionRank[a.region]??9)-(regionRank[b.region]??9);
+        if(regionCmp)return regionCmp;
+        return compareJobBoardAlpha(a,b);
+    });
+}
+function normalizeJobBoardCachePayload(payload){
+    const raw=payload&&typeof payload==='object'?payload:{};
+    const jobs=sortJobBoardPostings(
+        dedupeJobPostings(
+            (Array.isArray(raw.jobs)?raw.jobs:[])
+                .map(function(item){
+                    if(item&&item.title&&item.company&&item.url)return normalizeJobPosting(item);
+                    return null;
+                })
+                .filter(Boolean)
+        )
+    ).slice(0,JOB_BOARD_DEFAULT_LIMIT);
+    return{
+        jobs,
+        updated_at:normalizePrepareText(raw.updated_at||raw.last_refreshed_at||''),
+        source_label:normalizePrepareText(raw.source_label||raw.source||'职位池'),
+        source_count:Number(raw.source_count||0)||0
+    };
+}
+async function fetchRemoteJobBoardCache(){
+    const url=`${SUPABASE_URL}/rest/v1/${JOB_BOARD_REMOTE_TABLE}?select=payload,updated_at&cache_key=eq.${encodeURIComponent(JOB_BOARD_REMOTE_CACHE_KEY)}&limit=1`;
+    const result=await sb.requestJson(url,{
+        headers:{
+            apikey:SUPABASE_KEY,
+            Authorization:`Bearer ${SUPABASE_KEY}`
+        }
+    });
+    if(!result.ok)throw new Error(result.error||'职位缓存读取失败');
+    const row=Array.isArray(result.data)?result.data[0]:null;
+    if(!row||!row.payload)return null;
+    const payload=normalizeJobBoardCachePayload(Object.assign({},row.payload,{
+        updated_at:row.payload?.updated_at||row.updated_at||row.payload?.last_refreshed_at||''
+    }));
+    return payload.jobs.length?payload:null;
+}
+function getBundledJobBoardCache(){
+    if(!window.RT_JOB_BOARD_CACHE)return null;
+    const payload=normalizeJobBoardCachePayload(window.RT_JOB_BOARD_CACHE);
+    return payload.jobs.length?payload:null;
+}
+async function loadJobBoardCache(force){
+    if(jobBoardState.cacheReady&&!force)return;
+    let payload=null;
+    const isLocalPreview=location.protocol==='file:'||/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+    if(!isLocalPreview){
+        try{
+            payload=await fetchRemoteJobBoardCache();
+        }catch(error){
+            console.warn('[jobs] remote cache unavailable',error);
+        }
+    }
+    if(!payload)payload=getBundledJobBoardCache();
+    if(!payload){
+        jobBoardState.jobs=[];
+        jobBoardState.lastFetchedAt='';
+        jobBoardState.sourceLabel='';
+        jobBoardState.cacheReady=false;
+        throw new Error('职位缓存暂时为空，请先运行缓存同步。');
+    }
+    jobBoardState.jobs=payload.jobs;
+    jobBoardState.lastFetchedAt=payload.updated_at||'';
+    jobBoardState.sourceLabel=payload.source_label||'职位池';
+    jobBoardState.cacheReady=true;
+}
+async function fetchZhaopinJson(url,label){
+    const mirrored=await fetchJobBoardText(buildJinaMirrorUrl(url),`${label} 镜像`,{
+        timeoutMs:16000
+    });
+    return parseJobBoardJsonText(mirrored);
+}
+function getZhaopinJobUrl(item){
+    const direct=safeHttpUrl(item.positionURL||item.jobUrl||item.url||'');
+    if(direct)return direct;
+    const number=normalizePrepareText(item.number||item.positionNumber||item.jobNumber||'');
+    return number&&/^\d+$/.test(number)?`https://jobs.zhaopin.com/${number}.htm`:'https://www.zhaopin.com/';
+}
+function mapZhaopinJob(item){
+    if(!item||typeof item!=='object')return null;
+    const labels=[
+        ...(Array.isArray(item.jobLabels)?item.jobLabels:[]),
+        ...(Array.isArray(item.welfareTagList)?item.welfareTagList:[])
+    ].map(function(label){
+        return typeof label==='string'?label:(label?.name||label?.value||'');
+    }).filter(Boolean);
+    return normalizeJobPosting({
+        title:item.jobName||item.positionName||item.jobTitle||item.name,
+        company:item.companyName||item.company?.name||item.companyTitle||item.company?.title,
+        location:[
+            item.cityName,
+            item.areaDistrictName,
+            item.workCity,
+            item.workingCity,
+            item.regionCity
+        ].filter(Boolean).join(' · '),
+        source:'智联招聘 API',
+        url:getZhaopinJobUrl(item),
+        jd_text:[
+            item.jobSummary,
+            item.positionLabel,
+            labels.join(' / ')
+        ].filter(Boolean).join('\n\n'),
+        summary:[
+            item.jobSummary,
+            item.salaryReal,
+            item.workingExp?.name||item.workingExpName,
+            item.education?.name||item.educationName
+        ].filter(Boolean).join(' · '),
+        updated_at:item.updateDate||item.refreshTime||item.createTime||''
+    });
+}
+async function fetchTencentJobs(query){
+    const keyword=normalizePrepareText(query);
+    const tasks=Array.from({length:JOB_BOARD_TENCENT_MAX_PAGES},function(_,index){
+        const page=index+1;
+        const url=`https://careers.tencent.com/tencentcareer/api/post/Query?timestamp=${Date.now()+page}&keyword=${encodeURIComponent(keyword)}&pageIndex=${page}&pageSize=${JOB_BOARD_TENCENT_PAGE_SIZE}&language=zh-cn&area=cn`;
+        return fetchJobBoardText(buildJinaMirrorUrl(url),`腾讯招聘 API 镜像 第 ${page} 页`,{
+            timeoutMs:16000
+        });
+    });
+    const settled=await Promise.allSettled(tasks);
+    return settled.flatMap(function(result){
+        if(result.status!=='fulfilled')return[];
+        const data=parseJobBoardJsonText(result.value);
+        const posts=data?.Data?.Posts||data?.data?.posts||[];
+        return posts.map(function(item){
+            const postId=normalizePrepareText(item.PostId||item.postId||'');
+            return normalizeJobPosting({
+                title:item.RecruitPostName||item.postName||item.title,
+                company:'腾讯',
+                location:[item.CountryName,item.LocationName,item.WorkPlace].filter(Boolean).join(' · '),
+                source:'腾讯招聘 API',
+                url:postId?`https://careers.tencent.com/jobdesc.html?postId=${encodeURIComponent(postId)}`:'https://careers.tencent.com/search.html',
+                jd_text:[item.Responsibility,item.Requirement].filter(Boolean).join('\n\n'),
+                summary:item.Responsibility||item.Requirement||''
+            });
+        }).filter(Boolean);
+    }).filter(function(job){
+        return jobMatchesQuery(job,keyword);
+    });
+}
+async function fetchZhaopinJobs(query){
+    const keyword=normalizePrepareText(query);
+    const tasks=Array.from({length:JOB_BOARD_MAINLAND_MAX_PAGES},function(_,index){
+        const start=index*JOB_BOARD_MAINLAND_PAGE_SIZE;
+        const url=`https://fe-api.zhaopin.com/c/i/sou?pageSize=${JOB_BOARD_MAINLAND_PAGE_SIZE}&cityId=489&kw=${encodeURIComponent(keyword)}&start=${start}`;
+        return fetchZhaopinJson(url,`智联招聘 API 偏移 ${start}`);
+    });
+    const settled=await Promise.allSettled(tasks);
+    return settled.flatMap(function(result){
+        if(result.status!=='fulfilled')return[];
+        const list=result.value?.data?.results||result.value?.data?.list||result.value?.data?.positions||result.value?.results||result.value?.list||[];
+        return(Array.isArray(list)?list:[]).map(mapZhaopinJob).filter(Boolean);
+    }).filter(function(job){
+        return jobMatchesQuery(job,keyword);
+    });
+}
+async function fetchGreenhouseJobs(source,query){
+    try{
+        const data=await fetchJobBoardJson(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(source.board)}/jobs?content=true`,`${source.company} Greenhouse`);
+        return (data?.jobs||[]).map(function(item){
+            return normalizeJobPosting({
+                title:item.title,
+                company:source.company,
+                location:item.location?.name||'',
+                source:'Greenhouse API',
+                url:item.absolute_url,
+                jd_text:normalizeJobBoardText(item.content||''),
+                updated_at:item.updated_at||''
+            });
+        }).filter(Boolean).filter(function(job){return jobMatchesQuery(job,query);});
     }catch(error){
         return[];
     }
 }
-async function fetchPrepareJobRadar(query){
-    const keyword=normalizePrepareText(query||prepareState.jobRadarQuery||prepareState.manualDraft.roleName||'产品经理');
-    const [hkSources]=await Promise.all([fetchPrepareHongKongJobSources(keyword)]);
-    const officialLinks=PREPARE_MAINLAND_HK_CAREER_SOURCES.map(function(source){
-        return{
-            title:`${source.company} 官方招聘入口`,
-            company:source.company,
-            region:source.region,
-            source:'官方招聘页',
-            url:buildPrepareOfficialCareerUrl(source.url,keyword),
-            summary:`优先查看 ${keyword} / AI / 产品 / 数据相关岗位，并把完整 JD 链接带回准备工作台。`
-        };
-    });
-    return dedupePrepareLookupResults(hkSources.concat(officialLinks)).slice(0,10);
+async function fetchRemotiveJobs(query){
+    const keyword=normalizePrepareText(query);
+    try{
+        const data=await fetchJobBoardJson(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(keyword)}`,'Remotive API');
+        return (data?.jobs||[]).slice(0,40).map(function(item){
+            return normalizeJobPosting({
+                title:item.title,
+                company:item.company_name,
+                location:item.candidate_required_location||'Remote',
+                region:classifyJobRegion(item.candidate_required_location||'Remote'),
+                source:'Remotive API',
+                url:item.url,
+                jd_text:normalizeJobBoardText(item.description||''),
+                updated_at:item.publication_date||''
+            });
+        }).filter(Boolean).filter(function(job){
+            return job.region==='northamerica'&&jobMatchesQuery(job,keyword);
+        });
+    }catch(error){
+        return[];
+    }
+}
+async function fetchJobBoardResults(query){
+    const keyword=normalizePrepareText(query);
+    const tasks=[
+        fetchTencentJobs(keyword),
+        fetchZhaopinJobs(keyword),
+        fetchRemotiveJobs(keyword),
+        ...JOB_BOARD_GREENHOUSE_SOURCES.map(function(source){return fetchGreenhouseJobs(source,keyword);})
+    ];
+    const settled=await Promise.allSettled(tasks);
+    return sortJobBoardPostings(dedupeJobPostings(settled.flatMap(function(result){
+        return result.status==='fulfilled'?(result.value||[]):[];
+    }))).slice(0,JOB_BOARD_DEFAULT_LIMIT);
 }
 function flattenPrepareDuckTopics(topics,bucket){
     (topics||[]).forEach(function(topic){
@@ -7357,37 +7774,170 @@ function renderPrepareWorkbench(session){
         </div>
     `;
 }
-function renderPrepareJobRadarCard(){
-    const query=prepareState.jobRadarQuery||prepareState.manualDraft.roleName||'AI 产品经理';
-    const results=Array.isArray(prepareState.jobRadarResults)?prepareState.jobRadarResults:[];
-    return `
-        <div class="prepare-card-surface prepare-job-radar-card">
-            <div class="prepare-section-kicker">中港职位入口</div>
-            <h3>找中国大陆 / 香港公司的真实岗位</h3>
-            <p>优先接香港公开数据目录和中港公司官方招聘入口。打开后把 JD 链接带回准备台即可读取。</p>
-            <div class="prepare-job-radar-search">
-                <input type="text" id="prepare-job-radar-query" value="${escapeHTML(query)}" placeholder="AI 产品经理 / 数据产品 / PM Intern">
-                <button type="button" class="btn-secondary btn-sm" id="prepare-job-radar-run">${prepareState.jobRadarLoading?'搜索中':'刷新'}</button>
+function renderJobsView(filterText){
+    const root=$('#jobs-root');
+    if(!root)return;
+    const q=normalizePrepareText(filterText||jobBoardState.query);
+    const jobs=(jobBoardState.jobs||[]).filter(function(job){
+        return jobBoardState.activeRegion==='all'||job.region===jobBoardState.activeRegion;
+    }).filter(function(job){
+        return jobMatchesQuery(job,q);
+    });
+    const regionCounts=JOB_BOARD_REGIONS.reduce(function(map,region){
+        map[region.key]=(jobBoardState.jobs||[]).filter(function(job){return job.region===region.key;}).length;
+        return map;
+    },{});
+    const metaLabel=q?`当前匹配 ${jobs.length} 个岗位`:`当前收录 ${jobs.length} 个岗位`;
+    root.innerHTML=`
+        <section class="jobs-shell">
+            <div class="jobs-hero">
+                <div class="jobs-hero-copy">
+                    <div class="section-kicker">职位发现</div>
+                    <h2>真实职位发现</h2>
+                    <p class="jobs-hero-meta">${jobBoardState.lastFetchedAt?`最近更新 · ${escapeHTML(fmtDT(jobBoardState.lastFetchedAt))}`:'默认展示最近同步好的职位池。'}</p>
+                </div>
+                <button type="button" class="btn-secondary btn-sm" id="jobs-refresh" ${jobBoardState.loading?'disabled':''}>${jobBoardState.loading?'更新中':(jobBoardState.query?'更新结果':'更新职位池')}</button>
             </div>
-            ${prepareState.jobRadarError?`<div class="prepare-inline-notice is-error">${escapeHTML(prepareState.jobRadarError)}</div>`:''}
-            <div class="prepare-job-radar-list">
-                ${results.length?results.map(function(item){
-                    return `
-                        <a class="prepare-job-radar-item" href="${escapeHTML(item.url||'#')}" target="_blank" rel="noreferrer">
-                            <strong>${escapeHTML(item.title||'职位入口')}</strong>
-                            <span>${escapeHTML(item.region||'中港')} · ${escapeHTML(item.source||'公开来源')}</span>
-                            <em>${escapeHTML(item.summary||'打开官方入口查看 JD，再用 JD 链接读取到准备台。')}</em>
-                        </a>
-                    `;
-                }).join(''):`
-                    <div class="prepare-recent-empty">
-                        <strong>还没搜索职位</strong>
-                        <span>输入岗位关键词，先拿到官方入口或公开数据源。</span>
+            <div class="jobs-board-surface">
+                <div class="jobs-toolbar">
+                    <label class="jobs-query-field">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                        <input type="text" id="jobs-query" value="${escapeHTML(jobBoardState.query)}" placeholder="搜公司或岗位，留空默认显示全部。">
+                    </label>
+                    <div class="jobs-region-tabs">
+                        <button type="button" class="jobs-region-tab${jobBoardState.activeRegion==='all'?' is-active':''}" data-jobs-region="all">全部</button>
+                        ${JOB_BOARD_REGIONS.map(function(region){
+                            const count=regionCounts[region.key]||0;
+                            return `<button type="button" class="jobs-region-tab${jobBoardState.activeRegion===region.key?' is-active':''}" data-jobs-region="${region.key}">${escapeHTML(region.label)}${count?` <span>${count}</span>`:''}</button>`;
+                        }).join('')}
                     </div>
-                `}
+                </div>
+                <div class="jobs-meta-row">
+                    <span>${escapeHTML(metaLabel)}</span>
+                    <span>同步周期 24 小时</span>
+                </div>
+            ${jobBoardState.error?`<div class="jobs-error">${escapeHTML(jobBoardState.error)}</div>`:''}
+            ${jobBoardState.loading?`
+                <div class="jobs-loading">
+                    <span></span>
+                    <strong>正在整理职位列表…</strong>
+                </div>
+            `:(!jobBoardState.searched?`
+                <div class="jobs-empty">
+                    <strong>准备加载职位列表</strong>
+                    <span>这里展示的是已经同步好的职位数据，不会在用户进入时现场抓取。</span>
+                </div>
+            `:(jobs.length?`
+                <div class="jobs-table-wrap">
+                    <div class="jobs-table-shell">
+                        <div class="jobs-table-head">
+                            <span>地区</span>
+                            <span>公司</span>
+                            <span>岗位</span>
+                            <span>Base</span>
+                            <span>来源</span>
+                            <span></span>
+                        </div>
+                        <div class="jobs-table-body">
+                            ${jobs.map(renderJobRow).join('')}
+                        </div>
+                    </div>
+                </div>
+            `:`
+                <div class="jobs-empty">
+                    <strong>没有搜到匹配岗位</strong>
+                    <span>职位池里暂时没有这组关键词，试试更通用的公司名或岗位名。</span>
+                </div>
+            `))}
             </div>
-        </div>
+        </section>
     `;
+    $('#jobs-query')?.addEventListener('input',function(){
+        jobBoardState.query=this.value;
+    });
+    $('#jobs-query')?.addEventListener('keydown',function(event){
+        if(event.key==='Enter'){
+            event.preventDefault();
+            void runJobBoardSearch();
+        }
+    });
+    $('#jobs-refresh')?.addEventListener('click',function(){
+        void runJobBoardSearch();
+    });
+    $$('[data-jobs-region]').forEach(function(button){
+        button.addEventListener('click',function(){
+            jobBoardState.activeRegion=this.dataset.jobsRegion||'all';
+            renderJobsView();
+        });
+    });
+    $$('[data-job-import]').forEach(function(button){
+        button.addEventListener('click',function(event){
+            event.preventDefault();
+            event.stopPropagation();
+            openJobPostingInAppModal(this.dataset.jobImport||'');
+        });
+    });
+    if(!jobBoardState.bootstrapped&&!jobBoardState.loading&&!jobBoardState.searched&&curView==='jobs'){
+        jobBoardState.bootstrapped=true;
+        setTimeout(function(){
+            if(curView==='jobs')void runJobBoardSearch({query:'',forceReload:false});
+        },0);
+    }
+}
+function renderJobRow(job){
+    return `
+        <article class="job-row">
+            <div class="job-region-pill" data-region="${escapeHTML(job.region||'other')}">${escapeHTML(getJobBoardRegionLabel(job.region))}</div>
+            <div class="job-company-cell">
+                <strong>${escapeHTML(job.company)}</strong>
+                ${job.updated_at?`<span>${escapeHTML(fmtD(job.updated_at))}</span>`:''}
+            </div>
+            <div class="job-title-cell">
+                <strong>${escapeHTML(job.title)}</strong>
+                ${job.summary?`<span>${escapeHTML(getJobBoardVisibleSummary(job))}</span>`:''}
+            </div>
+            <div class="job-location-cell">${escapeHTML(job.location||'地点未标注')}</div>
+            <div class="job-source-cell">${escapeHTML(job.source||'公开职位')}</div>
+            <div class="job-row-actions">
+                <a class="btn-secondary btn-sm" href="${escapeHTML(job.url)}" target="_blank" rel="noreferrer">打开JD</a>
+                <button type="button" class="btn-primary btn-sm" data-job-import="${escapeHTML(job.id)}">带入投递</button>
+            </div>
+        </article>
+    `;
+}
+async function runJobBoardSearch(options){
+    const rawQuery=options&&Object.prototype.hasOwnProperty.call(options,'query')?options.query:(jobBoardState.query||$('#jobs-query')?.value||'');
+    const query=normalizePrepareText(rawQuery);
+    jobBoardState.query=query;
+    jobBoardState.loading=true;
+    jobBoardState.error='';
+    jobBoardState.searched=true;
+    jobBoardState.bootstrapped=true;
+    renderJobsView();
+    try{
+        await loadJobBoardCache(!!(options&&options.forceReload));
+        if(!jobBoardState.jobs.length){
+            jobBoardState.error='职位缓存里暂时没有可展示岗位，请先运行缓存同步。';
+        }
+    }catch(error){
+        jobBoardState.error=error instanceof Error?error.message:String(error);
+    }finally{
+        jobBoardState.loading=false;
+        renderJobsView();
+    }
+}
+function openJobPostingInAppModal(jobId){
+    const job=(jobBoardState.jobs||[]).find(function(item){return item.id===jobId;});
+    if(!job)return;
+    openAppModal();
+    setFieldValue('#form-company',job.company);
+    setFieldValue('#form-position',job.title);
+    setFieldValue('#form-base',job.location);
+    setFieldValue('#form-channel',job.source);
+    setFieldValue('#form-channel-link',job.url);
+    setFieldValue('#form-jd-url',job.url);
+    setFieldValue('#form-jd-text',job.jd_text||job.summary||'');
+    toast('已把职位带入投递表单，请补岗位类别后保存。','success');
 }
 function renderPrepare(){
     const root=$('#prepare-root');
@@ -7590,12 +8140,11 @@ function renderPrepare(){
                         `}
                     </div>
                     <aside class="prepare-compose-side">
-                        ${renderPrepareJobRadarCard()}
                         <div class="prepare-card-surface prepare-recent-card prepare-recent-card-compact">
                             <div class="prepare-section-kicker">最近会话</div>
                             <div class="prepare-recent-list prepare-recent-list-compact">
                                 ${sessions.length?sessions.slice(0,PREPARE_SESSION_HISTORY_LIMIT).map(session=>`
-                                    <button type="button" class="prepare-recent-item${prepareState.selectedSessionId===session.id?' is-active':''}" data-prepare-session="${session.id}">
+                                    <button type="button" class="prepare-recent-item${prepareState.screen==='workspace'&&prepareState.selectedSessionId===session.id?' is-active':''}" data-prepare-session="${session.id}">
                                         <div>
                                             <strong>${escapeHTML(session.company_name||'目标公司')} · ${escapeHTML(session.role_name||'目标岗位')}</strong>
                                             <span>${escapeHTML(session.source_type==='application'?'来自已投递岗位':'准备会话')} · ${fmtDT(session.updated_at||session.created_at)}</span>
@@ -7780,25 +8329,6 @@ function renderPrepare(){
                 toast('准备工作台已生成','success');
             }
         },'生成中...');
-    });
-    $('#prepare-job-radar-query')?.addEventListener('input',function(){
-        prepareState.jobRadarQuery=this.value;
-    });
-    $('#prepare-job-radar-run')?.addEventListener('click',async function(){
-        const query=normalizePrepareText($('#prepare-job-radar-query')?.value||prepareState.jobRadarQuery||'产品经理');
-        prepareState.jobRadarQuery=query;
-        prepareState.jobRadarLoading=true;
-        prepareState.jobRadarError='';
-        renderPrepare();
-        try{
-            prepareState.jobRadarResults=await fetchPrepareJobRadar(query);
-            if(!prepareState.jobRadarResults.length)prepareState.jobRadarError='暂时没有搜到公开入口，可以换一个岗位关键词。';
-        }catch(error){
-            prepareState.jobRadarError=error instanceof Error?error.message:String(error);
-        }finally{
-            prepareState.jobRadarLoading=false;
-            renderPrepare();
-        }
     });
     $$('[data-prepare-session]').forEach(button=>button.addEventListener('click',function(){
         resetPrepareWorkspaceState(this.dataset.prepareSession);
@@ -8026,7 +8556,7 @@ function renderPrepare(){
         const session=getPrepareSelectedSession();
         const app=session&&session.application_id?store.getApp(session.application_id):null;
         if(app){
-            switchView('pipeline');
+            switchView('table');
             openDrawer(app.id);
         }
     });
@@ -8371,11 +8901,13 @@ function renderPrepare(){
 }
 function switchView(v){
     curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
-    const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
-    const tm={pipeline:'投递看板',table:'表格视图',resumes:'简历文件舱',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
+    const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',jobs:'view-jobs',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
+    const tm={pipeline:'投递',table:'投递',resumes:'简历文件舱',jobs:'职位发现',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
     $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${v}"]`)?.classList.add('active');
-    $('#view-title').textContent=tm[v]||'';$('#view-subtitle').textContent=v==='pipeline'?`${store.apps.length} 条投递`:'';
-    if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
+    $('#view-title').textContent=tm[v]||'';
+    $('#view-subtitle').textContent=(v==='pipeline'||v==='table')?`${store.apps.length} 条投递`:'';
+    renderViewModeSwitcher(v);
+    if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='jobs')renderJobsView();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
     if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
         window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
             view:v,
@@ -8385,9 +8917,28 @@ function switchView(v){
         }));
     }
 }
+function renderViewModeSwitcher(view){
+    const root=$('#view-mode-switcher');
+    if(!root)return;
+    if(view!=='table'&&view!=='pipeline'){
+        root.innerHTML='';
+        root.style.display='none';
+        return;
+    }
+    root.style.display='inline-flex';
+    root.innerHTML=`
+        <button type="button" class="view-mode-btn${view==='table'?' is-active':''}" data-switch-mode="table">表格</button>
+        <button type="button" class="view-mode-btn${view==='pipeline'?' is-active':''}" data-switch-mode="pipeline">看板</button>
+    `;
+    $$('[data-switch-mode]').forEach(function(button){
+        button.addEventListener('click',function(){
+            const target=this.dataset.switchMode||'table';
+            if(target!==curView)switchView(target);
+        });
+    });
+}
 $$('.nav-item[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
 initSidebarBrand();
-$('#global-search').addEventListener('input',e=>{const q=e.target.value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);});
 syncIntlToggles();
 async function setIntlMode(enabled){
     const ok=await store.setSetting('intlMode',!!enabled);
@@ -8476,29 +9027,24 @@ function mkCard(a){
         a.source_channel?`<span class="card-chip subtle">${escapeHTML(a.source_channel)}</span>`:''
     ].filter(Boolean).join('');
     const followup=getFollowupState(a);
-    c.innerHTML=`<div class="card-top"><div class="card-logo">${ini(a.company_name)}</div><div class="card-info"><div class="card-company">${escapeHTML(a.company_name)}</div><div class="card-position">${escapeHTML(a.position_title)}</div></div><div class="card-chevron">›</div></div><div class="card-chips">${chips}${followup?`<span class="card-chip followup">${escapeHTML(followup.label)}</span>`:''}</div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span class="card-date">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}</div>${r?`<div class="card-resume">已关联简历 · ${escapeHTML(r.file_name)}</div>`:''}${ddl}`;
+    c.innerHTML=`<div class="card-top"><div class="card-info"><div class="card-company">${escapeHTML(a.company_name)}</div><div class="card-position">${escapeHTML(a.position_title)}</div></div><div class="card-chevron" aria-hidden="true">›</div></div><div class="card-chips">${chips}${followup?`<span class="card-chip followup">${escapeHTML(followup.label)}</span>`:''}</div><div class="card-meta"><span class="card-stars">${stars(a.preference_level)}</span>${dateStr?`<span class="card-date">${dateStr}</span>`:''}${w!==null?`<span class="card-wait ${wc}">${w}天</span>`:''}</div>${r?`<div class="card-resume">已关联简历 · ${escapeHTML(r.file_name)}</div>`:''}${ddl}`;
     c.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',a.id);c.classList.add('dragging');});
     c.addEventListener('dragend',()=>c.classList.remove('dragging'));
     c.addEventListener('click',()=>openDrawer(a.id));
     return c;
 }
-async function chgStatus(id,ns){const a=store.getApp(id);if(!a||a.status===ns)return;if(ns==='REJECTED'){openRejModal(id);return;}const ok=await store.updateApp(id,{status:ns});if(ok===false)return;if(ns==='OFFER')toast('🎉 Offer！','success');renderKanban($('#global-search').value.toLowerCase().trim());}
+async function chgStatus(id,ns){const a=store.getApp(id);if(!a||a.status===ns)return;if(ns==='REJECTED'){openRejModal(id);return;}const ok=await store.updateApp(id,{status:ns});if(ok===false)return;if(ns==='OFFER')toast('🎉 Offer！','success');renderKanban(getBoardSearchQuery());}
 let pendRej=null;
 function openRejModal(id){pendRej=id;$$('#rejection-options input').forEach(i=>i.checked=false);$('#rejection-modal-overlay').classList.add('active');}
-$('#rejection-confirm').addEventListener('click',async ()=>{if(!pendRej)return;const s=$('#rejection-options input:checked');if(!s){toast('请选择','error');return;}const ok=await store.updateApp(pendRej,{status:'REJECTED',_rej:s.value});if(ok===false)return;$('#rejection-modal-overlay').classList.remove('active');pendRej=null;renderKanban($('#global-search').value.toLowerCase().trim());});
+$('#rejection-confirm').addEventListener('click',async ()=>{if(!pendRej)return;const s=$('#rejection-options input:checked');if(!s){toast('请选择','error');return;}const ok=await store.updateApp(pendRej,{status:'REJECTED',_rej:s.value});if(ok===false)return;$('#rejection-modal-overlay').classList.remove('active');pendRej=null;renderKanban(getBoardSearchQuery());});
 $('#rejection-modal-close').addEventListener('click',()=>{$('#rejection-modal-overlay').classList.remove('active');pendRej=null;});
 
 // ---- 表格 ----
 function renderTable(q=''){
     renderTableControlOptions();
-    const fs=$('#table-filter-status').value;
-    const filterColumn=$('#table-filter-column').value;
-    const filterValue=$('#table-filter-value').value.toLowerCase().trim();
     const cols=store.tableCols.filter(c=>c.show);
     let apps=store.apps.filter(a=>{
         if(q&&!a.company_name.toLowerCase().includes(q)&&!a.position_title.toLowerCase().includes(q))return false;
-        if(fs&&a.status!==fs)return false;
-        if(filterColumn&&filterValue&&!getTableFilterText(a,filterColumn).includes(filterValue))return false;
         return true;
     });
     const gb=$('#table-group-by').value,hd=$('#table-header'),bd=$('#table-body');
@@ -8579,7 +9125,7 @@ function renderTable(q=''){
         document.getElementById('table-select-all')?.addEventListener('change',function(e){
             if(e.target.checked)apps.forEach(app=>tableSelectedRows.add(app.id));
             else tableSelectedRows.clear();
-            renderTable($('#global-search').value.toLowerCase().trim());
+            renderTable(getBoardSearchQuery());
         });
     }
 }
@@ -8623,27 +9169,24 @@ function mkRow(a,cols){
     tr.addEventListener('click',function(){if(!tableQuickEdit)openDrawer(a.id);});
     return tr;
 }
-function inlineEdit(td,a,f,custom=false){const old=custom?(a.customFields?.[f]||''):(a[f]||'');const inp=document.createElement('input');inp.type='text';inp.className='inline-edit';inp.value=old;td.textContent='';td.appendChild(inp);inp.focus();inp.select();const sv=async ()=>{const v=inp.value.trim();if(custom){const nextFields=Object.assign({},a.customFields||{}, {[f]:v});const ok=await store.updateApp(a.id,{customFields:nextFields});if(ok===false)return renderTable($('#global-search').value.toLowerCase().trim());}else if(v!==old){if(f==='position_category'&&v){const added=await store.addCat(v);if(!added)return renderTable($('#global-search').value.toLowerCase().trim());}const ok=await store.updateApp(a.id,{[f]:v});if(ok===false)return renderTable($('#global-search').value.toLowerCase().trim());}renderTable($('#global-search').value.toLowerCase().trim());};inp.addEventListener('blur',sv);inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sv();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
-function inlineCatSel(td,a){const sel=document.createElement('select');sel.className='inline-select';const empty=document.createElement('option');empty.value='';empty.textContent='选择';sel.appendChild(empty);store.categories.forEach(function(c){const option=document.createElement('option');option.value=c;option.selected=a.position_category===c;option.textContent=c;sel.appendChild(option);});const addNew=document.createElement('option');addNew.value='__NEW__';addNew.textContent='+ 新增类别...';sel.appendChild(addNew);td.textContent='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{if(sel.value==='__NEW__'){const name=prompt('输入新类别名称：');if(name&&name.trim()){const added=await store.addCat(name.trim());if(!added)return renderTable($('#global-search').value.toLowerCase().trim());const ok=await store.updateApp(a.id,{position_category:name.trim()});if(ok!==false)initFilters();}renderTable($('#global-search').value.toLowerCase().trim());}else if(sel.value){const ok=await store.updateApp(a.id,{position_category:sel.value});if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());}});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',async ()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const nextTimeline=cloneData(a.timeline);const ae=nextTimeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=nextTimeline;}const ok=await store.updateApp(a.id,updates);if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable($('#global-search').value.toLowerCase().trim());});}
-function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{await chgStatus(a.id,sel.value);renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{const ok=await store.updateApp(a.id,{preference_level:sel.value});if(ok!==false)renderTable($('#global-search').value.toLowerCase().trim());});sel.addEventListener('blur',()=>renderTable($('#global-search').value.toLowerCase().trim()));}
-$('#table-group-by').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
-$('#table-filter-status').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
-$('#table-filter-column').addEventListener('change',()=>renderTable($('#global-search').value.toLowerCase().trim()));
-$('#table-filter-value').addEventListener('input',()=>renderTable($('#global-search').value.toLowerCase().trim()));
-$('#table-sort-column').addEventListener('change',e=>{tableSortColumn=e.target.value||'created_at';renderTable($('#global-search').value.toLowerCase().trim());});
-$('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable($('#global-search').value.toLowerCase().trim());});
-$('#filter-category').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
-$('#filter-visa')?.addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
-$('#kanban-sort').addEventListener('change',()=>renderKanban($('#global-search').value.toLowerCase().trim()));
-$('#kanban-sort-direction').addEventListener('click',()=>{kanbanSortDirection=kanbanSortDirection==='asc'?'desc':'asc';syncKanbanSortDirection();renderKanban($('#global-search').value.toLowerCase().trim());});
+function inlineEdit(td,a,f,custom=false){const old=custom?(a.customFields?.[f]||''):(a[f]||'');const inp=document.createElement('input');inp.type='text';inp.className='inline-edit';inp.value=old;td.textContent='';td.appendChild(inp);inp.focus();inp.select();const sv=async ()=>{const v=inp.value.trim();if(custom){const nextFields=Object.assign({},a.customFields||{}, {[f]:v});const ok=await store.updateApp(a.id,{customFields:nextFields});if(ok===false)return renderTable(getBoardSearchQuery());}else if(v!==old){if(f==='position_category'&&v){const added=await store.addCat(v);if(!added)return renderTable(getBoardSearchQuery());}const ok=await store.updateApp(a.id,{[f]:v});if(ok===false)return renderTable(getBoardSearchQuery());}renderTable(getBoardSearchQuery());};inp.addEventListener('blur',sv);inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sv();}if(e.key==='Escape')renderTable(getBoardSearchQuery());});}
+function inlineCatSel(td,a){const sel=document.createElement('select');sel.className='inline-select';const empty=document.createElement('option');empty.value='';empty.textContent='选择';sel.appendChild(empty);store.categories.forEach(function(c){const option=document.createElement('option');option.value=c;option.selected=a.position_category===c;option.textContent=c;sel.appendChild(option);});const addNew=document.createElement('option');addNew.value='__NEW__';addNew.textContent='+ 新增类别...';sel.appendChild(addNew);td.textContent='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{if(sel.value==='__NEW__'){const name=prompt('输入新类别名称：');if(name&&name.trim()){const added=await store.addCat(name.trim());if(!added)return renderTable(getBoardSearchQuery());const ok=await store.updateApp(a.id,{position_category:name.trim()});if(ok!==false)initFilters();}renderTable(getBoardSearchQuery());}else if(sel.value){const ok=await store.updateApp(a.id,{position_category:sel.value});if(ok!==false)renderTable(getBoardSearchQuery());}});sel.addEventListener('blur',()=>renderTable(getBoardSearchQuery()));}
+function inlineDateEdit(td,a){const inp=document.createElement('input');inp.type='date';inp.className='inline-edit';inp.value=a.applied_date||'';td.textContent='';td.appendChild(inp);inp.focus();inp.addEventListener('blur',async ()=>{const newDate=inp.value;const updates={applied_date:newDate};if(a.timeline&&a.timeline.length){const nextTimeline=cloneData(a.timeline);const ae=nextTimeline.find(t=>t.name==='已投递');if(ae)ae.date=newDate;updates.timeline=nextTimeline;}const ok=await store.updateApp(a.id,updates);if(ok!==false)renderTable(getBoardSearchQuery());});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape')renderTable(getBoardSearchQuery());});}
+function inlineStatusSel(td,a){const sel=document.createElement('select');sel.className='inline-select';STATUSES.forEach(s=>{sel.innerHTML+=`<option value="${s.key}" ${s.key===a.status?'selected':''}>${s.label}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{await chgStatus(a.id,sel.value);renderTable(getBoardSearchQuery());});sel.addEventListener('blur',()=>renderTable(getBoardSearchQuery()));}
+function prefSelect(td,a){const sel=document.createElement('select');sel.className='inline-select';PREF_OPTIONS.forEach(p=>{sel.innerHTML+=`<option value="${p.v}" ${a.preference_level==p.v?'selected':''}>${p.l}</option>`;});td.innerHTML='';td.appendChild(sel);sel.focus();sel.addEventListener('change',async ()=>{const ok=await store.updateApp(a.id,{preference_level:sel.value});if(ok!==false)renderTable(getBoardSearchQuery());});sel.addEventListener('blur',()=>renderTable(getBoardSearchQuery()));}
+$('#table-group-by').addEventListener('change',()=>renderTable(getBoardSearchQuery()));
+$('#table-sort-column').addEventListener('change',e=>{tableSortColumn=e.target.value||'created_at';renderTable(getBoardSearchQuery());});
+$('#table-sort-direction').addEventListener('click',()=>{tableSortDirection=tableSortDirection==='asc'?'desc':'asc';renderTable(getBoardSearchQuery());});
+$('#filter-category').addEventListener('change',()=>renderKanban(getBoardSearchQuery()));
+$('#filter-visa')?.addEventListener('change',()=>renderKanban(getBoardSearchQuery()));
+$('#kanban-sort').addEventListener('change',()=>renderKanban(getBoardSearchQuery()));
+$('#kanban-sort-direction').addEventListener('click',()=>{kanbanSortDirection=kanbanSortDirection==='asc'?'desc':'asc';syncKanbanSortDirection();renderKanban(getBoardSearchQuery());});
 $('#table-add-row').addEventListener('click',()=>openAppModal());
 $('#table-edit-mode-btn').addEventListener('click',()=>{
     tableQuickEdit=!tableQuickEdit;
     if(!tableQuickEdit)tableSelectedRows.clear();
     syncQuickEditPanel();
-    renderTable($('#global-search').value.toLowerCase().trim());
+    renderTable(getBoardSearchQuery());
 });
 $('#table-quick-add-row').addEventListener('click',()=>openAppModal());
 $('#table-quick-del-rows').addEventListener('click',async ()=>{
@@ -8933,7 +9476,7 @@ function updDActions(){
 $$('.drawer-tab').forEach(t=>{t.addEventListener('click',()=>{$$('.drawer-tab').forEach(x=>x.classList.remove('active'));$$('.drawer-tab-content').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(`#tab-${t.dataset.tab}`).classList.add('active');curTab=t.dataset.tab;updDActions();});});
 $('#drawer-close').addEventListener('click',()=>$('#drawer-overlay').classList.remove('active'));
 $('#drawer-overlay').addEventListener('click',e=>{if(e.target===$('#drawer-overlay'))$('#drawer-overlay').classList.remove('active');});
-function refresh(){const q=$('#global-search').value.toLowerCase().trim();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);else if(curView==='resumes')renderResumes();else if(curView==='prepare')renderPrepare();else if(curView==='reflections')renderRefs();else if(curView==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(curView==='analytics')renderAnalytics();}
+function refresh(){const q=getBoardSearchQuery();if(curView==='pipeline')renderKanban(q);else if(curView==='table')renderTable(q);else if(curView==='resumes')renderResumes();else if(curView==='jobs')renderJobsView(jobBoardState.query||'');else if(curView==='prepare')renderPrepare();else if(curView==='reflections')renderRefs();else if(curView==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(curView==='analytics')renderAnalytics();}
 // ---- 简历 ----
 function renderResumeStats(){
     const statsEl=$('#resumes-stats');
@@ -9877,7 +10420,7 @@ function openResumeLinkModal(resumeId){
         $('#resume-link-overlay').remove();renderResumes();toast('关联已更新','success');
     },'保存中...');});
 }
-function initFilters(){const cs=$('#filter-category');cs.textContent='';const catPlaceholder=document.createElement('option');catPlaceholder.value='';catPlaceholder.textContent='全部类别';cs.appendChild(catPlaceholder);store.categories.forEach(function(c){const option=document.createElement('option');option.value=c;option.textContent=c;cs.appendChild(option);});const ss=$('#table-filter-status');const prev=ss.value;ss.textContent='';const statusPlaceholder=document.createElement('option');statusPlaceholder.value='';statusPlaceholder.textContent='全部状态';ss.appendChild(statusPlaceholder);STATUSES.filter(s=>s.key!=='REJECTED').forEach(function(s){const option=document.createElement('option');option.value=s.key;option.textContent=s.label;ss.appendChild(option);});ss.value=STATUSES.some(s=>s.key===prev&&s.key!=='REJECTED')?prev:'';renderTableControlOptions();}
+function initFilters(){const cs=$('#filter-category');cs.textContent='';const catPlaceholder=document.createElement('option');catPlaceholder.value='';catPlaceholder.textContent='全部类别';cs.appendChild(catPlaceholder);store.categories.forEach(function(c){const option=document.createElement('option');option.value=c;option.textContent=c;cs.appendChild(option);});renderTableControlOptions();}
 function daysAgo(n){const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().split('T')[0];}
 function buildStarterData(preservedSettings){
     const categories=['产品运营','技术研发','管理咨询','数据分析','金融投行','市场营销'];
@@ -9894,6 +10437,8 @@ function buildStarterData(preservedSettings){
         const timeline=cloneData(sample.timeline||[]);
         const app=Object.assign({},sample,{
             id:crypto.randomUUID(),
+            is_starter_placeholder:true,
+            starter_placeholder_source:'default_seed',
             status:deriveStatus(timeline),
             visa_requirement:sample.visa_requirement||'UNKNOWN',
             salary_expectation:sample.salary_expectation||'',
@@ -9943,6 +10488,6 @@ function init(){
     syncKanbanSortDirection();
     syncQuickEditPanel();
     updIntl();
-    switchView('pipeline');
+    switchView('table');
 }
 init();

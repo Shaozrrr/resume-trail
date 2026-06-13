@@ -26,7 +26,8 @@
             },window.RT_PREPARE_CONFIG||{});
         })();
     </script>
-  <link rel="stylesheet" href="styles.css?v=20260605-mobile-layout-01">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23090a0d'/%3E%3Cpath d='M32 8 52 19.5v25L32 56 12 44.5v-25L32 8Zm0 6.8L18 22.9v16.2l14 8.1 14-8.1V22.9l-14-8.1Zm0 7.2 7.8 4.5v9L32 40l-7.8-4.5v-9L32 22Z' fill='%23f4f1ea'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css?v=20260613-jd-cleanup-01">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -192,9 +193,10 @@
                 </div>
             </div>
             <div class="nav-items">
-                <button class="nav-item active" data-view="pipeline" title="投递看板"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
-                <button class="nav-item" data-view="table" title="表格视图"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M9 3v18"/></svg><span>表格</span></button>
+                <button class="nav-item active" data-view="table" title="投递"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M9 3v18"/></svg><span>投递</span></button>
+                <button class="nav-item nav-item-hidden" data-view="pipeline" title="投递看板" aria-hidden="true" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
                 <button class="nav-item" data-view="resumes" title="简历文件舱"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg><span>简历</span></button>
+                <button class="nav-item" data-view="jobs" title="职位发现"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 7V5a3 3 0 0 1 3-3h2a3 3 0 0 1 3 3v2"/><rect x="3" y="7" width="18" height="15" rx="2"/><path d="M3 13h18M10 13v2h4v-2"/></svg><span>职位</span></button>
                 <button class="nav-item" data-view="prepare" title="面试准备"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3 4 7.5V16.5L12 21 20 16.5V7.5L12 3Z"/><path d="M8.5 12 10.8 14.3 15.8 9.3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>准备</span></button>
                 <button class="nav-item" data-view="reflections" title="复盘记录"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8"/></svg><span>复盘</span></button>
                 <button class="nav-item" data-view="calendar" title="日历"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>日历</span></button>
@@ -208,8 +210,9 @@
         <main id="main-content">
             <header id="top-bar">
                 <div class="top-bar-left">
-                    <h1 id="view-title">投递看板</h1>
+                    <h1 id="view-title">投递</h1>
                     <span id="view-subtitle" class="subtitle"></span>
+                    <div id="view-mode-switcher" class="view-mode-switcher" aria-label="投递视图切换"></div>
                 </div>
                 <div class="top-bar-right">
                     <button class="topbar-community-entry" id="app-community-entry" type="button" title="加入用户共创群">
@@ -222,12 +225,10 @@
                         <span class="theme-toggle-icon" aria-hidden="true">☀︎</span>
                         <span class="theme-toggle-text">浅色模式</span>
                     </button>
-                    <div class="search-box"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input type="text" id="global-search" placeholder="搜索公司或岗位..."></div>
-                    <button id="import-btn" class="btn-ghost btn-sm" title="批量导入">📥 导入</button>
                     <button id="add-application-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建投递</button>
                 </div>
             </header>
-            <div id="view-pipeline" class="view active">
+            <div id="view-pipeline" class="view">
                 <div class="kanban-filters">
                     <select id="filter-category" class="filter-select"><option value="">全部类别</option></select>
                     <div style="flex:1"></div>
@@ -236,12 +237,9 @@
                 </div>
                 <div class="kanban-board" id="kanban-board"></div>
             </div>
-            <div id="view-table" class="view">
+            <div id="view-table" class="view active">
                 <div class="table-toolbar">
                     <select id="table-group-by" class="filter-select"><option value="">不分组</option><option value="position_category">按类别</option><option value="status">按状态</option><option value="source_channel">按渠道</option></select>
-                    <select id="table-filter-status" class="filter-select"><option value="">全部状态</option></select>
-                    <select id="table-filter-column" class="filter-select"><option value="">筛选列</option></select>
-                    <input type="text" id="table-filter-value" class="table-filter-input" placeholder="输入筛选值">
                     <select id="table-sort-column" class="filter-select"><option value="">排序列</option></select>
                     <button class="btn-ghost btn-sm" id="table-sort-direction" title="切换排序方向">↓</button>
                     <div style="flex:1"></div>
@@ -283,6 +281,9 @@
             </div>
             <div id="view-prepare" class="view">
                 <div id="prepare-root" class="prepare-root"></div>
+            </div>
+            <div id="view-jobs" class="view">
+                <div id="jobs-root" class="jobs-root"></div>
             </div>
             <div id="view-reflections" class="view">
                 <div class="reflections-header"><button id="new-reflection-btn" class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建复盘</button></div>
@@ -561,23 +562,10 @@
                 </div>
             <div class="community-modal-qr-wrap">
               <span class="community-scan-line" aria-hidden="true"></span>
-              <img src="assets/user-cocreation-group-qr.jpg" alt="用户共创群二维码" class="community-modal-qr">
+              <img src="assets/user-cocreation-group-qr.jpg" alt="用户共创群二维码" class="community-modal-qr" data-runtime-qr="modal">
             </div>
                 <div class="community-modal-caption">微信扫码加入用户共创群。需求、问题、想法，都可以直接放进群里。</div>
             </div>
-        </div>
-    </div>
-
-    <!-- 导入弹窗 -->
-    <div class="modal-overlay" id="import-modal-overlay">
-        <div class="modal">
-            <div class="modal-header"><h2>📥 批量导入</h2><button class="modal-close" id="import-modal-close">&times;</button></div>
-            <div class="modal-body">
-                <div class="form-group"><label style="font-size:13px;font-weight:500;color:var(--text-primary)">从 CSV 导入</label><div class="upload-zone" id="import-upload-zone" style="padding:20px"><p>拖拽 CSV 文件或点击选择</p><span class="upload-hint">格式：公司,岗位,类别,投递日期</span><input type="file" id="import-file-input" accept=".csv" style="display:none"></div></div>
-                <div class="form-group" style="border-top:1px solid var(--border-light);padding-top:12px"><label style="font-size:13px;font-weight:500;color:var(--text-primary)">粘贴导入</label><textarea id="import-paste" rows="5" placeholder="从招聘平台复制粘贴，支持：&#10;公司 | 岗位 | 类别&#10;或 Tab/逗号 分隔"></textarea></div>
-                <div id="import-preview" style="display:none;margin-top:8px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">预览 <span id="import-count">0</span> 条</div><div id="import-preview-list" style="max-height:120px;overflow-y:auto;font-size:11px;color:var(--text-muted)"></div></div>
-            </div>
-            <div class="modal-footer"><button class="btn-secondary" id="import-cancel">取消</button><button class="btn-primary" id="import-confirm">导入</button></div>
         </div>
     </div>
 
@@ -627,9 +615,11 @@
     </script>
     <script src=".prepare-runtime.local.js"></script>
     <script src=".billing-runtime.local.js?v=20260525-stripe-setup-01"></script>
+    <script src="rt-runtime-settings.js?v=20260613-runtime-remote-02"></script>
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
-  <script src="app.js?v=20260605-mobile-layout-01"></script>
+  <script src="assets/job-board-cache.js?v=20260613-local-cache-polish-02"></script>
+  <script src="app.js?v=20260613-jd-cleanup-01"></script>
     <script src="supabase.js?v=20260602-account-scope-01"></script>
     <script src="features.js?v=20260605-mobile-layout-01"></script>
     <script src="goal.js"></script>
