@@ -102,7 +102,6 @@ const JOB_BOARD_GREENHOUSE_SOURCES=[
     {company:'Asana',board:'asana'},
     {company:'Instacart',board:'instacart'}
 ];
-const JOB_BOARD_DEFAULT_LIMIT=2600;
 const JOB_BOARD_REMOTE_TABLE='rt_public_job_board_cache';
 const JOB_BOARD_REMOTE_CACHE_KEY='default';
 const JOB_BOARD_CACHE_MAX_AGE_MS=24*60*60*1000;
@@ -1578,6 +1577,7 @@ let tableQuickEdit=false;
 let tableSortColumn='created_at';
 let tableSortDirection='desc';
 let kanbanSortDirection='desc';
+let viewModeTransitionToken=0;
 const prepareState={
     mode:'application',
     screen:'compose',
@@ -1665,7 +1665,8 @@ const jobBoardState={
     jobsVersion:'',
     regionCounts:{},
     filteredCacheKey:'',
-    filteredJobs:[]
+    filteredJobs:[],
+    bodyAnimationToken:0
 };
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
@@ -3152,8 +3153,18 @@ function normalizeJobPosting(input){
         url,
         jd_text:normalizePrepareText(input.jd_text||''),
         summary:normalizeJobBoardText(input.summary||input.jd_text||'').slice(0,220),
-        updated_at:normalizePrepareText(input.updated_at||'')
+        updated_at:normalizePrepareText(input.updated_at||''),
+        first_seen_at:normalizePrepareText(input.first_seen_at||''),
+        last_seen_at:normalizePrepareText(input.last_seen_at||'')
     };
+}
+function isJobBoardPostingVisible(job){
+    const sixtyDaysMs=60*24*60*60*1000;
+    const candidates=[job&&job.updated_at,job&&job.last_seen_at,job&&job.first_seen_at]
+        .map(function(value){return Date.parse(String(value||''));})
+        .filter(Number.isFinite);
+    if(!candidates.length)return true;
+    return Date.now()-Math.max.apply(null,candidates)<=sixtyDaysMs;
 }
 function getJobBoardRegionLabel(regionKey){
     const region=JOB_BOARD_REGIONS.find(function(item){return item.key===regionKey;});
@@ -3214,8 +3225,9 @@ function normalizeJobBoardCachePayload(payload){
                     return null;
                 })
                 .filter(Boolean)
+                .filter(isJobBoardPostingVisible)
         )
-    ).slice(0,JOB_BOARD_DEFAULT_LIMIT);
+    );
     return{
         jobs,
         updated_at:normalizePrepareText(raw.updated_at||raw.last_refreshed_at||''),
@@ -3242,6 +3254,15 @@ async function fetchRemoteJobBoardCache(){
 function getBundledJobBoardCache(){
     if(!window.RT_JOB_BOARD_CACHE)return null;
     const payload=normalizeJobBoardCachePayload(window.RT_JOB_BOARD_CACHE);
+    return payload.jobs.length?payload:null;
+}
+async function fetchBundledJobBoardCacheJson(){
+    const response=await fetch(`assets/job-board-cache.json?t=${Date.now()}`,{
+        method:'GET',
+        cache:'no-store'
+    });
+    if(!response.ok)return null;
+    const payload=normalizeJobBoardCachePayload(await response.json().catch(function(){return{};}));
     return payload.jobs.length?payload:null;
 }
 function buildSharedStoragePublicUrl(bucket,objectPath){
@@ -3280,6 +3301,11 @@ async function loadJobBoardCache(force){
             console.warn('[jobs] remote table cache unavailable',error);
         }
         if(!payload)payload=getBundledJobBoardCache();
+        try{
+            if(!payload)payload=await fetchBundledJobBoardCacheJson();
+        }catch(error){
+            console.warn('[jobs] bundled json cache unavailable',error);
+        }
         if(!payload){
             jobBoardState.jobs=[];
             jobBoardState.lastFetchedAt='';
@@ -3464,7 +3490,7 @@ async function fetchJobBoardResults(query){
     const settled=await Promise.allSettled(tasks);
     return sortJobBoardPostings(dedupeJobPostings(settled.flatMap(function(result){
         return result.status==='fulfilled'?(result.value||[]):[];
-    }))).slice(0,JOB_BOARD_DEFAULT_LIMIT);
+    })));
 }
 function flattenPrepareDuckTopics(topics,bucket){
     (topics||[]).forEach(function(topic){
@@ -4111,6 +4137,18 @@ async function extractResumeTextFromFile(file){
     if(!file)return'';
     const bytes=new Uint8Array(await file.arrayBuffer());
     return extractResumeTextFromBytes(bytes,file.name,file.type||'');
+}
+async function readBlobAsDataUrl(blob){
+    return await new Promise(function(resolve,reject){
+        const reader=new FileReader();
+        reader.onload=function(event){
+            resolve(String(event?.target?.result||''));
+        };
+        reader.onerror=function(){
+            reject(reader.error||new Error('文件读取失败'));
+        };
+        reader.readAsDataURL(blob);
+    });
 }
 function dataUrlToPrepareBytes(dataUrl){
     const raw=String(dataUrl||'');
@@ -7850,15 +7888,15 @@ function renderJobsView(filterText){
     const pageJobs=jobs.slice(startIndex,startIndex+(jobBoardState.pageSize||80));
     const regionCounts=jobBoardState.regionCounts||{};
     const metaLabel=q?`当前匹配 ${jobs.length} 个岗位`:`当前收录 ${jobs.length} 个岗位`;
+    const bodyTransitionClass=jobBoardState.bodyAnimationToken?' jobs-results-panel--enter':'';
     root.innerHTML=`
         <section class="jobs-shell">
             <div class="jobs-hero">
                 <div class="jobs-hero-copy">
                     <div class="section-kicker">职位发现</div>
                     <h2>真实职位发现</h2>
-                    <p class="jobs-hero-meta">${jobBoardState.lastFetchedAt?`最近更新 · ${escapeHTML(fmtDT(jobBoardState.lastFetchedAt))}`:'默认展示最近同步好的职位池。'}</p>
+                    <p class="jobs-hero-meta">默认展示已经同步好的真实岗位，留空会直接按地区查看全部。</p>
                 </div>
-                <button type="button" class="btn-secondary btn-sm" id="jobs-refresh" ${jobBoardState.loading?'disabled':''}>${jobBoardState.loading?'更新中':(jobBoardState.query?'更新结果':'更新职位池')}</button>
             </div>
             <div class="jobs-board-surface">
                 <div class="jobs-toolbar">
@@ -7878,44 +7916,46 @@ function renderJobsView(filterText){
                     <span>${escapeHTML(metaLabel)}</span>
                     <span>第 ${currentPage} / ${totalPages} 页</span>
                 </div>
-            ${jobBoardState.error?`<div class="jobs-error">${escapeHTML(jobBoardState.error)}</div>`:''}
-            ${jobBoardState.loading?`
-                <div class="jobs-loading">
-                    <span></span>
-                    <strong>正在整理职位列表…</strong>
-                </div>
-            `:(!jobBoardState.searched?`
-                <div class="jobs-empty">
-                    <strong>准备加载职位列表</strong>
-                    <span>这里展示的是已经同步好的职位数据，不会在用户进入时现场抓取。</span>
-                </div>
-            `:(jobs.length?`
-                <div class="jobs-table-wrap">
-                    <div class="jobs-table-shell">
-                        <div class="jobs-table-head">
-                            <span>地区</span>
-                            <span>公司</span>
-                            <span>岗位</span>
-                            <span>Base</span>
-                            <span>来源</span>
-                            <span></span>
+                <div class="jobs-results-panel${bodyTransitionClass}">
+                ${jobBoardState.error?`<div class="jobs-error">${escapeHTML(jobBoardState.error)}</div>`:''}
+                ${jobBoardState.loading?`
+                    <div class="jobs-loading">
+                        <span></span>
+                        <strong>正在整理职位列表…</strong>
+                    </div>
+                `:(!jobBoardState.searched?`
+                    <div class="jobs-empty">
+                        <strong>准备加载职位列表</strong>
+                        <span>这里展示的是已经同步好的职位数据，不会在用户进入时现场抓取。</span>
+                    </div>
+                `:(jobs.length?`
+                    <div class="jobs-table-wrap">
+                        <div class="jobs-table-shell">
+                            <div class="jobs-table-head">
+                                <span>地区</span>
+                                <span>公司</span>
+                                <span>岗位</span>
+                                <span>Base</span>
+                                <span>来源</span>
+                                <span></span>
+                            </div>
+                            <div class="jobs-table-body">
+                                ${pageJobs.map(renderJobRow).join('')}
+                            </div>
                         </div>
-                        <div class="jobs-table-body">
-                            ${pageJobs.map(renderJobRow).join('')}
+                        <div class="jobs-pagination">
+                            <button type="button" class="btn-secondary btn-sm" data-jobs-page="prev" ${currentPage<=1?'disabled':''}>上一页</button>
+                            <span class="jobs-pagination-meta">显示 ${jobs.length?startIndex+1:0}-${Math.min(startIndex+pageJobs.length,jobs.length)} / ${jobs.length}</span>
+                            <button type="button" class="btn-secondary btn-sm" data-jobs-page="next" ${currentPage>=totalPages?'disabled':''}>下一页</button>
                         </div>
                     </div>
-                    <div class="jobs-pagination">
-                        <button type="button" class="btn-secondary btn-sm" data-jobs-page="prev" ${currentPage<=1?'disabled':''}>上一页</button>
-                        <span class="jobs-pagination-meta">显示 ${jobs.length?startIndex+1:0}-${Math.min(startIndex+pageJobs.length,jobs.length)} / ${jobs.length}</span>
-                        <button type="button" class="btn-secondary btn-sm" data-jobs-page="next" ${currentPage>=totalPages?'disabled':''}>下一页</button>
+                `:`
+                    <div class="jobs-empty">
+                        <strong>没有搜到匹配岗位</strong>
+                        <span>职位池里暂时没有这组关键词，试试更通用的公司名或岗位名。</span>
                     </div>
+                `))}
                 </div>
-            `:`
-                <div class="jobs-empty">
-                    <strong>没有搜到匹配岗位</strong>
-                    <span>职位池里暂时没有这组关键词，试试更通用的公司名或岗位名。</span>
-                </div>
-            `))}
             </div>
         </section>
     `;
@@ -7928,13 +7968,11 @@ function renderJobsView(filterText){
             void runJobBoardSearch();
         }
     });
-    $('#jobs-refresh')?.addEventListener('click',function(){
-        void runJobBoardSearch();
-    });
     $$('[data-jobs-region]').forEach(function(button){
         button.addEventListener('click',function(){
             jobBoardState.activeRegion=this.dataset.jobsRegion||'all';
             jobBoardState.page=1;
+            jobBoardState.bodyAnimationToken=Date.now();
             renderJobsView();
         });
     });
@@ -7943,6 +7981,7 @@ function renderJobsView(filterText){
             const direction=this.dataset.jobsPage;
             if(direction==='prev'&&jobBoardState.page>1)jobBoardState.page-=1;
             if(direction==='next'&&jobBoardState.page<totalPages)jobBoardState.page+=1;
+            jobBoardState.bodyAnimationToken=Date.now();
             renderJobsView();
         });
     });
@@ -7958,6 +7997,11 @@ function renderJobsView(filterText){
         setTimeout(function(){
             if(curView==='jobs')void runJobBoardSearch({query:'',forceReload:false});
         },0);
+    }
+    if(jobBoardState.bodyAnimationToken){
+        window.requestAnimationFrame(function(){
+            jobBoardState.bodyAnimationToken=0;
+        });
     }
 }
 function renderJobRow(job){
@@ -8976,7 +9020,24 @@ function renderPrepare(){
         }
     }
 }
+function animateSharedViewSwitch(targetView){
+    const shell=(targetView==='pipeline'||targetView==='table')?$(`#view-${targetView}`):null;
+    if(!shell)return;
+    const token=String(Date.now());
+    viewModeTransitionToken+=1;
+    const currentToken=viewModeTransitionToken;
+    shell.dataset.sharedTransitionToken=token;
+    shell.classList.remove('view-shared-enter');
+    void shell.offsetWidth;
+    shell.classList.add('view-shared-enter');
+    window.setTimeout(function(){
+        if(currentToken!==viewModeTransitionToken)return;
+        shell.classList.remove('view-shared-enter');
+        delete shell.dataset.sharedTransitionToken;
+    },220);
+}
 function switchView(v){
+    const previousView=curView;
     curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
     const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',jobs:'view-jobs',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
     const tm={pipeline:'投递',table:'投递',resumes:'简历文件舱',jobs:'职位发现',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
@@ -8986,6 +9047,9 @@ function switchView(v){
     $('#view-subtitle').textContent=(v==='pipeline'||v==='table')?`${store.apps.length} 条投递`:'';
     renderViewModeSwitcher(v);
     if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='jobs')renderJobsView();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
+    if((previousView==='pipeline'||previousView==='table')&&(v==='pipeline'||v==='table')&&previousView!==v){
+        animateSharedViewSwitch(v);
+    }
     if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
         window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
             view:v,
@@ -10102,8 +10166,9 @@ $('#resume-save').addEventListener('click',async e=>{await withButtonBusy(e.curr
     const basePayload={file_name:n,tags,notes};
     if(selFile){
         const payload=Object.assign({},basePayload,{orig:selFile.name,file_type:selFile.name.toLowerCase().endsWith('.pdf')?'PDF':'DOCX',size:selFile.size,data_url:null});
+        const bytes=new Uint8Array(await selFile.arrayBuffer());
         try{
-            const extractedText=await extractResumeTextFromFile(selFile);
+            const extractedText=await extractResumeTextFromBytes(bytes,selFile.name,selFile.type||'');
             payload.extracted_text=extractedText;
             payload.extracted_at=new Date().toISOString();
             payload.extraction_status='ready';
@@ -10115,12 +10180,8 @@ $('#resume-save').addEventListener('click',async e=>{await withButtonBusy(e.curr
             payload.extraction_error=error instanceof Error?error.message:String(error);
             toast('文件已保存，但这份简历正文暂时没读出来。后续准备前请优先换成 PDF、DOCX、TXT 或 Markdown。','info');
         }
-        const reader=new FileReader();
-        reader.onload=async e=>{
-            payload.data_url=e.target.result;
-            await persistResumeDraft(payload);
-        };
-        reader.readAsDataURL(selFile);
+        payload.data_url=await readBlobAsDataUrl(new Blob([bytes],{type:selFile.type||'application/octet-stream'}));
+        await persistResumeDraft(payload);
         return;
     }
     if(editingResumeId&&current){
@@ -10334,10 +10395,10 @@ $('#record-btn').addEventListener('click',async()=>{
     }
 });
 $$('.star-rating .star').forEach(s=>{s.addEventListener('click',()=>{const v=parseInt(s.dataset.val);$$('.star-rating .star').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.val)<=v));});});
-$('#reflection-save').addEventListener('click',async ()=>{const rawAppValue=$('#reflection-application').value,round=$('#reflection-round').value,question=$('#reflection-question-content').value.trim(),answer=$('#reflection-answer-content').value.trim(),review=$('#reflection-review-content').value.trim();if(!rawAppValue||!round){toast('请选择投递和轮次','error');return;}if(!question&&!answer&&!review){toast('请至少填写一项内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const combined=`问题：${question||'—'}\n\n回答：${answer||'—'}\n\n复盘：${review||'—'}`.trim();const isDetached=rawAppValue.startsWith('manual::');const app=isDetached?null:store.getApp(rawAppValue);const detachedMeta=isDetached?rawAppValue.slice('manual::'.length).split('|||'):[];
+$('#reflection-save').addEventListener('click',async e=>{await withButtonBusy(e.currentTarget,async ()=>{const rawAppValue=$('#reflection-application').value,round=$('#reflection-round').value,question=$('#reflection-question-content').value.trim(),answer=$('#reflection-answer-content').value.trim(),review=$('#reflection-review-content').value.trim();if(!rawAppValue||!round){toast('请选择投递和轮次','error');return;}if(!question&&!answer&&!review){toast('请至少填写一项内容','error');return;}const pp=[];$$('#pain-points-selector input:checked').forEach(i=>pp.push(i.value));let sr=0;$$('.star-rating .star.active').forEach(()=>sr++);const combined=`问题：${question||'—'}\n\n回答：${answer||'—'}\n\n复盘：${review||'—'}`.trim();const isDetached=rawAppValue.startsWith('manual::');const app=isDetached?null:store.getApp(rawAppValue);const detachedMeta=isDetached?rawAppValue.slice('manual::'.length).split('|||'):[];
 const companyName=app?.company_name||detachedMeta[0]||'';
 const positionTitle=app?.position_title||detachedMeta[1]||'';
-const d={app_id:app?.id||null,company_name:companyName,position_title:positionTitle,interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',question_text:question,answer_text:answer,reflection_text:review,raw_content:combined,cleaned_content:combined,ai_extracted:review||answer||null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);});
+const d={app_id:app?.id||null,company_name:companyName,position_title:positionTitle,interview_round:round,input_type:currentReflectionMode==='voice'?'VOICE':'TEXT',question_text:question,answer_text:answer,reflection_text:review,raw_content:combined,cleaned_content:combined,ai_extracted:review||answer||null,pain_points:pp,self_rating:sr||null};if(editRefId){const ok=await store.updateRef(editRefId,d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已更新','success');}else{const ok=await store.addRef(d);if(ok===false){toast('保存失败，请重试','error');return;}toast('已保存','success');}if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;renderRefs();if(curDId)openDrawer(curDId);},editRefId?'保存中...':'创建中...');});
 $('#reflection-cancel').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 $('#reflection-modal-close').addEventListener('click',()=>{if(voiceRecognition)voiceRecognition.stop();$('#reflection-modal-overlay').classList.remove('active');editRefId=null;});
 

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const ROOT = path.resolve(process.cwd(), 'resume-trail-work');
+const CWD = process.cwd();
+const ROOT = path.basename(CWD) === 'resume-trail-work' ? CWD : path.resolve(CWD, 'resume-trail-work');
 const OUTPUT_JS = path.join(ROOT, 'assets', 'job-board-cache.js');
 const OUTPUT_JSON = path.join(ROOT, 'assets', 'job-board-cache.json');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://bpynqhujzvadyakypfju.supabase.co';
@@ -12,31 +13,11 @@ const CACHE_TABLE = 'rt_public_job_board_cache';
 const CACHE_KEY = 'default';
 const SHARED_STORAGE_BUCKET = 'rt-shared';
 const SHARED_JOB_CACHE_PATH = 'jobs/job-board-cache.json';
-const DEFAULT_LIMIT = 2600;
+const CACHE_RETENTION_DAYS = 14;
 const CHROME_BINARY = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const execFileAsync = promisify(execFile);
 const MAINLAND_QUERIES = ['产品经理', 'AI产品经理', '数据产品经理', '商业分析', '产品运营', '增长运营', '前端开发', '后端开发'];
 const BYTEDANCE_QUERIES = ['运营', '用户', '电商', '商业化', '内容', '豆包', 'TRAE', '生活服务', '音乐', '开发者服务', '产品'];
-const TARGET_SOURCE_FLOORS = [
-  { region: 'mainland', source: '腾讯招聘', min: 100 },
-  { region: 'mainland', source: '美团招聘', min: 100 },
-  { region: 'mainland', source: '拉勾招聘', min: 100 },
-  { region: 'mainland', source: '实习僧', min: 100 },
-  { region: 'mainland', source: 'Jobrapido 中国', min: 100 },
-  { region: 'hongkong', source: 'CTgoodjobs', min: 100 },
-  { region: 'hongkong', source: 'HKSlash', min: 100 },
-  { region: 'hongkong', source: 'Joblum Hong Kong', min: 100 },
-  { region: 'hongkong', source: 'Recruit.com.hk', min: 100 },
-  { region: 'hongkong', source: 'Talent Hong Kong', min: 100 },
-  { region: 'northamerica', source: 'Databricks Careers', min: 100 },
-  { region: 'northamerica', source: 'Stripe Careers', min: 100 },
-  { region: 'northamerica', source: 'Figma Careers', min: 100 },
-  { region: 'northamerica', source: 'Airbnb Careers', min: 80 },
-  { region: 'northamerica', source: 'Robinhood Careers', min: 100 },
-  { region: 'other', source: 'Jobicy', min: 40 },
-  { region: 'other', source: 'Remotive', min: 29 },
-  { region: 'other', source: 'Remote OK', min: 30 }
-];
 const GREENHOUSE_SOURCES = [
   { company: 'Databricks', board: 'databricks', source: 'Databricks Careers' },
   { company: 'Stripe', board: 'stripe', source: 'Stripe Careers' },
@@ -46,6 +27,13 @@ const GREENHOUSE_SOURCES = [
   { company: 'Asana', board: 'asana', source: 'Asana Careers' },
   { company: 'Instacart', board: 'instacart', source: 'Instacart Careers' },
   { company: 'Robinhood', board: 'robinhood', source: 'Robinhood Careers' }
+];
+const LEVER_SOURCES = [
+  { company: 'Plaid', board: 'plaid', source: 'Lever' },
+  { company: 'Scale AI', board: 'scaleai', source: 'Lever' },
+  { company: 'Rippling', board: 'rippling', source: 'Lever' },
+  { company: 'Postman', board: 'postman', source: 'Lever' },
+  { company: 'Motive', board: 'gomotive', source: 'Lever' }
 ];
 const CTGOODJOBS_PAGES = [
   'https://jobs.ctgoodjobs.hk/jobs/jobs-in-banking-finance',
@@ -72,11 +60,112 @@ const JOBLUM_HK_PATHS = [
 ];
 const RECRUIT_HOME = 'https://www.recruit.com.hk/default.aspx';
 function normalizeText(value) {
-  return String(value || '')
-    .replace(/[\uE000-\uF8FF]/g, ' ')
+  const raw = String(value || '');
+  let repaired = raw;
+  if (/[Ãâ€œâ€â€˜â€™]/.test(raw)) {
+    try {
+      const decoded = Buffer.from(raw, 'latin1').toString('utf8');
+      if (decoded && /[^\u0000-\u001f]/.test(decoded)) repaired = decoded;
+    } catch {}
+  }
+  return repaired
+    .replace(/\p{Co}/gu, ' ')
     .replace(/\uFFFD/g, ' ')
+    .replace(/[\uFE0E\uFE0F]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function decodeJsonFragment(value) {
+  const raw = String(value || '');
+  if (!raw) return '';
+  try {
+    return JSON.parse(`"${raw.replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`);
+  } catch {
+    return raw;
+  }
+}
+
+function squeezeHanSpacing(value) {
+  let output = String(value || '');
+  let previous = '';
+  while (previous !== output) {
+    previous = output;
+    output = output
+      .replace(/([\p{Script=Han}])\s+([\p{Script=Han}])/gu, '$1$2')
+      .replace(/([\p{Script=Han}])\s+([A-Za-z0-9])/gu, '$1$2')
+      .replace(/([A-Za-z0-9])\s+([\p{Script=Han}])/gu, '$1$2');
+  }
+  return output;
+}
+
+function cleanupDisplayText(value) {
+  return squeezeHanSpacing(
+    normalizeText(value)
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/\s*([（(【\[])\s*/g, '$1')
+      .replace(/\s*([）)】\]])/g, '$1')
+      .replace(/[（(【\[]\s*[）)】\]]/g, '')
+      .replace(/^\s*[-–—·•:：;,|/]+\s*/g, '')
+      .replace(/\s*[-–—·•:：;,|/]+\s*$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+function cleanupLocationText(value) {
+  const text = cleanupDisplayText(value)
+    .replace(/\bHong Kong Hong Kong\b/gi, 'Hong Kong')
+    .replace(/\bUnited States of America\b/gi, 'United States')
+    .replace(/\bRemote(?:\s*-\s*Remote)+\b/gi, 'Remote')
+    .trim();
+  return /remote|worldwide|anywhere/i.test(text) ? 'Remote' : text;
+}
+
+function isLikelySourcePlaceholder(name, source) {
+  const text = cleanupDisplayText(name).toLowerCase();
+  const sourceText = cleanupDisplayText(source).toLowerCase();
+  if (!text) return true;
+  if (sourceText && text === sourceText) return true;
+  if (text.includes('ctgoodjobs')) return true;
+  if (text.includes('recruit.com.hk')) return true;
+  if (text === 'talent' || text.includes('talent hong kong')) return true;
+  return /^(ctgoodjobs|jobicy|remote ok|remotive|recruit\.com\.hk|talent hong kong|talent 中国|talent|hkslash)$/i.test(text);
+}
+
+function isLikelyInvalidCompanyName(name, source) {
+  const text = cleanupDisplayText(name);
+  if (!text) return true;
+  if (isLikelySourcePlaceholder(text, source)) return true;
+  if (/ref\.?\s*no\.?/i.test(text)) return true;
+  if (/monthly income/i.test(text)) return true;
+  if (/^\$?\d[\d\s,./()\-a-z]*$/i.test(text)) return true;
+  if (/^\d+\s+(days?\s+work|vacanc(?:y|ies))/i.test(text)) return true;
+  if (/^[\d\s$().\-_/]+$/i.test(text)) return true;
+  return false;
+}
+
+function sanitizeCompanyName(name, source) {
+  let text = cleanupDisplayText(name).replace(/^\d+\s+(?=[A-Za-z])/u, '').trim();
+  if (source === 'Recruit.com.hk') text = text.replace(/^\d+\s+/, '').trim();
+  return text;
+}
+
+function sanitizeJobTitle(title) {
+  return cleanupDisplayText(title)
+    .replace(/^[\-–—|/]+\s*/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function resolvePostingRegion(explicitRegion, locationText, fallbackText) {
+  const locationInferred = classifyRegion(locationText);
+  const inferred = locationInferred !== 'other' ? locationInferred : classifyRegion(fallbackText);
+  const normalized = normalizeText(explicitRegion).toLowerCase();
+  if (inferred === 'other' && normalized) return normalized;
+  if (!normalized || normalized === 'other') return inferred;
+  return normalized;
 }
 
 function hashText(value) {
@@ -95,6 +184,8 @@ function decodeHtml(value) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, num) => String.fromCodePoint(parseInt(num, 10)))
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/&mdash;/gi, '—')
@@ -103,7 +194,7 @@ function decodeHtml(value) {
 }
 
 function classifyRegion(value) {
-  const text = normalizeText(value).toLowerCase();
+  const text = cleanupLocationText(value).toLowerCase();
   if (/remote|worldwide|anywhere/.test(text)) return 'other';
   if (/香港|hong kong|\bhk\b/.test(text)) return 'hongkong';
   if (/中国|china|mainland|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|西安|天津|重庆|长沙|青岛|郑州|厦门|珠海|合肥|宁波|佛山/.test(text)) return 'mainland';
@@ -136,21 +227,22 @@ function parseJsonText(text) {
 }
 
 function normalizePosting(input) {
-  const title = normalizeText(input.title);
-  const company = normalizeText(input.company);
+  const title = sanitizeJobTitle(input.title);
+  const company = sanitizeCompanyName(input.company, input.source || '');
   const url = normalizeText(input.url);
   if (!title || !company || !url) return null;
-  const rawLocation = normalizeText(input.location);
-  const location = /remote|worldwide|anywhere/i.test(rawLocation) ? 'Remote' : rawLocation;
+  if (isLikelyInvalidCompanyName(company, input.source || '')) return null;
+  const location = cleanupLocationText(input.location);
   const jdText = decodeHtml(input.jd_text || '').slice(0, 1800);
   const updatedAt = normalizeText(input.updated_at || '');
   if (!isRecentEnough(updatedAt)) return null;
+  const region = resolvePostingRegion(input.region, location, `${company} ${title}`);
   return {
     id: `job_${hashText(`${input.source || ''}|${company}|${title}|${location}|${url}`)}`,
     title,
     company,
     location,
-    region: input.region || classifyRegion(`${location} ${company}`),
+    region,
     source: normalizeText(input.source || '公开职位'),
     url,
     jd_text: jdText,
@@ -168,11 +260,15 @@ function compareAlpha(a, b) {
   return String(a.location || '').localeCompare(String(b.location || ''), locale, { numeric: true, sensitivity: 'base' });
 }
 
+function makeJobMergeKey(job) {
+  return `${job.source}|${job.url}`.toLowerCase();
+}
+
 function dedupe(items) {
   const seen = new Set();
   return items.filter((item) => {
     if (!item) return false;
-    const key = `${item.source}|${item.company}|${item.title}|${item.location}|${item.url}`.toLowerCase();
+    const key = makeJobMergeKey(item);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -234,24 +330,54 @@ async function fetchJson(url, label, timeoutMs = 16000) {
   return parseJsonText(text);
 }
 
-async function fetchTencentJobs() {
-  const url = `https://careers.tencent.com/tencentcareer/api/post/Query?timestamp=${Date.now()}&pageIndex=1&pageSize=160&language=zh-cn&area=cn`;
-  let payload = null;
-  try {
-    payload = await fetchJson(url, '腾讯招聘 1', 18000);
-  } catch {
-    payload = parseJsonText(await fetchText(buildMirrorUrl(url), '腾讯招聘镜像 1', 18000));
+async function mapBatched(items, limit, worker) {
+  const results = [];
+  const concurrency = Math.max(1, Math.min(limit || 1, items.length || 1));
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
   }
-  const list = payload?.Data?.Posts || [];
-  return list.map((item) => normalizePosting({
-      title: item.RecruitPostName,
-      company: '腾讯',
-      location: [item.CountryName, item.LocationName, item.WorkPlace].filter(Boolean).join(' · '),
-      region: 'mainland',
-      source: '腾讯招聘',
-      url: item.PostId ? `https://careers.tencent.com/jobdesc.html?postId=${encodeURIComponent(item.PostId)}` : 'https://careers.tencent.com/search.html',
-      jd_text: [item.Responsibility, item.Requirement].filter(Boolean).join('\n\n'),
-      updated_at: item.LastUpdateTime || ''
+  await Promise.all(Array.from({ length: concurrency }, () => run()));
+  return results;
+}
+
+async function fetchTencentJobs() {
+  const pageSize = 160;
+  async function fetchPage(pageIndex) {
+    const url = `https://careers.tencent.com/tencentcareer/api/post/Query?timestamp=${Date.now()}&pageIndex=${pageIndex}&pageSize=${pageSize}&language=zh-cn&area=cn`;
+    try {
+      return await fetchJson(url, `腾讯招聘 ${pageIndex}`, 18000);
+    } catch {
+      return parseJsonText(await fetchText(buildMirrorUrl(url), `腾讯招聘镜像 ${pageIndex}`, 18000));
+    }
+  }
+  const firstPage = await fetchPage(1);
+  const firstList = Array.isArray(firstPage?.Data?.Posts) ? firstPage.Data.Posts : [];
+  const totalCount = Number(firstPage?.Data?.Count || firstPage?.Data?.TotalCount || firstList.length) || firstList.length;
+  const totalPages = Math.max(1, Math.min(Math.ceil(totalCount / pageSize), 50));
+  const remainingPages = [];
+  for (let pageIndex = 2; pageIndex <= totalPages; pageIndex += 1) remainingPages.push(pageIndex);
+  const restPages = await mapBatched(remainingPages, 6, async (pageIndex) => {
+    try {
+      const payload = await fetchPage(pageIndex);
+      return Array.isArray(payload?.Data?.Posts) ? payload.Data.Posts : [];
+    } catch {
+      return [];
+    }
+  });
+  return firstList.concat(restPages.flat()).map((item) => normalizePosting({
+    title: item.RecruitPostName,
+    company: '腾讯',
+    location: [item.CountryName, item.LocationName, item.WorkPlace].filter(Boolean).join(' · '),
+    region: 'mainland',
+    source: '腾讯招聘',
+    url: item.PostId ? `https://careers.tencent.com/jobdesc.html?postId=${encodeURIComponent(item.PostId)}` : 'https://careers.tencent.com/search.html',
+    jd_text: [item.Responsibility, item.Requirement].filter(Boolean).join('\n\n'),
+    updated_at: item.LastUpdateTime || ''
   })).filter(Boolean);
 }
 
@@ -321,8 +447,8 @@ function extractLagouJobsFromPage(text) {
 
 async function fetchLagouJobs() {
   const jobs = [];
-  for (const keyword of MAINLAND_QUERIES.slice(0, 4)) {
-    for (let page = 1; page <= 5; page += 1) {
+  for (const keyword of MAINLAND_QUERIES) {
+    for (let page = 1; page <= 10; page += 1) {
       const url = `https://www.lagou.com/wn/jobs?cl=false&fromSearch=true&kd=${encodeURIComponent(keyword)}&pn=${page}`;
       try {
         const text = await fetchText(url, `拉勾招聘 ${keyword} 第 ${page} 页`, 18000);
@@ -335,20 +461,21 @@ async function fetchLagouJobs() {
 }
 
 function extractShixisengJobsFromText(text) {
-  const blocks = String(text || '').split(/\n(?=\[[^\]]+\]\(https:\/\/www\.shixiseng\.com\/intern\/)/g);
+  const blocks = String(text || '').split(/<div data-intern-id="/g).slice(1);
   return blocks.map((block) => {
-    const titleMatch = block.match(/^\[([^\]]+)\]\((https:\/\/www\.shixiseng\.com\/intern\/[^ )]+)[^)]*\)/m);
+    const titleMatch = block.match(/href="(https:\/\/www\.shixiseng\.com\/intern\/[^"?]+)[^"]*"[^>]*title="([^"]+)"/i);
     if (!titleMatch) return null;
-    const companyMatch = block.match(/\n\[([^\]\n]+)\]\(javascript:; "[^"]+"\)/);
-    const locationMatch = block.match(/\n([^\n|]+)\|/);
+    const companyMatch = block.match(/<a title="([^"]+)" href="javascript:;" class="title ellipsis"/i);
+    const locationMatch = block.match(/<span class="city ellipsis"[^>]*>([^<]+)</i);
+    const summaryParts = [...block.matchAll(/<span title="([^"]+)" class="intern-label"/gi)].map((item) => decodeHtml(item[1])).filter(Boolean);
     return normalizePosting({
-      title: titleMatch[1].replace(//g, '').trim(),
-      company: companyMatch ? companyMatch[1].trim() : '实习僧',
-      location: locationMatch ? locationMatch[1].trim() : '中国',
+      title: decodeHtml(titleMatch[2]).replace(/&#xe[0-9a-f]+;/gi, ''),
+      company: companyMatch ? decodeHtml(companyMatch[1]) : '',
+      location: locationMatch ? decodeHtml(locationMatch[1]) : '中国',
       region: 'mainland',
       source: '实习僧',
-      url: titleMatch[2],
-      summary: block.split('\n').slice(0, 6).join(' ').replace(/\s+/g, ' ').trim()
+      url: decodeHtml(titleMatch[1]),
+      summary: summaryParts.join(' · ')
     });
   }).filter(Boolean);
 }
@@ -357,8 +484,13 @@ async function fetchShixisengJobs() {
   const tasks = [];
   for (const keyword of MAINLAND_QUERIES.slice(0, 6)) {
     for (let page = 1; page <= 10; page += 1) {
-      const url = `https://r.jina.ai/http://www.shixiseng.com/interns?keyword=${encodeURIComponent(keyword)}&type=intern&city=%E5%85%A8%E5%9B%BD&page=${page}`;
-      tasks.push(fetchText(url, `实习僧 ${keyword} 第 ${page} 页`, 18000).then(extractShixisengJobsFromText).catch(() => []));
+      const url = `https://www.shixiseng.com/interns?keyword=${encodeURIComponent(keyword)}&type=intern&city=%E5%85%A8%E5%9B%BD&page=${page}`;
+      const fallbackUrl = `https://r.jina.ai/http://www.shixiseng.com/interns?keyword=${encodeURIComponent(keyword)}&type=intern&city=%E5%85%A8%E5%9B%BD&page=${page}`;
+      tasks.push(
+        fetchText(url, `实习僧 ${keyword} 第 ${page} 页`, 18000)
+          .then(extractShixisengJobsFromText)
+          .catch(() => fetchText(fallbackUrl, `实习僧镜像 ${keyword} 第 ${page} 页`, 18000).then(extractShixisengJobsFromText).catch(() => []))
+      );
     }
   }
   return (await Promise.all(tasks)).flat();
@@ -427,21 +559,33 @@ function extractJobrapidoJobs(text, source, region) {
 }
 
 async function fetchJobrapidoMainlandJobs() {
-  const jobs = [];
-  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E8%BF%90%E8%90%A5', 'AI'];
-  for (const query of queries) {
-    for (let page = 1; page <= 4; page += 1) {
-      const url = `https://r.jina.ai/http://cn.jobrapido.com/?q=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
-      try {
-        const text = await fetchText(url, `Jobrapido 中国 ${query} ${page}`, 18000);
-        jobs.push(...extractJobrapidoJobs(text, 'Jobrapido 中国', 'mainland'));
-      } catch {}
-      await delay(160);
-      if (dedupe(jobs).length >= 140) return dedupe(jobs);
+  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90', '%E5%A2%9E%E9%95%BF%E8%BF%90%E8%90%A5', '%E6%95%B0%E6%8D%AE', '%E5%BC%80%E5%8F%91'];
+  const pageRequests = queries.flatMap((query) => Array.from({ length: 8 }, (_, index) => ({ query, page: index + 1 })));
+  const buckets = await mapBatched(pageRequests, 2, async ({ query, page }) => {
+    const url = `https://r.jina.ai/http://cn.jobrapido.com/?q=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
+    try {
+      const text = await fetchText(url, `Jobrapido 中国 ${query} ${page}`, 18000);
+      return extractJobrapidoJobs(text, 'Jobrapido 中国', 'mainland');
+    } catch {
+      return [];
     }
-    if (dedupe(jobs).length >= 140) break;
-  }
-  return dedupe(jobs);
+  });
+  return dedupe(buckets.flat());
+}
+
+async function fetchJobrapidoHongKongJobs() {
+  const queries = ['product', 'manager', 'analyst', 'operation', 'business', 'marketing', 'finance'];
+  const pageRequests = queries.flatMap((query) => Array.from({ length: 6 }, (_, index) => ({ query, page: index + 1 })));
+  const buckets = await mapBatched(pageRequests, 2, async ({ query, page }) => {
+    const url = `https://r.jina.ai/http://hk.jobrapido.com/?q=${encodeURIComponent(query)}&l=hong-kong&p=${page}`;
+    try {
+      const text = await fetchText(url, `Jobrapido Hong Kong ${query} ${page}`, 18000);
+      return extractJobrapidoJobs(text, 'Jobrapido Hong Kong', 'hongkong');
+    } catch {
+      return [];
+    }
+  });
+  return dedupe(buckets.flat());
 }
 
 async function fetchGreenhouseJobs() {
@@ -460,46 +604,150 @@ async function fetchGreenhouseJobs() {
   return (await Promise.all(tasks)).flat();
 }
 
-function extractCtgoodjobsJobsFromPage(text) {
-  const raw = String(text || '');
-  const ldMatch = raw.match(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
-  if (ldMatch) {
-    try {
-      const schema = JSON.parse(ldMatch[1]);
-      const items = Array.isArray(schema?.itemListElement) ? schema.itemListElement : [];
-      return items.map((item) => {
-        const rawName = normalizeText(item?.name || '');
-        const rawUrl = normalizeText(item?.url || '');
-        if (!rawName || !rawUrl) return null;
-        const parts = rawName.split(/\s+-\s+/);
-        const company = parts.length > 1 ? normalizeText(parts.pop()) : 'CTgoodjobs';
-        const title = normalizeText(parts.join(' - ') || rawName);
-        return normalizePosting({
-          title,
-          company,
-          location: 'Hong Kong',
-          region: 'hongkong',
-          source: 'CTgoodjobs',
-          url: rawUrl,
-          summary: `${company} · Hong Kong`
-        });
-      }).filter(Boolean);
-    } catch {
-      return [];
-    }
+function compactCtgoodjobsFlightText(text) {
+  return String(text || '')
+    .replace(/"\]\)<\/script><script>self\.__next_f\.push\(\[1,"/g, '')
+    .replace(/<\/script><script>self\.__next_f\.push\(\[1,"/g, '')
+    .replace(/<script>self\.__next_f\.push\(\[1,"/g, '')
+    .replace(/"\]\)<\/script>/g, '');
+}
+
+function extractEscapedJsonField(block, field) {
+  const pattern = new RegExp(`\\\\"${field}\\\\"\\s*:\\s*\\\\"((?:\\\\\\\\.|[^"])*)\\\\"`);
+  const match = String(block || '').match(pattern);
+  return match ? decodeJsonFragment(match[1]) : '';
+}
+
+function extractCtgoodjobsRecordsFromPage(text) {
+  const records = [];
+  const seen = new Set();
+  const raw = compactCtgoodjobsFlightText(text);
+  const urlRegex = /\\"url\\"\s*:\s*\\"(https:\/\/jobs\.ctgoodjobs\.hk\/job\/(?:\\\\.|[^"])*)\\"/g;
+  for (const match of raw.matchAll(urlRegex)) {
+    const blockStart = Math.max(0, raw.lastIndexOf('\\"jobTitle\\"', match.index));
+    const nextStart = raw.indexOf('\\"jobTitle\\"', match.index + match[0].length);
+    const block = raw.slice(blockStart, nextStart === -1 ? Math.min(raw.length, match.index + 3000) : nextStart);
+    const url = decodeJsonFragment(match[1]);
+    if (!url || seen.has(url)) continue;
+    const title = extractEscapedJsonField(block, 'jobTitle');
+    const company = extractEscapedJsonField(block, 'companyName');
+    if (!title && !company) continue;
+    seen.add(url);
+    records.push({
+      title,
+      company,
+      location: 'Hong Kong',
+      region: 'hongkong',
+      source: 'CTgoodjobs',
+      url
+    });
   }
-  return [];
+  return records;
+}
+
+function normalizeCtgoodjobsRecord(record) {
+  return normalizePosting({
+    title: record.title,
+    company: record.company,
+    location: record.location || 'Hong Kong',
+    region: 'hongkong',
+    source: 'CTgoodjobs',
+    url: record.url,
+    jd_text: record.jd_text || '',
+    updated_at: record.updated_at || '',
+    summary: `${record.company || ''} · ${record.location || 'Hong Kong'}`
+  });
+}
+
+function isCtgoodjobsRecordSuspect(record) {
+  const raw = `${record?.title || ''} ${record?.company || ''}`;
+  const company = cleanupDisplayText(record?.company || '');
+  if (/[\p{Co}\uFFFD]/u.test(raw)) return true;
+  if (!company || isLikelyInvalidCompanyName(company, 'CTgoodjobs')) return true;
+  return /^(?:[$€£¥]|HK\$|\d+\s+(?:days?\s+work|vacanc(?:y|ies))|.*ref\.?\s*no\.?)/i.test(company);
+}
+
+function extractCtgoodjobsDetailFromPage(text, url) {
+  const raw = compactCtgoodjobsFlightText(text);
+  const detail = { url };
+  const escapedTitle = raw.match(/\\"title\\"\s*:\s*\\"((?:\\\\.|[^"])*)\\"/);
+  const escapedCompany = raw.match(/\\"hiringOrganization\\"\s*:\s*\{[\s\S]{0,900}?\\"name\\"\s*:\s*\\"((?:\\\\.|[^"])*)\\"/);
+  if (escapedTitle) detail.title = decodeJsonFragment(escapedTitle[1]);
+  if (escapedCompany) detail.company = decodeJsonFragment(escapedCompany[1]);
+
+  const plainTitle = raw.match(/"title"\s*:\s*"([^"]+)"/);
+  const plainCompany = raw.match(/"hiringOrganization"\s*:\s*\{[\s\S]{0,900}?"name"\s*:\s*"([^"]+)"/);
+  if (!detail.title && plainTitle) detail.title = decodeHtml(plainTitle[1]);
+  if (!detail.company && plainCompany) detail.company = decodeHtml(plainCompany[1]);
+
+  const titleTag = decodeHtml(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
+  const titleParts = titleTag.replace(/\s*\|\s*CTgoodjobs\s*$/i, '').split(/\s+-\s+/);
+  if (titleParts.length >= 2) {
+    if (!detail.company || isLikelyInvalidCompanyName(detail.company, 'CTgoodjobs')) detail.company = titleParts.pop();
+    if (!detail.title) detail.title = titleParts.join(' - ');
+  }
+  const locationMatch = raw.match(/\\"jobLocation\\"\s*:\s*\{[\s\S]{0,1400}?\\"addressLocality\\"\s*:\s*\\"((?:\\\\.|[^"])*)\\"/);
+  if (locationMatch) detail.location = decodeJsonFragment(locationMatch[1]);
+  const descriptionMatch = raw.match(/\\"description\\"\s*:\s*\\"((?:\\\\.|[^"])*)\\"/);
+  if (descriptionMatch) detail.jd_text = decodeJsonFragment(descriptionMatch[1]);
+  const dateMatch = raw.match(/\\"datePosted\\"\s*:\s*\\"((?:\\\\.|[^"])*)\\"/) || raw.match(/"datePosted"\s*:\s*"([^"]+)"/);
+  if (dateMatch) detail.updated_at = decodeJsonFragment(dateMatch[1]);
+  return detail;
+}
+
+async function repairCtgoodjobsRecord(record) {
+  if (!isCtgoodjobsRecordSuspect(record)) return record;
+  try {
+    const detailText = await fetchText(record.url, `CTgoodjobs detail ${record.url}`, 18000);
+    const detail = extractCtgoodjobsDetailFromPage(detailText, record.url);
+    return Object.assign({}, record, detail);
+  } catch {
+    return record;
+  }
+}
+
+async function normalizeCtgoodjobsRecords(records) {
+  const unique = dedupe((records || []).map((record) => ({
+    id: `raw_${hashText(record.url || `${record.company}|${record.title}`)}`,
+    source: 'CTgoodjobs',
+    url: record.url,
+    company: record.company,
+    title: record.title,
+    location: record.location || 'Hong Kong',
+    region: 'hongkong'
+  })));
+  const repaired = await mapBatched(unique, 5, repairCtgoodjobsRecord);
+  return repaired.map(normalizeCtgoodjobsRecord).filter(Boolean);
+}
+
+function extractCtgoodjobsTotalPages(text, pageSize) {
+  const raw = String(text || '');
+  const totalMatch = raw.match(/Explore\s+(\d+)\s+jobs/i) || raw.match(/(\d+)\s+Jobs Matched/i);
+  const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
+  if (!total || !pageSize) return 1;
+  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 async function fetchCtgoodjobsJobs() {
-  const tasks = [];
-  for (const base of CTGOODJOBS_PAGES) {
-    for (let page = 1; page <= 6; page += 1) {
-      const url = page === 1 ? base : `${base}?page=${page}`;
-      tasks.push(fetchText(url, `CTgoodjobs ${page}`, 18000).then(extractCtgoodjobsJobsFromPage).catch(() => []));
+  const buckets = await mapBatched(CTGOODJOBS_PAGES, 3, async (base) => {
+    const firstText = await fetchText(base, `CTgoodjobs ${base}`, 18000);
+    const firstRecords = extractCtgoodjobsRecordsFromPage(firstText);
+    const totalPages = Math.min(extractCtgoodjobsTotalPages(firstText, firstRecords.length), 80);
+    const pageUrls = [];
+    for (let page = 2; page <= totalPages; page += 1) {
+      pageUrls.push(`${base}?page=${page}`);
     }
-  }
-  return (await Promise.all(tasks)).flat();
+    const rest = await mapBatched(pageUrls, 6, async (url) => {
+      try {
+        const text = await fetchText(url, `CTgoodjobs ${url}`, 18000);
+        return extractCtgoodjobsRecordsFromPage(text);
+      } catch {
+        return [];
+      }
+    });
+    return firstRecords.concat(rest.flat());
+  });
+  return normalizeCtgoodjobsRecords(buckets.flat());
 }
 
 function extractHkSlashJobsFromPage(text) {
@@ -520,11 +768,23 @@ function extractHkSlashJobsFromPage(text) {
 }
 
 async function fetchHkSlashJobs() {
-  const tasks = [];
-  for (let page = 1; page <= 10; page += 1) {
-    tasks.push(fetchText(`https://www.hkslash.com/zh/jobs?page=${page}`, `HKSlash ${page}`, 18000).then(extractHkSlashJobsFromPage).catch(() => []));
+  const firstText = await fetchText('https://www.hkslash.com/zh/jobs?page=1', 'HKSlash 1', 18000);
+  const firstJobs = extractHkSlashJobsFromPage(firstText);
+  const totalPagesMatch = String(firstText || '').match(/"totalPages":(\d+)/);
+  const totalPages = Math.min(totalPagesMatch ? parseInt(totalPagesMatch[1], 10) : 1, 60);
+  const pages = [];
+  for (let page = 2; page <= totalPages; page += 1) {
+    pages.push(page);
   }
-  return (await Promise.all(tasks)).flat();
+  const rest = await mapBatched(pages, 6, async (page) => {
+    try {
+      const text = await fetchText(`https://www.hkslash.com/zh/jobs?page=${page}`, `HKSlash ${page}`, 18000);
+      return extractHkSlashJobsFromPage(text);
+    } catch {
+      return [];
+    }
+  });
+  return firstJobs.concat(rest.flat());
 }
 
 function extractJoblumHongKongJobsFromPage(text) {
@@ -545,26 +805,25 @@ async function fetchJoblumHongKongJobs() {
   const jobs = [];
   for (const route of JOBLUM_HK_PATHS) {
     try {
-      const text = await fetchText(`https://hk.joblum.com${route}`, `Joblum Hong Kong ${route}`, 18000);
-      jobs.push(...extractJoblumHongKongJobsFromPage(text));
+      const firstText = await fetchText(`https://hk.joblum.com${route}`, `Joblum Hong Kong ${route}`, 18000);
+      jobs.push(...extractJoblumHongKongJobsFromPage(firstText));
+      const pageMatches = [...String(firstText || '').matchAll(/href="([^"]+\?p=(\d+))"/gi)];
+      const pageCount = Math.min(pageMatches.reduce((max, match) => Math.max(max, parseInt(match[2], 10) || 1), 1), 50);
+      const pageUrls = [];
+      for (let page = 2; page <= pageCount; page += 1) {
+        pageUrls.push(`https://hk.joblum.com${route}?p=${page}`);
+      }
+      const rest = await mapBatched(pageUrls, 5, async (url) => {
+        try {
+          const text = await fetchText(url, `Joblum Hong Kong ${url}`, 18000);
+          return extractJoblumHongKongJobsFromPage(text);
+        } catch {
+          return [];
+        }
+      });
+      jobs.push(...rest.flat());
     } catch {}
     await delay(120);
-  }
-  return jobs;
-}
-
-async function fetchJobrapidoHongKongJobs() {
-  const jobs = [];
-  const queries = ['product', 'manager', 'analyst', 'operation', 'business', 'marketing', 'finance'];
-  for (const query of queries) {
-    for (let page = 1; page <= 6; page += 1) {
-      const url = `https://r.jina.ai/http://hk.jobrapido.com/?q=${encodeURIComponent(query)}&l=hong-kong&p=${page}`;
-      try {
-        const text = await fetchText(url, `Jobrapido Hong Kong ${query} ${page}`, 18000);
-        jobs.push(...extractJobrapidoJobs(text, 'Jobrapido Hong Kong', 'hongkong'));
-      } catch {}
-      await delay(160);
-    }
   }
   return jobs;
 }
@@ -602,15 +861,18 @@ async function fetchRecruitHongKongJobs() {
   try {
     const homepage = await fetchText(RECRUIT_HOME, 'Recruit.com.hk 首页', 18000);
     jobs.push(...extractRecruitJobsFromPage(homepage));
-    links = links.concat(extractRecruitIndexLinks(homepage).slice(0, 64));
+    links = links.concat(extractRecruitIndexLinks(homepage));
   } catch {}
-  for (const url of [...new Set(links)]) {
+  const uniqueLinks = [...new Set(links)];
+  const buckets = await mapBatched(uniqueLinks, 6, async (url) => {
     try {
       const text = await fetchText(url, url, 18000);
-      jobs.push(...extractRecruitJobsFromPage(text));
-    } catch {}
-    await delay(120);
-  }
+      return extractRecruitJobsFromPage(text);
+    } catch {
+      return [];
+    }
+  });
+  jobs.push(...buckets.flat());
   return jobs;
 }
 
@@ -643,11 +905,19 @@ async function fetchTalentRegionJobs(options) {
   const baseUrl = opts.baseUrl || `https://${domain}.talent.com`;
   const jobs = [];
   for (const query of queries) {
+    let emptyCount = 0;
     for (let page = 1; page <= pageLimit; page += 1) {
       const url = `${baseUrl}/jobs?k=${query}&l=${location}&p=${page}`;
       try {
         const text = await fetchText(url, `${source} ${query} ${page}`, 18000);
-        jobs.push(...extractTalentJobsFromHtml(text, { baseUrl, region, source }));
+        const pageJobs = extractTalentJobsFromHtml(text, { baseUrl, region, source });
+        jobs.push(...pageJobs);
+        if (!pageJobs.length) {
+          emptyCount += 1;
+          if (emptyCount >= 2) break;
+        } else {
+          emptyCount = 0;
+        }
       } catch {}
       await delay(120);
     }
@@ -663,7 +933,7 @@ async function fetchTalentHongKongJobs() {
     location: 'hong+kong',
     baseUrl: 'https://hk.talent.com',
     queries: ['product', 'manager', 'analyst', 'finance', 'marketing', 'sales', 'engineer'],
-    pageLimit: 4
+    pageLimit: 12
   });
 }
 
@@ -674,14 +944,26 @@ async function fetchTalentChinaJobs() {
     source: 'Talent 中国',
     location: '%E4%B8%AD%E5%9B%BD',
     baseUrl: 'https://cn.talent.com',
-    queries: ['%E4%BA%A7%E5%93%81', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90'],
-    pageLimit: 4
+    queries: ['%E4%BA%A7%E5%93%81', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90', '%E5%BC%80%E5%8F%91', '%E5%95%86%E4%B8%9A%E5%8C%96'],
+    pageLimit: 10
+  });
+}
+
+async function fetchTalentNorthAmericaJobs() {
+  return fetchTalentRegionJobs({
+    domain: 'com',
+    region: 'northamerica',
+    source: 'Talent North America',
+    location: 'united+states',
+    baseUrl: 'https://www.talent.com',
+    queries: ['product manager', 'product operations', 'business analyst', 'software engineer', 'data analyst', 'marketing', 'finance'],
+    pageLimit: 10
   });
 }
 
 async function fetchRemotiveJobs() {
   const data = await fetchJson('https://remotive.com/api/remote-jobs', 'Remotive');
-  return (data?.jobs || []).slice(0, 120).map((item) => normalizePosting({
+  return (data?.jobs || []).map((item) => normalizePosting({
     title: item.title,
     company: item.company_name,
     location: item.candidate_required_location || 'Remote',
@@ -694,7 +976,7 @@ async function fetchRemotiveJobs() {
 }
 
 async function fetchJobicyJobs() {
-  const data = await fetchJson('https://jobicy.com/api/v2/remote-jobs?count=120', 'Jobicy');
+  const data = await fetchJson('https://jobicy.com/api/v2/remote-jobs?count=500', 'Jobicy');
   const list = Array.isArray(data?.jobs) ? data.jobs : [];
   return list.map((item) => normalizePosting({
     title: item.jobTitle || item.title,
@@ -723,28 +1005,84 @@ async function fetchRemoteOkJobs() {
   })).filter(Boolean);
 }
 
-function selectJobsWithSourceFloors(items, limit = DEFAULT_LIMIT) {
-  const sorted = sortJobs(dedupe(items));
-  const picked = [];
-  const pickedIds = new Set();
-  for (const floor of TARGET_SOURCE_FLOORS) {
-    const matches = sorted.filter((job) => job.region === floor.region && job.source === floor.source).slice(0, floor.min);
-    if (matches.length < floor.min) {
-      console.warn(`[job-cache] source floor not met: ${floor.source} ${matches.length}/${floor.min}`);
+async function fetchLeverJobs() {
+  const buckets = await mapBatched(LEVER_SOURCES, 4, async (source) => {
+    try {
+      const data = await fetchJson(`https://api.lever.co/v0/postings/${encodeURIComponent(source.board)}?mode=json`, `${source.company} Lever`, 18000);
+      const list = Array.isArray(data) ? data : [];
+      return list.map((item) => normalizePosting({
+        title: item.text,
+        company: source.company,
+        location: item.categories?.location || item.categories?.team || 'United States',
+        region: 'northamerica',
+        source: source.source,
+        url: item.hostedUrl || item.applyUrl || '',
+        jd_text: decodeHtml(item.descriptionPlain || item.description || ''),
+        summary: [item.categories?.team, item.categories?.department, item.categories?.commitment].filter(Boolean).join(' · '),
+        updated_at: item.createdAt ? new Date(item.createdAt).toISOString() : ''
+      })).filter(Boolean);
+    } catch {
+      return [];
     }
-    for (const job of matches) {
-      if (pickedIds.has(job.id)) continue;
-      pickedIds.add(job.id);
-      picked.push(job);
+  });
+  return buckets.flat();
+}
+
+async function readExistingCache() {
+  try {
+    const raw = await fs.readFile(OUTPUT_JSON, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.jobs) ? parsed : { jobs: [] };
+  } catch {
+    return { jobs: [] };
+  }
+}
+
+function isWithinRetentionWindow(job, nowMs) {
+  const timestamps = [job.updated_at, job.last_seen_at, job.first_seen_at]
+    .map((value) => Date.parse(String(value || '')))
+    .filter(Number.isFinite);
+  if (!timestamps.length) return true;
+  const latest = Math.max(...timestamps);
+  return nowMs - latest <= CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function mergeJobCollections(existingJobs, fetchResults, nowIso) {
+  const nowMs = Date.parse(nowIso);
+  const existingByKey = new Map();
+  const existingSourceCounts = new Map();
+  for (const job of Array.isArray(existingJobs) ? existingJobs : []) {
+    if (!job) continue;
+    existingByKey.set(makeJobMergeKey(job), job);
+    existingSourceCounts.set(job.source, (existingSourceCounts.get(job.source) || 0) + 1);
+  }
+  const merged = [];
+  const fetchedSources = new Set();
+  for (const result of fetchResults) {
+    if (!result?.ok) continue;
+    const sourceCount = existingSourceCounts.get(result.source) || 0;
+    const nextCount = Array.isArray(result.jobs) ? result.jobs.length : 0;
+    if (sourceCount > 0 && (nextCount === 0 || (sourceCount >= 80 && nextCount < sourceCount * 0.55))) {
+      console.warn(`[job-cache] ${result.source} kept from previous cache: fetched ${nextCount}, existing ${sourceCount}`);
+      continue;
+    }
+    fetchedSources.add(result.source);
+    for (const job of dedupe(result.jobs || [])) {
+      const key = makeJobMergeKey(job);
+      const previous = existingByKey.get(key);
+      merged.push(Object.assign({}, previous || {}, job, {
+        id: previous?.id || job.id,
+        first_seen_at: previous?.first_seen_at || nowIso,
+        last_seen_at: nowIso
+      }));
     }
   }
-  for (const job of sorted) {
-    if (picked.length >= limit) break;
-    if (pickedIds.has(job.id)) continue;
-    pickedIds.add(job.id);
-    picked.push(job);
+  for (const job of Array.isArray(existingJobs) ? existingJobs : []) {
+    if (!job || fetchedSources.has(job.source)) continue;
+    if (!isWithinRetentionWindow(job, nowMs)) continue;
+    merged.push(job);
   }
-  return picked.slice(0, limit);
+  return sortJobs(dedupe(merged)).filter((job) => isWithinRetentionWindow(job, nowMs));
 }
 
 async function writeLocalCache(payload) {
@@ -844,32 +1182,40 @@ async function main() {
     try {
       const result = await task();
       console.log(`[job-cache] fetched ${label}: ${Array.isArray(result) ? result.length : 0} jobs in ${Date.now() - startedAt}ms`);
-      return result;
+      return { source: label, ok: true, jobs: Array.isArray(result) ? result : [] };
     } catch (error) {
       console.warn(`[job-cache] ${label} skipped: ${error?.message || error || 'unknown error'}`);
-      return [];
+      return { source: label, ok: false, jobs: [] };
     }
   }
 
-  const buckets = [];
-  buckets.push(await safeFetch('Jobrapido 中国', fetchJobrapidoMainlandJobs));
-  buckets.push(await safeFetch('Talent Hong Kong', fetchTalentHongKongJobs));
-  buckets.push(await safeFetch('Joblum Hong Kong', fetchJoblumHongKongJobs));
-  buckets.push(await safeFetch('Recruit.com.hk', fetchRecruitHongKongJobs));
-  buckets.push(await safeFetch('腾讯招聘', fetchTencentJobs));
-  buckets.push(await safeFetch('美团招聘', fetchMeituanJobs));
-  buckets.push(await safeFetch('拉勾招聘', fetchLagouJobs));
-  buckets.push(await safeFetch('实习僧', fetchShixisengJobs));
-  buckets.push(await safeFetch('Greenhouse', fetchGreenhouseJobs));
-  buckets.push(await safeFetch('CTgoodjobs', fetchCtgoodjobsJobs));
-  buckets.push(await safeFetch('HKSlash', fetchHkSlashJobs));
-  buckets.push(await safeFetch('Remotive', fetchRemotiveJobs));
-  buckets.push(await safeFetch('Jobicy', fetchJobicyJobs));
-  buckets.push(await safeFetch('Remote OK', fetchRemoteOkJobs));
-  const jobs = selectJobsWithSourceFloors(buckets.flat(), DEFAULT_LIMIT);
+  const existing = await readExistingCache();
+  const results = await Promise.all([
+    safeFetch('Jobrapido 中国', fetchJobrapidoMainlandJobs),
+    safeFetch('Talent 中国', fetchTalentChinaJobs),
+    safeFetch('字节跳动校招', fetchByteDanceCampusJobs),
+    safeFetch('腾讯招聘', fetchTencentJobs),
+    safeFetch('美团招聘', fetchMeituanJobs),
+    safeFetch('拉勾招聘', fetchLagouJobs),
+    safeFetch('实习僧', fetchShixisengJobs),
+    safeFetch('CTgoodjobs', fetchCtgoodjobsJobs),
+    safeFetch('HKSlash', fetchHkSlashJobs),
+    safeFetch('Joblum Hong Kong', fetchJoblumHongKongJobs),
+    safeFetch('Recruit.com.hk', fetchRecruitHongKongJobs),
+    safeFetch('Jobrapido Hong Kong', fetchJobrapidoHongKongJobs),
+    safeFetch('Talent Hong Kong', fetchTalentHongKongJobs),
+    safeFetch('Greenhouse', fetchGreenhouseJobs),
+    safeFetch('Lever', fetchLeverJobs),
+    safeFetch('Talent North America', fetchTalentNorthAmericaJobs),
+    safeFetch('Remotive', fetchRemotiveJobs),
+    safeFetch('Jobicy', fetchJobicyJobs),
+    safeFetch('Remote OK', fetchRemoteOkJobs)
+  ]);
+  const nowIso = new Date().toISOString();
+  const jobs = mergeJobCollections(existing.jobs, results, nowIso);
   const payload = {
-    updated_at: new Date().toISOString(),
-    source_label: '最近更新职位池',
+    updated_at: nowIso,
+    source_label: '职位池',
     source_count: new Set(jobs.map((job) => job.source).filter(Boolean)).size,
     jobs
   };

@@ -114,12 +114,32 @@
         }
     }
 
-    function showToast(title,message,type){
+    function flashQrSyncPreview(src){
+        const shell=document.querySelector('.admin-qr-preview-shell-large');
+        const preview=$('admin-qr-preview-shared');
+        if(preview&&src)preview.src=src;
+        if(!shell)return;
+        shell.classList.remove('is-sync-flash');
+        void shell.offsetWidth;
+        shell.classList.add('is-sync-flash');
+        window.setTimeout(function(){
+            shell.classList.remove('is-sync-flash');
+        },980);
+    }
+
+    function showToast(title,message,type,options){
         const stack=$('admin-toast-stack');
         if(!stack)return;
+        const opts=options&&typeof options==='object'?options:{};
         const node=document.createElement('div');
         node.className=`admin-toast ${type==='error'?'is-error':'is-success'}`;
-        node.innerHTML=`<strong>${escapeHTML(title)}</strong><p>${escapeHTML(message||'')}</p>`;
+        node.innerHTML=`
+            ${opts.thumbnailSrc?`<div class="admin-toast-media"><img src="${escapeHTML(opts.thumbnailSrc)}" alt=""></div>`:''}
+            <div class="admin-toast-copy">
+                <strong>${escapeHTML(title)}</strong>
+                <p>${escapeHTML(message||'')}</p>
+            </div>
+        `;
         stack.appendChild(node);
         window.setTimeout(function(){
             node.classList.add('is-fading');
@@ -1577,7 +1597,8 @@
         }
         await syncSharedCommunityQrFromRemote();
         renderQrManager();
-        showToast('共享二维码已更新','主产品后续重新打开时会读取这张新二维码。','success');
+        flashQrSyncPreview(sharedSrc);
+        showToast('已同步到主产品','共享二维码已经写入主产品配置，并完成同步确认。','success',{thumbnailSrc:sharedSrc});
     }
 
     async function boot(){
@@ -1772,7 +1793,8 @@
                 }
                 await syncSharedCommunityQrFromRemote();
                 renderQrManager();
-                showToast('已恢复默认','共享二维码已经恢复到默认图片。','success');
+                flashQrSyncPreview('assets/user-cocreation-group-qr.jpg');
+                showToast('已同步到主产品','共享二维码已经恢复到默认图片，并完成同步确认。','success',{thumbnailSrc:'assets/user-cocreation-group-qr.jpg'});
             }).catch(function(error){
                 showToast('恢复失败',error instanceof Error?error.message:String(error),'error');
             });
