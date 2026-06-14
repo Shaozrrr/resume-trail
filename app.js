@@ -106,6 +106,8 @@ const JOB_BOARD_DEFAULT_LIMIT=2600;
 const JOB_BOARD_REMOTE_TABLE='rt_public_job_board_cache';
 const JOB_BOARD_REMOTE_CACHE_KEY='default';
 const JOB_BOARD_CACHE_MAX_AGE_MS=24*60*60*1000;
+const JOB_BOARD_SHARED_BUCKET='rt-shared';
+const JOB_BOARD_SHARED_CACHE_PATH='jobs/job-board-cache.json';
 
 function cloneData(value){
     if(typeof structuredClone==='function')return structuredClone(value);
@@ -1650,7 +1652,7 @@ const jobBoardState={
     query:'',
     activeRegion:'all',
     page:1,
-    pageSize:80,
+    pageSize:60,
     loading:false,
     error:'',
     jobs:[],
@@ -1658,7 +1660,12 @@ const jobBoardState={
     lastFetchedAt:'',
     bootstrapped:false,
     sourceLabel:'',
-    cacheReady:false
+    cacheReady:false,
+    cachePromise:null,
+    jobsVersion:'',
+    regionCounts:{},
+    filteredCacheKey:'',
+    filteredJobs:[]
 };
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
@@ -3189,6 +3196,14 @@ function sortJobBoardPostings(items){
         return compareJobBoardAlpha(a,b);
     });
 }
+function buildJobBoardRegionCounts(items){
+    const counts={mainland:0,hongkong:0,northamerica:0,other:0};
+    (items||[]).forEach(function(job){
+        const key=job&&job.region||'other';
+        counts[key]=(counts[key]||0)+1;
+    });
+    return counts;
+}
 function normalizeJobBoardCachePayload(payload){
     const raw=payload&&typeof payload==='object'?payload:{};
     const jobs=sortJobBoardPostings(
@@ -3229,27 +3244,82 @@ function getBundledJobBoardCache(){
     const payload=normalizeJobBoardCachePayload(window.RT_JOB_BOARD_CACHE);
     return payload.jobs.length?payload:null;
 }
+function buildSharedStoragePublicUrl(bucket,objectPath){
+    const encoded=String(objectPath||'')
+        .split('/')
+        .filter(Boolean)
+        .map(function(segment){return encodeURIComponent(segment);})
+        .join('/');
+    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${encoded}`;
+}
+async function fetchSharedJobBoardCache(){
+    const response=await fetch(`${buildSharedStoragePublicUrl(JOB_BOARD_SHARED_BUCKET,JOB_BOARD_SHARED_CACHE_PATH)}?t=${Date.now()}`,{
+        method:'GET',
+        cache:'no-store'
+    });
+    if(response.status===404)return null;
+    if(!response.ok){
+        throw new Error(`职位缓存读取失败（${response.status}）`);
+    }
+    const payload=normalizeJobBoardCachePayload(await response.json().catch(function(){return{};}));
+    return payload.jobs.length?payload:null;
+}
 async function loadJobBoardCache(force){
-    if(jobBoardState.cacheReady&&!force)return;
-    let payload=null;
-    try{
-        payload=await fetchRemoteJobBoardCache();
-    }catch(error){
-        console.warn('[jobs] remote cache unavailable',error);
+    if(jobBoardState.cacheReady&&!force)return jobBoardState.jobs;
+    if(jobBoardState.cachePromise&&!force)return jobBoardState.cachePromise;
+    jobBoardState.cachePromise=(async function(){
+        let payload=null;
+        try{
+            payload=await fetchSharedJobBoardCache();
+        }catch(error){
+            console.warn('[jobs] shared storage cache unavailable',error);
+        }
+        try{
+            if(!payload)payload=await fetchRemoteJobBoardCache();
+        }catch(error){
+            console.warn('[jobs] remote table cache unavailable',error);
+        }
+        if(!payload)payload=getBundledJobBoardCache();
+        if(!payload){
+            jobBoardState.jobs=[];
+            jobBoardState.lastFetchedAt='';
+            jobBoardState.sourceLabel='';
+            jobBoardState.regionCounts={};
+            jobBoardState.jobsVersion='';
+            jobBoardState.filteredCacheKey='';
+            jobBoardState.filteredJobs=[];
+            jobBoardState.cacheReady=false;
+            throw new Error('职位缓存暂时为空，请先运行缓存同步。');
+        }
+        jobBoardState.jobs=payload.jobs;
+        jobBoardState.lastFetchedAt=payload.updated_at||'';
+        jobBoardState.sourceLabel=payload.source_label||'职位池';
+        jobBoardState.page=1;
+        jobBoardState.regionCounts=buildJobBoardRegionCounts(payload.jobs);
+        jobBoardState.jobsVersion=`${jobBoardState.lastFetchedAt}|${payload.jobs.length}`;
+        jobBoardState.filteredCacheKey='';
+        jobBoardState.filteredJobs=[];
+        jobBoardState.cacheReady=true;
+        return payload.jobs;
+    })().finally(function(){
+        jobBoardState.cachePromise=null;
+    });
+    return jobBoardState.cachePromise;
+}
+function getVisibleJobBoardJobs(query){
+    const normalizedQuery=normalizePrepareText(query||jobBoardState.query);
+    const cacheKey=`${jobBoardState.jobsVersion}|${jobBoardState.activeRegion}|${normalizedQuery}`;
+    if(jobBoardState.filteredCacheKey===cacheKey&&Array.isArray(jobBoardState.filteredJobs)){
+        return jobBoardState.filteredJobs;
     }
-    if(!payload)payload=getBundledJobBoardCache();
-    if(!payload){
-        jobBoardState.jobs=[];
-        jobBoardState.lastFetchedAt='';
-        jobBoardState.sourceLabel='';
-        jobBoardState.cacheReady=false;
-        throw new Error('职位缓存暂时为空，请先运行缓存同步。');
-    }
-    jobBoardState.jobs=payload.jobs;
-    jobBoardState.lastFetchedAt=payload.updated_at||'';
-    jobBoardState.sourceLabel=payload.source_label||'职位池';
-    jobBoardState.page=1;
-    jobBoardState.cacheReady=true;
+    const jobs=(jobBoardState.jobs||[]).filter(function(job){
+        return jobBoardState.activeRegion==='all'||job.region===jobBoardState.activeRegion;
+    }).filter(function(job){
+        return jobMatchesQuery(job,normalizedQuery);
+    });
+    jobBoardState.filteredCacheKey=cacheKey;
+    jobBoardState.filteredJobs=jobs;
+    return jobs;
 }
 async function fetchZhaopinJson(url,label){
     const mirrored=await fetchJobBoardText(buildJinaMirrorUrl(url),`${label} 镜像`,{
@@ -7772,20 +7842,13 @@ function renderJobsView(filterText){
     const root=$('#jobs-root');
     if(!root)return;
     const q=normalizePrepareText(filterText||jobBoardState.query);
-    const jobs=(jobBoardState.jobs||[]).filter(function(job){
-        return jobBoardState.activeRegion==='all'||job.region===jobBoardState.activeRegion;
-    }).filter(function(job){
-        return jobMatchesQuery(job,q);
-    });
+    const jobs=getVisibleJobBoardJobs(q);
     const totalPages=Math.max(1,Math.ceil(jobs.length/(jobBoardState.pageSize||80)));
     const currentPage=Math.min(Math.max(jobBoardState.page||1,1),totalPages);
     jobBoardState.page=currentPage;
     const startIndex=(currentPage-1)*(jobBoardState.pageSize||80);
     const pageJobs=jobs.slice(startIndex,startIndex+(jobBoardState.pageSize||80));
-    const regionCounts=JOB_BOARD_REGIONS.reduce(function(map,region){
-        map[region.key]=(jobBoardState.jobs||[]).filter(function(job){return job.region===region.key;}).length;
-        return map;
-    },{});
+    const regionCounts=jobBoardState.regionCounts||{};
     const metaLabel=q?`当前匹配 ${jobs.length} 个岗位`:`当前收录 ${jobs.length} 个岗位`;
     root.innerHTML=`
         <section class="jobs-shell">
@@ -10504,5 +10567,11 @@ function init(){
     syncQuickEditPanel();
     updIntl();
     switchView('table');
+    const schedulePrewarm=window.requestIdleCallback||function(callback){return window.setTimeout(callback,240);};
+    schedulePrewarm(function(){
+        if(!jobBoardState.cacheReady&&!jobBoardState.loading){
+            void loadJobBoardCache(false).catch(function(){});
+        }
+    });
 }
 init();

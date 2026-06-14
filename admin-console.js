@@ -190,6 +190,43 @@
         const baseUrl=String(config.supabaseUrl||'').replace(/\/$/,'');
         const serviceRoleKey=String(config.serviceRoleKey||'').trim();
         const runtimeTable='rt_public_runtime_settings';
+        const sharedBucket='rt-shared';
+        const sharedQrConfigPath='runtime/community-qr.json';
+        let sharedBucketReady=null;
+
+        function encodeStoragePath(objectPath){
+            return String(objectPath||'')
+                .split('/')
+                .filter(Boolean)
+                .map(function(segment){return encodeURIComponent(segment);})
+                .join('/');
+        }
+
+        function buildPublicObjectUrl(objectPath){
+            return `${baseUrl}/storage/v1/object/public/${sharedBucket}/${encodeStoragePath(objectPath)}`;
+        }
+
+        function dataUrlToUploadPayload(dataUrl){
+            const match=String(dataUrl||'').match(/^data:([^;,]+);base64,(.+)$/);
+            if(!match)throw new Error('二维码图片格式不支持，请重新上传。');
+            const mime=match[1];
+            const binary=atob(match[2]);
+            const bytes=new Uint8Array(binary.length);
+            for(let index=0;index<binary.length;index+=1){
+                bytes[index]=binary.charCodeAt(index);
+            }
+            const extMap={
+                'image/png':'png',
+                'image/jpeg':'jpg',
+                'image/jpg':'jpg',
+                'image/webp':'webp'
+            };
+            return{
+                mime,
+                ext:extMap[mime]||'png',
+                body:bytes
+            };
+        }
 
         async function request(path,options){
             const response=await fetch(baseUrl+path,Object.assign({
@@ -214,6 +251,59 @@
                 throw new Error(message);
             }
             return data;
+        }
+
+        async function ensureSharedBucket(){
+            if(sharedBucketReady)return sharedBucketReady;
+            sharedBucketReady=(async function(){
+                const response=await fetch(baseUrl+'/storage/v1/bucket',{
+                    method:'POST',
+                    headers:{
+                        apikey:serviceRoleKey,
+                        Authorization:'Bearer '+serviceRoleKey,
+                        'Content-Type':'application/json'
+                    },
+                    body:JSON.stringify({
+                        id:sharedBucket,
+                        name:sharedBucket,
+                        public:true,
+                        file_size_limit:'10485760',
+                        allowed_mime_types:['image/png','image/jpeg','image/webp','application/json','text/plain']
+                    })
+                });
+                if(response.ok)return true;
+                const text=await response.text().catch(function(){return'';});
+                if(response.status===400||response.status===409){
+                    const lower=String(text||'').toLowerCase();
+                    if(lower.indexOf('already exists')>=0||lower.indexOf('duplicate')>=0||lower.indexOf('exists')>=0){
+                        return true;
+                    }
+                }
+                throw new Error(text||`共享存储桶创建失败（${response.status}）`);
+            })().catch(function(error){
+                sharedBucketReady=null;
+                throw error;
+            });
+            return sharedBucketReady;
+        }
+
+        async function uploadSharedObject(objectPath,body,contentType){
+            await ensureSharedBucket();
+            const response=await fetch(`${baseUrl}/storage/v1/object/${sharedBucket}/${encodeStoragePath(objectPath)}`,{
+                method:'POST',
+                headers:{
+                    apikey:serviceRoleKey,
+                    Authorization:'Bearer '+serviceRoleKey,
+                    'Content-Type':contentType,
+                    'x-upsert':'true'
+                },
+                body:body
+            });
+            const text=await response.text().catch(function(){return'';});
+            if(!response.ok){
+                throw new Error(text||`共享文件上传失败（${response.status}）`);
+            }
+            return text;
         }
 
         return {
@@ -297,6 +387,24 @@
                     }])
                 });
                 return Array.isArray(data)&&data.length?data[0]:null;
+            },
+            async writeSharedCommunityQrConfig(src){
+                if(!src)throw new Error('缺少共享二维码地址。');
+                const payload={
+                    src:src,
+                    updated_at:new Date().toISOString()
+                };
+                await uploadSharedObject(sharedQrConfigPath,JSON.stringify(payload,null,2),'application/json');
+                return payload;
+            },
+            async uploadSharedCommunityQr(dataUrl){
+                const payload=dataUrlToUploadPayload(dataUrl);
+                const stamp=Date.now();
+                const imagePath=`community/user-cocreation-group-${stamp}.${payload.ext}`;
+                await uploadSharedObject(imagePath,payload.body,payload.mime);
+                const src=`${buildPublicObjectUrl(imagePath)}?v=${stamp}`;
+                await this.writeSharedCommunityQrConfig(src);
+                return src;
             }
         };
     }
@@ -1456,14 +1564,18 @@
             reader.onerror=function(){reject(reader.error||new Error('读取图片失败'));};
             reader.readAsDataURL(file);
         });
-        runtimeSettings.setCommunityQr(slot,dataUrl);
+        let sharedSrc=dataUrl;
+        if(adminDataSource&&typeof adminDataSource.uploadSharedCommunityQr==='function'){
+            sharedSrc=await adminDataSource.uploadSharedCommunityQr(dataUrl);
+        }
+        runtimeSettings.setCommunityQr(slot,sharedSrc);
         if(adminDataSource&&typeof adminDataSource.upsertRuntimeSetting==='function'){
             await adminDataSource.upsertRuntimeSetting('community_qr',{
-                src:dataUrl,
+                src:sharedSrc,
                 updated_at:new Date().toISOString()
-            });
-            await syncSharedCommunityQrFromRemote();
+            }).catch(function(){});
         }
+        await syncSharedCommunityQrFromRemote();
         renderQrManager();
         showToast('共享二维码已更新','主产品后续重新打开时会读取这张新二维码。','success');
     }
@@ -1649,13 +1761,16 @@
         if(resetButton&&runtimeSettings){
             Promise.resolve().then(async function(){
                 runtimeSettings.resetCommunityQr();
+                if(adminDataSource&&typeof adminDataSource.writeSharedCommunityQrConfig==='function'){
+                    await adminDataSource.writeSharedCommunityQrConfig('assets/user-cocreation-group-qr.jpg');
+                }
                 if(adminDataSource&&typeof adminDataSource.upsertRuntimeSetting==='function'){
                     await adminDataSource.upsertRuntimeSetting('community_qr',{
                         src:'assets/user-cocreation-group-qr.jpg',
                         updated_at:new Date().toISOString()
-                    });
-                    await syncSharedCommunityQrFromRemote();
+                    }).catch(function(){});
                 }
+                await syncSharedCommunityQrFromRemote();
                 renderQrManager();
                 showToast('已恢复默认','共享二维码已经恢复到默认图片。','success');
             }).catch(function(error){

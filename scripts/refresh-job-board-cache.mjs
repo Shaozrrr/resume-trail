@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const ROOT = path.resolve(process.cwd(), 'resume-trail-work');
 const OUTPUT_JS = path.join(ROOT, 'assets', 'job-board-cache.js');
@@ -8,34 +10,41 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://bpynqhujzvadyakypfju.s
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const CACHE_TABLE = 'rt_public_job_board_cache';
 const CACHE_KEY = 'default';
+const SHARED_STORAGE_BUCKET = 'rt-shared';
+const SHARED_JOB_CACHE_PATH = 'jobs/job-board-cache.json';
 const DEFAULT_LIMIT = 2600;
+const CHROME_BINARY = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const execFileAsync = promisify(execFile);
 const MAINLAND_QUERIES = ['产品经理', 'AI产品经理', '数据产品经理', '商业分析', '产品运营', '增长运营', '前端开发', '后端开发'];
+const BYTEDANCE_QUERIES = ['运营', '用户', '电商', '商业化', '内容', '豆包', 'TRAE', '生活服务', '音乐', '开发者服务', '产品'];
 const TARGET_SOURCE_FLOORS = [
   { region: 'mainland', source: '腾讯招聘', min: 100 },
   { region: 'mainland', source: '美团招聘', min: 100 },
-  { region: 'mainland', source: '拉勾招聘', min: 60 },
+  { region: 'mainland', source: '拉勾招聘', min: 100 },
   { region: 'mainland', source: '实习僧', min: 100 },
   { region: 'mainland', source: 'Jobrapido 中国', min: 100 },
-  { region: 'mainland', source: 'Talent 中国', min: 100 },
   { region: 'hongkong', source: 'CTgoodjobs', min: 100 },
   { region: 'hongkong', source: 'HKSlash', min: 100 },
   { region: 'hongkong', source: 'Joblum Hong Kong', min: 100 },
-  { region: 'hongkong', source: 'Jobrapido Hong Kong', min: 100 },
-  { region: 'hongkong', source: 'Recruit.com.hk', min: 20 },
+  { region: 'hongkong', source: 'Recruit.com.hk', min: 100 },
+  { region: 'hongkong', source: 'Talent Hong Kong', min: 100 },
   { region: 'northamerica', source: 'Databricks Careers', min: 100 },
   { region: 'northamerica', source: 'Stripe Careers', min: 100 },
   { region: 'northamerica', source: 'Figma Careers', min: 100 },
-  { region: 'northamerica', source: 'Block Careers', min: 100 },
+  { region: 'northamerica', source: 'Airbnb Careers', min: 80 },
   { region: 'northamerica', source: 'Robinhood Careers', min: 100 },
   { region: 'other', source: 'Jobicy', min: 40 },
-  { region: 'other', source: 'Remotive', min: 30 },
+  { region: 'other', source: 'Remotive', min: 29 },
   { region: 'other', source: 'Remote OK', min: 30 }
 ];
 const GREENHOUSE_SOURCES = [
   { company: 'Databricks', board: 'databricks', source: 'Databricks Careers' },
   { company: 'Stripe', board: 'stripe', source: 'Stripe Careers' },
   { company: 'Figma', board: 'figma', source: 'Figma Careers' },
-  { company: 'Block', board: 'block', source: 'Block Careers' },
+  { company: 'Airbnb', board: 'airbnb', source: 'Airbnb Careers' },
+  { company: 'Coinbase', board: 'coinbase', source: 'Coinbase Careers' },
+  { company: 'Asana', board: 'asana', source: 'Asana Careers' },
+  { company: 'Instacart', board: 'instacart', source: 'Instacart Careers' },
   { company: 'Robinhood', board: 'robinhood', source: 'Robinhood Careers' }
 ];
 const CTGOODJOBS_PAGES = [
@@ -45,11 +54,39 @@ const CTGOODJOBS_PAGES = [
   'https://jobs.ctgoodjobs.hk/jobs/jobs-in-education',
   'https://jobs.ctgoodjobs.hk/jobs/jobs-in-engineering'
 ];
-const RECRUIT_PAGES = [
-  'https://www.recruit.com.hk/default.aspx'
+const JOBLUM_HK_PATHS = [
+  '/jobs-spec-banking-financial-services',
+  '/jobs-spec-information-technology-it',
+  '/jobs-spec-sales',
+  '/jobs-spec-marketing-communications',
+  '/jobs-spec-administration-office-support',
+  '/jobs-spec-human-resources-recruitment',
+  '/jobs-spec-engineering',
+  '/jobs-spec-consulting-strategy',
+  '/jobs-spec-retail-consumer-products',
+  '/jobs-spec-education-training',
+  '/jobs-spec-call-centre-customer-service',
+  '/jobs-spec-healthcare-medical',
+  '/jobs-spec-government-defence',
+  '/jobs-spec-manufacturing-transport-logistics'
 ];
+const RECRUIT_HOME = 'https://www.recruit.com.hk/default.aspx';
 function normalizeText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/[\uE000-\uF8FF]/g, ' ')
+    .replace(/\uFFFD/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hashText(value) {
+  const input = String(value || '');
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function decodeHtml(value) {
@@ -67,11 +104,19 @@ function decodeHtml(value) {
 
 function classifyRegion(value) {
   const text = normalizeText(value).toLowerCase();
+  if (/remote|worldwide|anywhere/.test(text)) return 'other';
   if (/香港|hong kong|\bhk\b/.test(text)) return 'hongkong';
   if (/中国|china|mainland|北京|上海|深圳|广州|杭州|成都|南京|苏州|武汉|西安|天津|重庆|长沙|青岛|郑州|厦门|珠海|合肥|宁波|佛山/.test(text)) return 'mainland';
   if (/united states|usa|u\.s\.|canada|new york|san francisco|seattle|boston|austin|chicago|toronto|vancouver|california|redwood city|brooklyn|oakland|bellevue|atlanta|denver|los angeles|washington dc|washington, dc|new jersey|montreal|ottawa|virginia|miami|phoenix|minneapolis|oregon|utah|georgia|massachusetts|illinois|texas|ontario|quebec/.test(text)) return 'northamerica';
-  if (/remote|worldwide|anywhere/.test(text)) return 'other';
   return 'other';
+}
+
+function isRecentEnough(updatedAt) {
+  const text = normalizeText(updatedAt);
+  if (!text) return true;
+  const timestamp = new Date(text).getTime();
+  if (!Number.isFinite(timestamp)) return true;
+  return Date.now() - timestamp <= 60 * 24 * 60 * 60 * 1000;
 }
 
 function parseJsonText(text) {
@@ -95,10 +140,13 @@ function normalizePosting(input) {
   const company = normalizeText(input.company);
   const url = normalizeText(input.url);
   if (!title || !company || !url) return null;
-  const location = normalizeText(input.location);
+  const rawLocation = normalizeText(input.location);
+  const location = /remote|worldwide|anywhere/i.test(rawLocation) ? 'Remote' : rawLocation;
   const jdText = decodeHtml(input.jd_text || '').slice(0, 1800);
+  const updatedAt = normalizeText(input.updated_at || '');
+  if (!isRecentEnough(updatedAt)) return null;
   return {
-    id: `job_${company}_${title}_${url}`.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_').slice(0, 120),
+    id: `job_${hashText(`${input.source || ''}|${company}|${title}|${location}|${url}`)}`,
     title,
     company,
     location,
@@ -107,7 +155,7 @@ function normalizePosting(input) {
     url,
     jd_text: jdText,
     summary: decodeHtml(input.summary || jdText).slice(0, 260),
-    updated_at: normalizeText(input.updated_at || '')
+    updated_at: updatedAt
   };
 }
 
@@ -124,7 +172,7 @@ function dedupe(items) {
   const seen = new Set();
   return items.filter((item) => {
     if (!item) return false;
-    const key = `${item.company}|${item.title}|${item.location}|${item.url}`.toLowerCase();
+    const key = `${item.source}|${item.company}|${item.title}|${item.location}|${item.url}`.toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -166,6 +214,21 @@ async function fetchText(url, label, timeoutMs = 16000) {
   }
 }
 
+async function fetchHeadlessDom(url, label, timeoutMs = 20000) {
+  const result = await execFileAsync(CHROME_BINARY, [
+    '--headless=new',
+    '--disable-gpu',
+    '--dump-dom',
+    url
+  ], {
+    timeout: timeoutMs,
+    maxBuffer: 24 * 1024 * 1024
+  }).catch((error) => {
+    throw new Error(`${label} failed (${error.message || error})`);
+  });
+  return String(result.stdout || '');
+}
+
 async function fetchJson(url, label, timeoutMs = 16000) {
   const text = await fetchText(url, label, timeoutMs);
   return parseJsonText(text);
@@ -196,21 +259,31 @@ async function fetchMeituanJobs() {
   const jobs = [];
   for (const keyword of MAINLAND_QUERIES) {
     for (let pageNo = 1; pageNo <= 10; pageNo += 1) {
-      const response = await fetch('https://zhaopin.meituan.com/api/official/job/getJobList', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          origin: 'https://zhaopin.meituan.com',
-          referer: 'https://zhaopin.meituan.com/web/position'
-        },
-        body: JSON.stringify({
-          page: { pageNo, pageSize: 30 },
-          keywords: keyword
-        })
-      });
-      const payload = await response.json().catch(() => ({}));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 16000);
+      let payload = {};
+      try {
+        const response = await fetch('https://zhaopin.meituan.com/api/official/job/getJobList', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'content-type': 'application/json',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            origin: 'https://zhaopin.meituan.com',
+            referer: 'https://zhaopin.meituan.com/web/position'
+          },
+          body: JSON.stringify({
+            page: { pageNo, pageSize: 30 },
+            keywords: keyword
+          })
+        });
+        payload = await response.json().catch(() => ({}));
+      } catch {
+        payload = {};
+      } finally {
+        clearTimeout(timer);
+      }
       const list = Array.isArray(payload?.data?.list) ? payload.data.list : [];
       if (!list.length) break;
       jobs.push(...list.map((item) => normalizePosting({
@@ -291,6 +364,40 @@ async function fetchShixisengJobs() {
   return (await Promise.all(tasks)).flat();
 }
 
+function extractByteDanceCampusJobsFromDom(text) {
+  return [...String(text || '').matchAll(/<a[^>]+data-id="([^"]+)"[^>]+href="([^"]*\/campus\/position\/[^"]+\/detail)"[\s\S]*?<span class="positionItem-title-text">([^<]+)<\/span>[\s\S]*?<div class="subTitle__3sRa3 positionItem-subTitle">([\s\S]*?)<\/div>[\s\S]*?<div class="jobDesc__3ZDgU positionItem-jobDesc">([\s\S]*?)<\/div>/gi)]
+    .map((match) => {
+      const subMeta = [...match[4].matchAll(/<span[^>]*>([^<]+)<\/span>/gi)].map((item) => decodeHtml(item[1])).filter(Boolean);
+      const location = subMeta[0] || '中国大陆';
+      const summaryParts = subMeta.slice(1, 4);
+      return normalizePosting({
+        title: decodeHtml(match[3]),
+        company: '字节跳动',
+        location,
+        region: 'mainland',
+        source: '字节跳动校招',
+        url: match[2].startsWith('http') ? match[2] : `https://job.bytedance.com${match[2]}`,
+        jd_text: decodeHtml(match[5]),
+        summary: [...summaryParts, decodeHtml(match[5]).slice(0, 120)].filter(Boolean).join(' · ')
+      });
+    })
+    .filter(Boolean);
+}
+
+async function fetchByteDanceCampusJobs() {
+  const jobs = [];
+  for (const keyword of BYTEDANCE_QUERIES) {
+    const url = `https://job.bytedance.com/campus/position?keywords=${encodeURIComponent(keyword)}`;
+    try {
+      const dom = await fetchHeadlessDom(url, `字节跳动校招 ${keyword}`, 26000);
+      jobs.push(...extractByteDanceCampusJobsFromDom(dom));
+    } catch {}
+    await delay(160);
+    if (dedupe(jobs).length >= 120) break;
+  }
+  return dedupe(jobs);
+}
+
 function extractJobrapidoJobs(text, source, region) {
   const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean);
   const jobs = [];
@@ -321,7 +428,7 @@ function extractJobrapidoJobs(text, source, region) {
 
 async function fetchJobrapidoMainlandJobs() {
   const jobs = [];
-  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E8%BF%90%E8%90%A5', '%E5%BC%80%E5%8F%91', '%E5%B7%A5%E7%A8%8B%E5%B8%88', '%E5%B8%82%E5%9C%BA'];
+  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E8%BF%90%E8%90%A5', 'AI'];
   for (const query of queries) {
     for (let page = 1; page <= 4; page += 1) {
       const url = `https://r.jina.ai/http://cn.jobrapido.com/?q=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
@@ -330,9 +437,11 @@ async function fetchJobrapidoMainlandJobs() {
         jobs.push(...extractJobrapidoJobs(text, 'Jobrapido 中国', 'mainland'));
       } catch {}
       await delay(160);
+      if (dedupe(jobs).length >= 140) return dedupe(jobs);
     }
+    if (dedupe(jobs).length >= 140) break;
   }
-  return jobs;
+  return dedupe(jobs);
 }
 
 async function fetchGreenhouseJobs() {
@@ -419,7 +528,7 @@ async function fetchHkSlashJobs() {
 }
 
 function extractJoblumHongKongJobsFromPage(text) {
-  return [...String(text || '').matchAll(/<div class="result-wrp row">[\s\S]*?<h2 class="job-title">[\s\S]*?<a[\s\S]*?title="([^"]+)"[\s\S]*?href="([^"]+)"[\s\S]*?<span class="company-name">[\s\S]*?<span>\s*([^<]+)\s*<\/span>[\s\S]*?<span class="location(?: location-desktop)?">\s*<span>\s*([^<]+)\s*<\/span>/gi)]
+  return [...String(text || '').matchAll(/<div class="result-wrp row">[\s\S]*?<h2 class="job-title">[\s\S]*?<a[\s\S]*?title="([^"]+)"[\s\S]*?href="([^"]+)"[\s\S]*?<span class="company-name">[\s\S]*?<span>\s*([^<]+)\s*<\/span>[\s\S]*?<span class="location location-desktop">\s*<span>\s*([^<]+)\s*<\/span>/gi)]
     .map((match) => normalizePosting({
       title: decodeHtml(match[1]),
       company: decodeHtml(match[3]),
@@ -433,18 +542,22 @@ function extractJoblumHongKongJobsFromPage(text) {
 }
 
 async function fetchJoblumHongKongJobs() {
-  const tasks = [];
-  for (let page = 1; page <= 12; page += 1) {
-    tasks.push(fetchText(`https://hk.joblum.com/jobs?page=${page}`, `Joblum Hong Kong ${page}`, 18000).then(extractJoblumHongKongJobsFromPage).catch(() => []));
+  const jobs = [];
+  for (const route of JOBLUM_HK_PATHS) {
+    try {
+      const text = await fetchText(`https://hk.joblum.com${route}`, `Joblum Hong Kong ${route}`, 18000);
+      jobs.push(...extractJoblumHongKongJobsFromPage(text));
+    } catch {}
+    await delay(120);
   }
-  return (await Promise.all(tasks)).flat();
+  return jobs;
 }
 
 async function fetchJobrapidoHongKongJobs() {
   const jobs = [];
-  const queries = ['product', 'manager', 'analyst', 'operation'];
+  const queries = ['product', 'manager', 'analyst', 'operation', 'business', 'marketing', 'finance'];
   for (const query of queries) {
-    for (let page = 1; page <= 4; page += 1) {
+    for (let page = 1; page <= 6; page += 1) {
       const url = `https://r.jina.ai/http://hk.jobrapido.com/?q=${encodeURIComponent(query)}&l=hong-kong&p=${page}`;
       try {
         const text = await fetchText(url, `Jobrapido Hong Kong ${query} ${page}`, 18000);
@@ -457,22 +570,41 @@ async function fetchJobrapidoHongKongJobs() {
 }
 
 function extractRecruitJobsFromPage(text) {
-  return [...String(text || '').matchAll(/<a[^>]+class='[^']*ArticleSectionLink[^']*'[^>]*>([^<]+)<\/a>[\s\S]{0,400}?<a[^>]+href='([^']*job[^']*)'[^>]*>[\s\S]{0,200}?<h3[^>]*>([^<]+)<\/h3>/gi)]
-    .map((match) => normalizePosting({
-      title: decodeHtml(match[3]),
-      company: decodeHtml(match[1]),
+  return [...String(text || '').matchAll(/href=['"]([^'"]*\/job-detail\/([^/'"]+)\/([^/'"]+)\/[^'"]+)['"]/gi)]
+    .map((match) => {
+      const companyName = decodeURIComponent(match[2] || '').replace(/[-_]+/g, ' ').trim() || '公司未公开';
+      const title = decodeURIComponent(match[3] || '').replace(/[-_]+/g, ' ').trim() || '职位未公开';
+      return normalizePosting({
+      title,
+      company: companyName,
       location: 'Hong Kong',
       region: 'hongkong',
       source: 'Recruit.com.hk',
-      url: match[2].startsWith('http') ? match[2] : `https://www.recruit.com.hk${match[2]}`,
-      summary: `${decodeHtml(match[1])} · Hong Kong`
-    }))
+      url: match[1].startsWith('http') ? match[1] : `https://www.recruit.com.hk${match[1]}`,
+      summary: `${companyName} · Hong Kong`
+    });
+    })
     .filter(Boolean);
+}
+
+function extractRecruitIndexLinks(text) {
+  const matches = [...String(text || '').matchAll(/href=['"]([^'"]*(?:job-function-q|job-category)[^'"]*)['"]/gi)];
+  return [...new Set(matches.map((match) => {
+    const href = normalizeText(match[1]);
+    if (!href) return '';
+    return href.startsWith('http') ? href : `https://www.recruit.com.hk${href}`;
+  }).filter(Boolean))];
 }
 
 async function fetchRecruitHongKongJobs() {
   const jobs = [];
-  for (const url of RECRUIT_PAGES) {
+  let links = [RECRUIT_HOME];
+  try {
+    const homepage = await fetchText(RECRUIT_HOME, 'Recruit.com.hk 首页', 18000);
+    jobs.push(...extractRecruitJobsFromPage(homepage));
+    links = links.concat(extractRecruitIndexLinks(homepage).slice(0, 64));
+  } catch {}
+  for (const url of [...new Set(links)]) {
     try {
       const text = await fetchText(url, url, 18000);
       jobs.push(...extractRecruitJobsFromPage(text));
@@ -482,73 +614,69 @@ async function fetchRecruitHongKongJobs() {
   return jobs;
 }
 
-function extractTalentJobs(text, source, region) {
-  const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean);
-  const jobs = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!/^##\s+/.test(line)) continue;
-    const title = decodeHtml(line.replace(/^##\s+/, '').replace(/\*\*/g, '').trim());
-    const meta = lines[index + 1] || '';
-    const metaMatch = meta.match(/^(.+?)•(.+)$/);
-    if (!metaMatch) continue;
-    const company = decodeHtml(metaMatch[1]).trim();
-    const location = decodeHtml(metaMatch[2]).trim();
-    let description = '';
-    let url = '';
-    for (let scan = index + 2; scan < Math.min(lines.length, index + 10); scan += 1) {
-      const moreMatch = lines[scan].match(/\[(?:展示更多|Show more)\]\((https?:\/\/[^)\s]+|http:\/\/[^)\s]+)\)/i);
-      if (moreMatch) {
-        url = moreMatch[1];
-        break;
-      }
-      description += `${description ? ' ' : ''}${lines[scan]}`;
-    }
-    if (!title || !company || !location || !url) continue;
-    jobs.push(normalizePosting({
-      title,
-      company,
-      location,
+function extractTalentJobsFromHtml(text, options) {
+  const opts = options || {};
+  const baseUrl = opts.baseUrl || 'https://hk.talent.com';
+  const region = opts.region || 'other';
+  const source = opts.source || 'Talent';
+  return [...String(text || '').matchAll(/<div[^>]+data-testid="jobcard-container-[^"]+"[\s\S]*?<h2[^>]*class="JobCard_title__[^"]*">([\s\S]*?)<\/h2>[\s\S]*?<span[^>]*class="JobCard_company__[^"]*">([\s\S]*?)<\/span>[\s\S]*?<span[^>]*class="JobCard_location__[^"]*">([\s\S]*?)<\/span>[\s\S]*?<a[^>]+href="(\/view\?id=[^"]+)"[\s\S]*?<time[^>]*dateTime="([^"]*)"/gi)]
+    .map((match) => normalizePosting({
+      title: decodeHtml(match[1]),
+      company: decodeHtml(match[2]),
+      location: decodeHtml(match[3]),
       region,
       source,
-      url,
-      jd_text: description,
-      summary: decodeHtml(description).slice(0, 220)
-    }));
+      url: new URL(match[4], baseUrl).toString(),
+      updated_at: match[5] || ''
+    }))
+    .filter(Boolean);
+}
+
+async function fetchTalentRegionJobs(options) {
+  const opts = options || {};
+  const domain = opts.domain || 'cn';
+  const region = opts.region || 'mainland';
+  const source = opts.source || 'Talent';
+  const location = opts.location || (domain === 'hk' ? 'hong+kong' : '%E4%B8%AD%E5%9B%BD');
+  const queries = Array.isArray(opts.queries) ? opts.queries : [];
+  const pageLimit = opts.pageLimit || 6;
+  const baseUrl = opts.baseUrl || `https://${domain}.talent.com`;
+  const jobs = [];
+  for (const query of queries) {
+    for (let page = 1; page <= pageLimit; page += 1) {
+      const url = `${baseUrl}/jobs?k=${query}&l=${location}&p=${page}`;
+      try {
+        const text = await fetchText(url, `${source} ${query} ${page}`, 18000);
+        jobs.push(...extractTalentJobsFromHtml(text, { baseUrl, region, source }));
+      } catch {}
+      await delay(120);
+    }
   }
-  return jobs.filter(Boolean);
+  return jobs;
 }
 
 async function fetchTalentHongKongJobs() {
-  const jobs = [];
-  const queries = ['product', 'manager', 'business', 'data'];
-  for (const query of queries) {
-    for (let page = 1; page <= 6; page += 1) {
-      const url = `https://r.jina.ai/http://hk.talent.com/jobs?k=${encodeURIComponent(query)}&l=hong+kong&p=${page}`;
-      try {
-        const text = await fetchText(url, `Talent Hong Kong ${query} ${page}`, 18000);
-        jobs.push(...extractTalentJobs(text, 'Talent Hong Kong', 'hongkong'));
-      } catch {}
-      await delay(180);
-    }
-  }
-  return jobs;
+  return fetchTalentRegionJobs({
+    domain: 'hk',
+    region: 'hongkong',
+    source: 'Talent Hong Kong',
+    location: 'hong+kong',
+    baseUrl: 'https://hk.talent.com',
+    queries: ['product', 'manager', 'analyst', 'finance', 'marketing', 'sales', 'engineer'],
+    pageLimit: 4
+  });
 }
 
 async function fetchTalentChinaJobs() {
-  const jobs = [];
-  const queries = ['%E4%BA%A7%E5%93%81', '%E4%BA%A7%E5%93%81%E7%BB%8F%E7%90%86', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5'];
-  for (const query of queries) {
-    for (let page = 1; page <= 6; page += 1) {
-      const url = `https://r.jina.ai/http://cn.talent.com/jobs?k=${query}&l=%E4%B8%AD%E5%9B%BD&p=${page}`;
-      try {
-        const text = await fetchText(url, `Talent 中国 ${query} ${page}`, 18000);
-        jobs.push(...extractTalentJobs(text, 'Talent 中国', 'mainland'));
-      } catch {}
-      await delay(180);
-    }
-  }
-  return jobs;
+  return fetchTalentRegionJobs({
+    domain: 'cn',
+    region: 'mainland',
+    source: 'Talent 中国',
+    location: '%E4%B8%AD%E5%9B%BD',
+    baseUrl: 'https://cn.talent.com',
+    queries: ['%E4%BA%A7%E5%93%81', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90'],
+    pageLimit: 4
+  });
 }
 
 async function fetchRemotiveJobs() {
@@ -624,6 +752,65 @@ async function writeLocalCache(payload) {
   await fs.writeFile(OUTPUT_JSON, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
+function encodeStoragePath(objectPath) {
+  return String(objectPath || '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+async function ensureSharedBucket() {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return false;
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    },
+    body: JSON.stringify({
+      id: SHARED_STORAGE_BUCKET,
+      name: SHARED_STORAGE_BUCKET,
+      public: true,
+      file_size_limit: '20971520',
+      allowed_mime_types: ['application/json', 'text/plain', 'image/png', 'image/jpeg', 'image/webp']
+    })
+  });
+  if (response.ok) return true;
+  const text = await response.text().catch(() => '');
+  if (response.status === 400 || response.status === 409) {
+    const lower = String(text || '').toLowerCase();
+    if (lower.includes('already exists') || lower.includes('duplicate') || lower.includes('exists')) return true;
+  }
+  throw new Error(`Supabase shared bucket ensure failed (${response.status}): ${text}`);
+}
+
+async function uploadSharedStorageObject(objectPath, body, contentType) {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return false;
+  await ensureSharedBucket();
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SHARED_STORAGE_BUCKET}/${encodeStoragePath(objectPath)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'x-upsert': 'true'
+    },
+    body
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Supabase storage upload failed (${response.status}): ${text}`);
+  }
+  return true;
+}
+
+async function uploadSharedJobCache(payload) {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return false;
+  return uploadSharedStorageObject(SHARED_JOB_CACHE_PATH, JSON.stringify(payload, null, 2), 'application/json');
+}
+
 async function upsertRemoteCache(payload) {
   if (!SUPABASE_SERVICE_ROLE_KEY) return false;
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${CACHE_TABLE}`, {
@@ -642,6 +829,9 @@ async function upsertRemoteCache(payload) {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
+    if (response.status === 404 || /rt_public_job_board_cache/i.test(text)) {
+      return false;
+    }
     throw new Error(`Supabase cache upsert failed (${response.status}): ${text}`);
   }
   return true;
@@ -649,8 +839,12 @@ async function upsertRemoteCache(payload) {
 
 async function main() {
   async function safeFetch(label, task) {
+    const startedAt = Date.now();
+    console.log(`[job-cache] fetching ${label}...`);
     try {
-      return await task();
+      const result = await task();
+      console.log(`[job-cache] fetched ${label}: ${Array.isArray(result) ? result.length : 0} jobs in ${Date.now() - startedAt}ms`);
+      return result;
     } catch (error) {
       console.warn(`[job-cache] ${label} skipped: ${error?.message || error || 'unknown error'}`);
       return [];
@@ -659,8 +853,7 @@ async function main() {
 
   const buckets = [];
   buckets.push(await safeFetch('Jobrapido 中国', fetchJobrapidoMainlandJobs));
-  buckets.push(await safeFetch('Talent 中国', fetchTalentChinaJobs));
-  buckets.push(await safeFetch('Jobrapido Hong Kong', fetchJobrapidoHongKongJobs));
+  buckets.push(await safeFetch('Talent Hong Kong', fetchTalentHongKongJobs));
   buckets.push(await safeFetch('Joblum Hong Kong', fetchJoblumHongKongJobs));
   buckets.push(await safeFetch('Recruit.com.hk', fetchRecruitHongKongJobs));
   buckets.push(await safeFetch('腾讯招聘', fetchTencentJobs));
@@ -681,6 +874,9 @@ async function main() {
     jobs
   };
   await writeLocalCache(payload);
+  await uploadSharedJobCache(payload).catch((error) => {
+    console.warn('[job-cache] shared storage upload skipped:', error.message);
+  });
   await upsertRemoteCache(payload).catch((error) => {
     console.warn('[job-cache] remote upsert skipped:', error.message);
   });

@@ -2,6 +2,8 @@
     const STORAGE_KEY='rt_runtime_settings_v1';
     const REMOTE_TABLE='rt_public_runtime_settings';
     const REMOTE_SETTING_KEY='community_qr';
+    const SHARED_STORAGE_BUCKET='rt-shared';
+    const SHARED_QR_CONFIG_PATH='runtime/community-qr.json';
     const DEFAULT_SUPABASE_URL='https://bpynqhujzvadyakypfju.supabase.co';
     const DEFAULT_SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJweW5xaHVqenZhZHlha3lwZmp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODIzMTAsImV4cCI6MjA5Mjk1ODMxMH0.sdU-HLNvVlyVstDUAesvKM_MX_4kBhxTd9OSTlRLXF8';
     const DEFAULT_SETTINGS={
@@ -9,6 +11,7 @@
     };
     let settingsCache=null;
     let remoteSyncPromise=null;
+    let lastRemoteSyncAt=0;
 
     function clone(value){
         if(typeof structuredClone==='function')return structuredClone(value);
@@ -71,6 +74,30 @@
         return DEFAULT_SUPABASE_ANON_KEY;
     }
 
+    function encodeStoragePath(objectPath){
+        return String(objectPath||'')
+            .split('/')
+            .filter(Boolean)
+            .map(function(segment){return encodeURIComponent(segment);})
+            .join('/');
+    }
+
+    function buildPublicStorageUrl(objectPath){
+        return `${resolveSupabaseUrl()}/storage/v1/object/public/${SHARED_STORAGE_BUCKET}/${encodeStoragePath(objectPath)}`;
+    }
+
+    async function fetchRemoteJsonFromStorage(objectPath){
+        const response=await fetch(`${buildPublicStorageUrl(objectPath)}?t=${Date.now()}`,{
+            method:'GET',
+            cache:'no-store'
+        });
+        if(response.status===404)return null;
+        if(!response.ok){
+            throw new Error(`shared storage fetch failed (${response.status})`);
+        }
+        return response.json();
+    }
+
     function applySettings(next,options){
         const opts=options||{};
         settingsCache=mergeDeep(DEFAULT_SETTINGS,next||{});
@@ -103,6 +130,12 @@
     }
 
     async function fetchRemoteCommunityQr(){
+        const sharedConfig=await fetchRemoteJsonFromStorage(SHARED_QR_CONFIG_PATH).catch(function(error){
+            console.warn('[RT runtime] shared storage config unavailable',error);
+            return null;
+        });
+        const sharedSrc=normalizeCommunityQrSrc(sharedConfig);
+        if(sharedSrc)return sharedSrc;
         const supabaseUrl=resolveSupabaseUrl();
         const supabaseAnonKey=resolveSupabaseAnonKey();
         const response=await fetch(
@@ -148,9 +181,15 @@
             applyCommunityQrs(document);
             return getSettingsSnapshot();
         }).finally(function(){
+            lastRemoteSyncAt=Date.now();
             remoteSyncPromise=null;
         });
         return remoteSyncPromise;
+    }
+
+    function syncFromRemoteIfNeeded(){
+        if(Date.now()-lastRemoteSyncAt<1500)return;
+        syncFromRemote(false);
     }
 
     const runtimeApi={
@@ -190,6 +229,16 @@
     document.addEventListener('DOMContentLoaded',function(){
         applyCommunityQrs(document);
         syncFromRemote(false);
+    });
+
+    window.addEventListener('focus',function(){
+        syncFromRemoteIfNeeded();
+    });
+
+    document.addEventListener('visibilitychange',function(){
+        if(!document.hidden){
+            syncFromRemoteIfNeeded();
+        }
     });
 
     window.addEventListener('storage',function(event){
