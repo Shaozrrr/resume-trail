@@ -3285,27 +3285,41 @@ async function fetchSharedJobBoardCache(){
     const payload=normalizeJobBoardCachePayload(await response.json().catch(function(){return{};}));
     return payload.jobs.length?payload:null;
 }
+function getJobBoardPayloadTime(payload){
+    const timestamp=Date.parse(payload&&payload.updated_at||'');
+    return Number.isFinite(timestamp)?timestamp:0;
+}
+function pickBestJobBoardCachePayload(payloads){
+    const candidates=(payloads||[]).filter(function(payload){
+        return payload&&Array.isArray(payload.jobs)&&payload.jobs.length;
+    });
+    if(!candidates.length)return null;
+    return candidates.sort(function(a,b){
+        const timeDelta=getJobBoardPayloadTime(b)-getJobBoardPayloadTime(a);
+        if(Math.abs(timeDelta)>60*1000)return timeDelta;
+        return (b.jobs.length||0)-(a.jobs.length||0);
+    })[0];
+}
 async function loadJobBoardCache(force){
     if(jobBoardState.cacheReady&&!force)return jobBoardState.jobs;
     if(jobBoardState.cachePromise&&!force)return jobBoardState.cachePromise;
     jobBoardState.cachePromise=(async function(){
-        let payload=null;
-        try{
-            payload=await fetchSharedJobBoardCache();
-        }catch(error){
-            console.warn('[jobs] shared storage cache unavailable',error);
-        }
-        try{
-            if(!payload)payload=await fetchRemoteJobBoardCache();
-        }catch(error){
-            console.warn('[jobs] remote table cache unavailable',error);
-        }
-        if(!payload)payload=getBundledJobBoardCache();
-        try{
-            if(!payload)payload=await fetchBundledJobBoardCacheJson();
-        }catch(error){
-            console.warn('[jobs] bundled json cache unavailable',error);
-        }
+        const bundledPayload=getBundledJobBoardCache();
+        const results=await Promise.allSettled([
+            fetchSharedJobBoardCache(),
+            fetchRemoteJobBoardCache(),
+            fetchBundledJobBoardCacheJson()
+        ]);
+        const payloads=[bundledPayload];
+        results.forEach(function(result,index){
+            if(result.status==='fulfilled'){
+                payloads.push(result.value);
+                return;
+            }
+            const label=['shared storage','remote table','bundled json'][index]||'cache';
+            console.warn(`[jobs] ${label} cache unavailable`,result.reason);
+        });
+        const payload=pickBestJobBoardCachePayload(payloads);
         if(!payload){
             jobBoardState.jobs=[];
             jobBoardState.lastFetchedAt='';
