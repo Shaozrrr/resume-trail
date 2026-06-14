@@ -103,6 +103,7 @@ const JOB_BOARD_GREENHOUSE_SOURCES=[
     {company:'Instacart',board:'instacart'}
 ];
 const JOB_BOARD_REMOTE_TABLE='rt_public_job_board_cache';
+const JOB_BOARD_REMOTE_JOBS_TABLE='rt_public_job_board_jobs';
 const JOB_BOARD_REMOTE_CACHE_KEY='default';
 const JOB_BOARD_CACHE_MAX_AGE_MS=24*60*60*1000;
 const JOB_BOARD_SHARED_BUCKET='rt-shared';
@@ -3251,6 +3252,46 @@ async function fetchRemoteJobBoardCache(){
     }));
     return payload.jobs.length?payload:null;
 }
+async function fetchRemoteJobBoardRows(){
+    const pageSize=1000;
+    const jobs=[];
+    let latestSeenAt='';
+    for(let offset=0;offset<40000;offset+=pageSize){
+        const url=`${SUPABASE_URL}/rest/v1/${JOB_BOARD_REMOTE_JOBS_TABLE}?select=job,last_seen_at&order=company.asc,title.asc&limit=${pageSize}&offset=${offset}`;
+        const result=await sb.requestJson(url,{
+            headers:{
+                apikey:SUPABASE_KEY,
+                Authorization:`Bearer ${SUPABASE_KEY}`
+            }
+        });
+        if(!result.ok){
+            if(result.status===404)return null;
+            throw new Error(result.error||'云端职位池读取失败');
+        }
+        const rows=Array.isArray(result.data)?result.data:[];
+        if(!rows.length)break;
+        rows.forEach(function(row){
+            const job=row&&row.job&&typeof row.job==='object'?row.job:null;
+            if(!job)return;
+            const normalized=normalizeJobPosting(Object.assign({},job,{
+                last_seen_at:job.last_seen_at||row.last_seen_at||''
+            }));
+            if(normalized&&isJobBoardPostingVisible(normalized)){
+                jobs.push(normalized);
+            }
+            const seenAt=normalizePrepareText(row.last_seen_at||job.last_seen_at||job.updated_at||'');
+            if(seenAt&&Date.parse(seenAt)>Date.parse(latestSeenAt||0))latestSeenAt=seenAt;
+        });
+        if(rows.length<pageSize)break;
+    }
+    const normalizedJobs=sortJobBoardPostings(dedupeJobPostings(jobs));
+    return normalizedJobs.length?{
+        jobs:normalizedJobs,
+        updated_at:latestSeenAt||new Date().toISOString(),
+        source_label:'云端每日职位池',
+        source_count:new Set(normalizedJobs.map(function(job){return job.source;}).filter(Boolean)).size
+    }:null;
+}
 function getBundledJobBoardCache(){
     if(!window.RT_JOB_BOARD_CACHE)return null;
     const payload=normalizeJobBoardCachePayload(window.RT_JOB_BOARD_CACHE);
@@ -3306,6 +3347,7 @@ async function loadJobBoardCache(force){
     jobBoardState.cachePromise=(async function(){
         const bundledPayload=getBundledJobBoardCache();
         const results=await Promise.allSettled([
+            fetchRemoteJobBoardRows(),
             fetchSharedJobBoardCache(),
             fetchRemoteJobBoardCache(),
             fetchBundledJobBoardCacheJson()
@@ -3316,7 +3358,7 @@ async function loadJobBoardCache(force){
                 payloads.push(result.value);
                 return;
             }
-            const label=['shared storage','remote table','bundled json'][index]||'cache';
+            const label=['remote rows','shared storage','remote table','bundled json'][index]||'cache';
             console.warn(`[jobs] ${label} cache unavailable`,result.reason);
         });
         const payload=pickBestJobBoardCachePayload(payloads);

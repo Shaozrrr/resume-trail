@@ -1,6 +1,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 
 const CACHE_TABLE = 'rt_public_job_board_cache'
+const JOBS_TABLE = 'rt_public_job_board_jobs'
 const CACHE_KEY = 'default'
 const CACHE_RETENTION_DAYS = 14
 const VISIBLE_RETENTION_DAYS = 60
@@ -14,6 +15,8 @@ const CTGOODJOBS_PAGES = [
   'https://jobs.ctgoodjobs.hk/jobs/jobs-in-education',
   'https://jobs.ctgoodjobs.hk/jobs/jobs-in-engineering',
 ]
+const CTGOODJOBS_CHUNK_SIZE = 10
+const CTGOODJOBS_PAGE_LIMIT = 80
 const JOBLUM_HK_PATHS = [
   '/jobs-spec-banking-financial-services',
   '/jobs-spec-information-technology-it',
@@ -40,6 +43,37 @@ const GREENHOUSE_SOURCES = [
   { company: 'Instacart', board: 'instacart', source: 'Instacart Careers' },
   { company: 'Robinhood', board: 'robinhood', source: 'Robinhood Careers' },
 ]
+
+const SOURCE_TASKS = [
+  { id: 'tencent', label: '腾讯招聘' },
+  { id: 'meituan', label: '美团招聘' },
+  { id: 'lagou', label: '拉勾招聘' },
+  { id: 'jobrapido_cn', label: 'Jobrapido 中国' },
+  { id: 'talent_cn', label: 'Talent 中国' },
+  { id: 'hkslash', label: 'HKSlash' },
+  { id: 'joblum_hk', label: 'Joblum Hong Kong' },
+  { id: 'recruit_hk', label: 'Recruit.com.hk' },
+  { id: 'jobrapido_hk', label: 'Jobrapido Hong Kong' },
+  { id: 'talent_hk', label: 'Talent Hong Kong' },
+  { id: 'greenhouse', label: 'Greenhouse' },
+  { id: 'talent_na', label: 'Talent North America' },
+  { id: 'remotive', label: 'Remotive' },
+  { id: 'jobicy', label: 'Jobicy' },
+  { id: 'remoteok', label: 'Remote OK' },
+]
+
+function getSourceTasks() {
+  const ctgoodjobsTasks = CTGOODJOBS_PAGES.flatMap((_, categoryIndex) => (
+    Array.from({ length: Math.ceil(CTGOODJOBS_PAGE_LIMIT / CTGOODJOBS_CHUNK_SIZE) }, (_, chunkIndex) => ({
+      id: `ctgoodjobs_${categoryIndex}_${chunkIndex}`,
+      label: `CTgoodjobs ${categoryIndex + 1}.${chunkIndex + 1}`,
+      categoryIndex,
+      startPage: chunkIndex * CTGOODJOBS_CHUNK_SIZE + 1,
+      pageLimit: CTGOODJOBS_CHUNK_SIZE,
+    }))
+  ))
+  return SOURCE_TASKS.concat(ctgoodjobsTasks)
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -447,15 +481,32 @@ function extractCtgoodjobsTotalPages(text, pageSize) {
   return Math.max(1, Math.ceil(total / pageSize))
 }
 
+async function fetchCtgoodjobsChunkJobs(categoryIndex, startPage = 1, pageLimit = CTGOODJOBS_CHUNK_SIZE) {
+  const base = CTGOODJOBS_PAGES[categoryIndex]
+  if (!base) return []
+  const pageUrls = Array.from({ length: pageLimit }, (_, index) => {
+    const page = startPage + index
+    return page === 1 ? base : `${base}?page=${page}`
+  })
+  const buckets = await mapBatched(pageUrls, 3, async (url) => {
+    try {
+      return extractCtgoodjobsRecordsFromPage(await fetchText(url, `CTgoodjobs ${url}`, 18000))
+    } catch {
+      return []
+    }
+  })
+  return buckets.flat().map(normalizeCtgoodjobsRecord).filter(Boolean)
+}
+
 async function fetchCtgoodjobsJobs() {
-  const buckets = await mapBatched(CTGOODJOBS_PAGES, 3, async (base) => {
-    const firstText = await fetchText(base, `CTgoodjobs ${base}`, 18000)
+  const buckets = await mapBatched(CTGOODJOBS_PAGES, 1, async (_, categoryIndex) => {
+    const firstText = await fetchText(CTGOODJOBS_PAGES[categoryIndex], `CTgoodjobs ${categoryIndex}`, 18000)
     const firstRecords = extractCtgoodjobsRecordsFromPage(firstText)
-    const totalPages = Math.min(extractCtgoodjobsTotalPages(firstText, firstRecords.length), 80)
-    const pageUrls = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => `${base}?page=${index + 2}`)
-    const rest = await mapBatched(pageUrls, 6, async (url) => {
+    const totalPages = Math.min(extractCtgoodjobsTotalPages(firstText, firstRecords.length), CTGOODJOBS_PAGE_LIMIT)
+    const chunkCount = Math.ceil(totalPages / CTGOODJOBS_CHUNK_SIZE)
+    const rest = await mapBatched(Array.from({ length: chunkCount }, (_, chunkIndex) => chunkIndex), 1, async (chunkIndex) => {
       try {
-        return extractCtgoodjobsRecordsFromPage(await fetchText(url, `CTgoodjobs ${url}`, 18000))
+        return fetchCtgoodjobsChunkJobs(categoryIndex, chunkIndex * CTGOODJOBS_CHUNK_SIZE + 1, CTGOODJOBS_CHUNK_SIZE)
       } catch {
         return []
       }
@@ -647,7 +698,47 @@ async function fetchRemoteOkJobs() {
   })).filter(Boolean)
 }
 
-async function fetchAllSources() {
+function getSourceDefinitions() {
+  const ctgoodjobsDefinitions = getSourceTasks()
+    .filter((source) => source.id.startsWith('ctgoodjobs_'))
+    .map((source) => ({
+      id: source.id,
+      label: source.label,
+      task: () => fetchCtgoodjobsChunkJobs(source.categoryIndex, source.startPage, source.pageLimit),
+    }))
+  return [
+    { id: 'tencent', label: '腾讯招聘', task: fetchTencentJobs },
+    { id: 'meituan', label: '美团招聘', task: fetchMeituanJobs },
+    { id: 'lagou', label: '拉勾招聘', task: fetchLagouJobs },
+    { id: 'jobrapido_cn', label: 'Jobrapido 中国', task: () => fetchJobrapidoRegionJobs('Jobrapido 中国', 'mainland', 'cn.jobrapido.com', ['产品', '产品经理', '运营', 'AI', '商业分析', '增长运营', '数据', '开发'], 8) },
+    { id: 'talent_cn', label: 'Talent 中国', task: () => fetchTalentRegionJobs({ region: 'mainland', source: 'Talent 中国', location: '%E4%B8%AD%E5%9B%BD', baseUrl: 'https://cn.talent.com', queries: ['%E4%BA%A7%E5%93%81', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90', '%E5%BC%80%E5%8F%91'], pageLimit: 8 }) },
+    ...ctgoodjobsDefinitions,
+    { id: 'hkslash', label: 'HKSlash', task: fetchHkSlashJobs },
+    { id: 'joblum_hk', label: 'Joblum Hong Kong', task: fetchJoblumHongKongJobs },
+    { id: 'recruit_hk', label: 'Recruit.com.hk', task: fetchRecruitHongKongJobs },
+    { id: 'jobrapido_hk', label: 'Jobrapido Hong Kong', task: () => fetchJobrapidoRegionJobs('Jobrapido Hong Kong', 'hongkong', 'hk.jobrapido.com', ['product', 'manager', 'analyst', 'operation', 'business', 'marketing', 'finance'], 6) },
+    { id: 'talent_hk', label: 'Talent Hong Kong', task: () => fetchTalentRegionJobs({ region: 'hongkong', source: 'Talent Hong Kong', location: 'hong+kong', baseUrl: 'https://hk.talent.com', queries: ['product', 'manager', 'analyst', 'finance', 'marketing', 'sales', 'engineer'], pageLimit: 10 }) },
+    { id: 'greenhouse', label: 'Greenhouse', task: fetchGreenhouseJobs },
+    { id: 'talent_na', label: 'Talent North America', task: () => fetchTalentRegionJobs({ region: 'northamerica', source: 'Talent North America', location: 'united+states', baseUrl: 'https://www.talent.com', queries: ['product manager', 'product operations', 'business analyst', 'software engineer', 'data analyst', 'marketing', 'finance'], pageLimit: 8 }) },
+    { id: 'remotive', label: 'Remotive', task: fetchRemotiveJobs },
+    { id: 'jobicy', label: 'Jobicy', task: fetchJobicyJobs },
+    { id: 'remoteok', label: 'Remote OK', task: fetchRemoteOkJobs },
+  ]
+}
+
+function resolveRequestedSourceIds(body) {
+  const rawSources = Array.isArray(body?.sources) ? body.sources : body?.source ? [body.source] : null
+  if (!rawSources) return null
+  const aliases = new Map(getSourceTasks().flatMap((source) => [
+    [source.id.toLowerCase(), source.id],
+    [source.label.toLowerCase(), source.id],
+  ]))
+  return rawSources
+    .map((value) => aliases.get(String(value || '').trim().toLowerCase()))
+    .filter(Boolean)
+}
+
+async function fetchAllSources(requestedSourceIds = null) {
   async function safeFetch(label, task) {
     const startedAt = Date.now()
     try {
@@ -657,24 +748,9 @@ async function fetchAllSources() {
       return { source: label, ok: false, jobs: [], error: error instanceof Error ? error.message : String(error), duration_ms: Date.now() - startedAt }
     }
   }
-  return Promise.all([
-    safeFetch('腾讯招聘', fetchTencentJobs),
-    safeFetch('美团招聘', fetchMeituanJobs),
-    safeFetch('拉勾招聘', fetchLagouJobs),
-    safeFetch('Jobrapido 中国', () => fetchJobrapidoRegionJobs('Jobrapido 中国', 'mainland', 'cn.jobrapido.com', ['产品', '产品经理', '运营', 'AI', '商业分析', '增长运营', '数据', '开发'], 8)),
-    safeFetch('Talent 中国', () => fetchTalentRegionJobs({ region: 'mainland', source: 'Talent 中国', location: '%E4%B8%AD%E5%9B%BD', baseUrl: 'https://cn.talent.com', queries: ['%E4%BA%A7%E5%93%81', '%E6%95%B0%E6%8D%AE', '%E8%BF%90%E8%90%A5', 'AI', '%E5%95%86%E4%B8%9A%E5%88%86%E6%9E%90', '%E5%BC%80%E5%8F%91'], pageLimit: 8 })),
-    safeFetch('CTgoodjobs', fetchCtgoodjobsJobs),
-    safeFetch('HKSlash', fetchHkSlashJobs),
-    safeFetch('Joblum Hong Kong', fetchJoblumHongKongJobs),
-    safeFetch('Recruit.com.hk', fetchRecruitHongKongJobs),
-    safeFetch('Jobrapido Hong Kong', () => fetchJobrapidoRegionJobs('Jobrapido Hong Kong', 'hongkong', 'hk.jobrapido.com', ['product', 'manager', 'analyst', 'operation', 'business', 'marketing', 'finance'], 6)),
-    safeFetch('Talent Hong Kong', () => fetchTalentRegionJobs({ region: 'hongkong', source: 'Talent Hong Kong', location: 'hong+kong', baseUrl: 'https://hk.talent.com', queries: ['product', 'manager', 'analyst', 'finance', 'marketing', 'sales', 'engineer'], pageLimit: 10 })),
-    safeFetch('Greenhouse', fetchGreenhouseJobs),
-    safeFetch('Talent North America', () => fetchTalentRegionJobs({ region: 'northamerica', source: 'Talent North America', location: 'united+states', baseUrl: 'https://www.talent.com', queries: ['product manager', 'product operations', 'business analyst', 'software engineer', 'data analyst', 'marketing', 'finance'], pageLimit: 8 })),
-    safeFetch('Remotive', fetchRemotiveJobs),
-    safeFetch('Jobicy', fetchJobicyJobs),
-    safeFetch('Remote OK', fetchRemoteOkJobs),
-  ])
+  const requested = requestedSourceIds ? new Set(requestedSourceIds) : null
+  const definitions = getSourceDefinitions().filter((source) => !requested || requested.has(source.id))
+  return mapBatched(definitions, requested ? 2 : 3, (source) => safeFetch(source.label, source.task))
 }
 
 function isWithinRetentionWindow(job, nowMs) {
@@ -722,7 +798,31 @@ function mergeJobCollections(existingJobs, fetchResults, nowIso) {
   return sortJobs(dedupe(merged)).filter((job) => isWithinRetentionWindow(job, nowMs))
 }
 
+function collectFetchedJobsForUpsert(existingJobs, fetchResults, nowIso) {
+  const existingByKey = new Map()
+  for (const job of Array.isArray(existingJobs) ? existingJobs : []) {
+    if (job) existingByKey.set(makeJobMergeKey(job), job)
+  }
+  const rows = []
+  for (const result of fetchResults) {
+    if (!result?.ok) continue
+    for (const job of dedupe(result.jobs || [])) {
+      const previous = existingByKey.get(makeJobMergeKey(job))
+      rows.push({
+        ...(previous || {}),
+        ...job,
+        id: previous?.id || job.id,
+        first_seen_at: previous?.first_seen_at || nowIso,
+        last_seen_at: nowIso,
+      })
+    }
+  }
+  return sortJobs(dedupe(rows))
+}
+
 async function readExistingCache(supabaseUrl, serviceRoleKey) {
+  const rowJobs = await readExistingJobRows(supabaseUrl, serviceRoleKey)
+  if (rowJobs.length) return { jobs: rowJobs }
   const response = await fetch(`${supabaseUrl}/rest/v1/${CACHE_TABLE}?select=payload,updated_at&cache_key=eq.${encodeURIComponent(CACHE_KEY)}&limit=1`, {
     headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
   })
@@ -732,7 +832,34 @@ async function readExistingCache(supabaseUrl, serviceRoleKey) {
   return Array.isArray(payload?.jobs) ? payload : { jobs: [] }
 }
 
+async function readExistingJobRows(supabaseUrl, serviceRoleKey) {
+  const jobs = []
+  const pageSize = 1000
+  for (let offset = 0; offset < 40000; offset += pageSize) {
+    const response = await fetch(`${supabaseUrl}/rest/v1/${JOBS_TABLE}?select=job,last_seen_at&order=company.asc,title.asc&limit=${pageSize}&offset=${offset}`, {
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+    })
+    if (response.status === 404) return []
+    if (!response.ok) return []
+    const rows = await response.json().catch(() => [])
+    if (!Array.isArray(rows) || !rows.length) break
+    rows.forEach((row) => {
+      if (row?.job && typeof row.job === 'object') {
+        jobs.push({
+          ...row.job,
+          last_seen_at: row.job.last_seen_at || row.last_seen_at,
+        })
+      }
+    })
+    if (rows.length < pageSize) break
+  }
+  return jobs
+}
+
 async function upsertRemoteCache(supabaseUrl, serviceRoleKey, payload) {
+  const cachePayload = payload.jobs.length > 5000
+    ? { ...payload, jobs: [], row_cache: true, job_count: payload.jobs.length }
+    : payload
   const response = await fetch(`${supabaseUrl}/rest/v1/${CACHE_TABLE}`, {
     method: 'POST',
     headers: {
@@ -741,9 +868,54 @@ async function upsertRemoteCache(supabaseUrl, serviceRoleKey, payload) {
       Authorization: `Bearer ${serviceRoleKey}`,
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
-    body: JSON.stringify([{ cache_key: CACHE_KEY, payload, updated_at: payload.updated_at }]),
+    body: JSON.stringify([{ cache_key: CACHE_KEY, payload: cachePayload, updated_at: payload.updated_at }]),
   })
   if (!response.ok) throw new Error(`cache upsert failed: ${response.status} ${await response.text().catch(() => '')}`)
+}
+
+function toJobRow(job) {
+  return {
+    id: job.id,
+    title: job.title,
+    company: job.company,
+    location: job.location || '',
+    region: job.region || 'other',
+    source: job.source || '公开职位',
+    url: job.url,
+    jd_text: job.jd_text || '',
+    summary: job.summary || '',
+    updated_at: job.updated_at || '',
+    first_seen_at: job.first_seen_at || new Date().toISOString(),
+    last_seen_at: job.last_seen_at || new Date().toISOString(),
+    job,
+  }
+}
+
+async function upsertRemoteJobRows(supabaseUrl, serviceRoleKey, jobs) {
+  if (!jobs.length) return
+  const chunkSize = 250
+  for (let index = 0; index < jobs.length; index += chunkSize) {
+    const chunk = jobs.slice(index, index + chunkSize).map(toJobRow)
+    const response = await fetch(`${supabaseUrl}/rest/v1/${JOBS_TABLE}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(chunk),
+    })
+    if (!response.ok) throw new Error(`job rows upsert failed: ${response.status} ${await response.text().catch(() => '')}`)
+  }
+}
+
+async function pruneStaleJobRows(supabaseUrl, serviceRoleKey) {
+  const staleBefore = new Date(Date.now() - VISIBLE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+  await fetch(`${supabaseUrl}/rest/v1/${JOBS_TABLE}?last_seen_at=lt.${encodeURIComponent(staleBefore)}`, {
+    method: 'DELETE',
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+  }).catch(() => null)
 }
 
 async function uploadSharedCache(supabaseUrl, serviceRoleKey, payload) {
@@ -773,10 +945,21 @@ Deno.serve(async (request) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
   if (!supabaseUrl || !serviceRoleKey) return json(500, { ok: false, error: 'Supabase function secrets are incomplete.' })
 
+  const body = await request.json().catch(() => ({}))
+  const requestedSourceIds = resolveRequestedSourceIds(body)
+  if ((body?.source || body?.sources) && !requestedSourceIds?.length) {
+    return json(400, {
+      ok: false,
+      error: 'Unsupported source.',
+      supported_sources: getSourceTasks(),
+    })
+  }
+
   const startedAt = new Date().toISOString()
   const existing = await readExistingCache(supabaseUrl, serviceRoleKey)
-  const results = await fetchAllSources()
+  const results = await fetchAllSources(requestedSourceIds)
   const nowIso = new Date().toISOString()
+  const jobsToUpsert = collectFetchedJobsForUpsert(existing.jobs, results, nowIso)
   const jobs = mergeJobCollections(existing.jobs, results, nowIso)
   if (jobs.length < 1000 && (existing.jobs || []).length > jobs.length) {
     return json(502, {
@@ -805,6 +988,8 @@ Deno.serve(async (request) => {
     source_results: sourceResults,
     jobs,
   }
+  await upsertRemoteJobRows(supabaseUrl, serviceRoleKey, jobsToUpsert)
+  await pruneStaleJobRows(supabaseUrl, serviceRoleKey)
   await upsertRemoteCache(supabaseUrl, serviceRoleKey, payload)
   await uploadSharedCache(supabaseUrl, serviceRoleKey, payload).catch((error) => {
     console.warn('[job-cache] storage mirror skipped', error)
