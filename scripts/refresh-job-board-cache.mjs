@@ -482,9 +482,9 @@ function extractShixisengJobsFromText(text) {
 
 function isSuspiciousShixisengTitle(title) {
   const text = cleanupDisplayText(title);
-  // 实习僧列表页偶尔会把首字包在 icon/font 节点里，title 属性只剩残缺文本。
-  // 典型表现是「生态」变成「态」、「财务/业务」变成「务」。
-  return /^(态|务)[\u4e00-\u9fffA-Za-z0-9（）()·\s-]*(实习|运营|分析|经营)/u.test(text);
+  // 实习僧列表页偶尔会把首字或中间字包在 icon/font 节点里，title 属性只剩残缺文本。
+  // 这不是固定字面问题，所以这里只做异常告警；最终标题一律以详情页标题为准。
+  return /^[\u4e00-\u9fff]{1,2}[\u4e00-\u9fffA-Za-z0-9（）()·\s-]*(实习|运营|分析|经营)/u.test(text) && text.length <= 6;
 }
 
 function extractShixisengDetailTitle(text, company) {
@@ -502,17 +502,17 @@ function extractShixisengDetailTitle(text, company) {
 async function fetchShixisengDetailTitle(url, company) {
   const direct = await fetchText(url, `实习僧详情 ${url}`, 18000).catch(() => '');
   let title = extractShixisengDetailTitle(direct, company);
-  if (title && !isSuspiciousShixisengTitle(title)) return title;
+  if (title) return title;
   const mirror = await fetchText(`https://r.jina.ai/http://${String(url).replace(/^https?:\/\//, '')}`, `实习僧详情镜像 ${url}`, 18000).catch(() => '');
   title = extractShixisengDetailTitle(mirror, company);
-  return title && !isSuspiciousShixisengTitle(title) ? title : '';
+  return title || '';
 }
 
 async function repairShixisengJobTitles(jobs) {
-  const repaired = await mapBatched(jobs, 5, async (job) => {
-    if (!isSuspiciousShixisengTitle(job.title)) return job;
+  const repaired = await mapBatched(jobs, 8, async (job) => {
     const title = await fetchShixisengDetailTitle(job.url, job.company);
     if (!title) return job;
+    if (title === job.title) return job;
     return normalizePosting(Object.assign({}, job, {
       title,
       source: '实习僧'
