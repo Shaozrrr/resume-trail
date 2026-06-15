@@ -7996,7 +7996,7 @@ function renderJobsView(filterText){
                                 <span></span>
                             </div>
                             <div class="jobs-table-body">
-                                ${pageJobs.map(renderJobRow).join('')}
+                                ${pageJobs.map(function(job,index){return renderJobRow(job,index);}).join('')}
                             </div>
                         </div>
                         <div class="jobs-pagination">
@@ -8060,9 +8060,10 @@ function renderJobsView(filterText){
         });
     }
 }
-function renderJobRow(job){
+function renderJobRow(job,index){
+    const rowIndex=Math.max(0,Math.min(Number(index)||0,12));
     return `
-        <article class="job-row">
+        <article class="job-row" style="--row-index:${rowIndex}">
             <div class="job-region-pill" data-region="${escapeHTML(job.region||'other')}">${escapeHTML(getJobBoardRegionLabel(job.region))}</div>
             <div class="job-company-cell">
                 <strong>${escapeHTML(job.company)}</strong>
@@ -9092,27 +9093,38 @@ function animateSharedViewSwitch(targetView){
         delete shell.dataset.sharedTransitionToken;
     },220);
 }
+function canRunViewTransition(){
+    if(!document.startViewTransition)return false;
+    return !(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
 function switchView(v){
     const previousView=curView;
-    curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
-    const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',jobs:'view-jobs',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
-    const tm={pipeline:'投递',table:'投递',resumes:'简历文件舱',jobs:'职位发现',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
-    const navView=(v==='pipeline'||v==='table')?'table':v;
-    $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${navView}"]`)?.classList.add('active');
-    $('#view-title').textContent=tm[v]||'';
-    $('#view-subtitle').textContent=(v==='pipeline'||v==='table')?`${store.apps.length} 条投递`:'';
-    renderViewModeSwitcher(v);
-    if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='jobs')renderJobsView();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
-    if((previousView==='pipeline'||previousView==='table')&&(v==='pipeline'||v==='table')&&previousView!==v){
-        animateSharedViewSwitch(v);
-    }
-    if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
-        window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
-            view:v,
-            application_count:store.apps.length,
-            resume_count:store.resumes.length,
-            reflection_count:store.refs.length
-        }));
+    const applyView=function(){
+        curView=v;$$('.view').forEach(x=>x.classList.remove('active'));$$('.nav-item[data-view]').forEach(x=>x.classList.remove('active'));
+        const vm={pipeline:'view-pipeline',table:'view-table',resumes:'view-resumes',jobs:'view-jobs',prepare:'view-prepare',reflections:'view-reflections',calendar:'view-calendar',analytics:'view-analytics'};
+        const tm={pipeline:'投递',table:'投递',resumes:'简历文件舱',jobs:'职位发现',prepare:'面试准备',reflections:'复盘记录',calendar:'日历',analytics:'数据大屏'};
+        const navView=(v==='pipeline'||v==='table')?'table':v;
+        $(`#${vm[v]}`)?.classList.add('active');$(`.nav-item[data-view="${navView}"]`)?.classList.add('active');
+        $('#view-title').textContent=tm[v]||'';
+        $('#view-subtitle').textContent=(v==='pipeline'||v==='table')?`${store.apps.length} 条投递`:'';
+        renderViewModeSwitcher(v);
+        if(v==='pipeline')renderKanban();else if(v==='table')renderTable();else if(v==='resumes')renderResumes();else if(v==='jobs')renderJobsView();else if(v==='prepare')renderPrepare();else if(v==='reflections')renderRefs();else if(v==='calendar'&&typeof renderCalendar==='function')renderCalendar();else if(v==='analytics')renderAnalytics();
+        if((previousView==='pipeline'||previousView==='table')&&(v==='pipeline'||v==='table')&&previousView!==v){
+            animateSharedViewSwitch(v);
+        }
+        if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
+            window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
+                view:v,
+                application_count:store.apps.length,
+                resume_count:store.resumes.length,
+                reflection_count:store.refs.length
+            }));
+        }
+    };
+    if(previousView!==v&&canRunViewTransition()){
+        document.startViewTransition(applyView);
+    }else{
+        applyView();
     }
 }
 function renderViewModeSwitcher(view){
