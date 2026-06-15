@@ -1667,7 +1667,8 @@ const jobBoardState={
     regionCounts:{},
     filteredCacheKey:'',
     filteredJobs:[],
-    bodyAnimationToken:0
+    bodyAnimationToken:0,
+    backgroundRefreshPromise:null
 };
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
@@ -3341,24 +3342,74 @@ function pickBestJobBoardCachePayload(payloads){
         return (b.jobs.length||0)-(a.jobs.length||0);
     })[0];
 }
-async function loadJobBoardCache(force){
-    if(jobBoardState.cacheReady&&!force)return jobBoardState.jobs;
-    if(jobBoardState.cachePromise&&!force)return jobBoardState.cachePromise;
-    jobBoardState.cachePromise=(async function(){
-        const bundledPayload=getBundledJobBoardCache();
+function applyJobBoardCachePayload(payload,options){
+    if(!payload||!Array.isArray(payload.jobs)||!payload.jobs.length)return false;
+    const preservePage=!!(options&&options.preservePage);
+    const previousPage=jobBoardState.page||1;
+    jobBoardState.jobs=payload.jobs;
+    jobBoardState.lastFetchedAt=payload.updated_at||'';
+    jobBoardState.sourceLabel=payload.source_label||'职位池';
+    jobBoardState.page=preservePage?previousPage:1;
+    jobBoardState.regionCounts=buildJobBoardRegionCounts(payload.jobs);
+    jobBoardState.jobsVersion=`${jobBoardState.lastFetchedAt}|${payload.jobs.length}`;
+    jobBoardState.filteredCacheKey='';
+    jobBoardState.filteredJobs=[];
+    jobBoardState.cacheReady=true;
+    return true;
+}
+function refreshJobBoardCacheInBackground(seedPayload){
+    if(jobBoardState.backgroundRefreshPromise)return jobBoardState.backgroundRefreshPromise;
+    jobBoardState.backgroundRefreshPromise=(async function(){
         const results=await Promise.allSettled([
-            fetchRemoteJobBoardRows(),
             fetchSharedJobBoardCache(),
             fetchRemoteJobBoardCache(),
-            fetchBundledJobBoardCacheJson()
+            fetchBundledJobBoardCacheJson(),
+            fetchRemoteJobBoardRows()
         ]);
-        const payloads=[bundledPayload];
+        const payloads=[seedPayload];
         results.forEach(function(result,index){
             if(result.status==='fulfilled'){
                 payloads.push(result.value);
                 return;
             }
-            const label=['remote rows','shared storage','remote table','bundled json'][index]||'cache';
+            const label=['shared storage','remote table','bundled json','remote rows'][index]||'cache';
+            console.warn(`[jobs] ${label} background cache unavailable`,result.reason);
+        });
+        const best=pickBestJobBoardCachePayload(payloads);
+        if(best&&best!==seedPayload&&applyJobBoardCachePayload(best,{preservePage:true})&&curView==='jobs'){
+            jobBoardState.bodyAnimationToken=Date.now();
+            renderJobsView(jobBoardState.query||'');
+        }
+        return best;
+    })().finally(function(){
+        jobBoardState.backgroundRefreshPromise=null;
+    });
+    return jobBoardState.backgroundRefreshPromise;
+}
+async function loadJobBoardCache(force){
+    if(jobBoardState.cacheReady&&!force)return jobBoardState.jobs;
+    if(jobBoardState.cachePromise&&!force)return jobBoardState.cachePromise;
+    jobBoardState.cachePromise=(async function(){
+        const bundledPayload=getBundledJobBoardCache();
+        if(bundledPayload&&!force){
+            applyJobBoardCachePayload(bundledPayload);
+            void refreshJobBoardCacheInBackground(bundledPayload).catch(function(error){
+                console.warn('[jobs] background cache refresh failed',error);
+            });
+            return jobBoardState.jobs;
+        }
+        const fastResults=await Promise.allSettled([
+            fetchSharedJobBoardCache(),
+            fetchRemoteJobBoardCache(),
+            fetchBundledJobBoardCacheJson()
+        ]);
+        const payloads=[bundledPayload];
+        fastResults.forEach(function(result,index){
+            if(result.status==='fulfilled'){
+                payloads.push(result.value);
+                return;
+            }
+            const label=['shared storage','remote table','bundled json'][index]||'cache';
             console.warn(`[jobs] ${label} cache unavailable`,result.reason);
         });
         const payload=pickBestJobBoardCachePayload(payloads);
@@ -3373,15 +3424,10 @@ async function loadJobBoardCache(force){
             jobBoardState.cacheReady=false;
             throw new Error('职位缓存暂时为空，请先运行缓存同步。');
         }
-        jobBoardState.jobs=payload.jobs;
-        jobBoardState.lastFetchedAt=payload.updated_at||'';
-        jobBoardState.sourceLabel=payload.source_label||'职位池';
-        jobBoardState.page=1;
-        jobBoardState.regionCounts=buildJobBoardRegionCounts(payload.jobs);
-        jobBoardState.jobsVersion=`${jobBoardState.lastFetchedAt}|${payload.jobs.length}`;
-        jobBoardState.filteredCacheKey='';
-        jobBoardState.filteredJobs=[];
-        jobBoardState.cacheReady=true;
+        applyJobBoardCachePayload(payload);
+        void refreshJobBoardCacheInBackground(payload).catch(function(error){
+            console.warn('[jobs] background cache refresh failed',error);
+        });
         return payload.jobs;
     })().finally(function(){
         jobBoardState.cachePromise=null;
@@ -8087,10 +8133,20 @@ async function runJobBoardSearch(options){
     const query=normalizePrepareText(rawQuery);
     jobBoardState.query=query;
     jobBoardState.page=1;
-    jobBoardState.loading=true;
     jobBoardState.error='';
     jobBoardState.searched=true;
     jobBoardState.bootstrapped=true;
+    if(jobBoardState.cacheReady||(!options?.forceReload&&getBundledJobBoardCache())){
+        jobBoardState.loading=false;
+        try{
+            await loadJobBoardCache(!!(options&&options.forceReload));
+        }catch(error){
+            jobBoardState.error=error instanceof Error?error.message:String(error);
+        }
+        renderJobsView();
+        return;
+    }
+    jobBoardState.loading=true;
     renderJobsView();
     try{
         await loadJobBoardCache(!!(options&&options.forceReload));
@@ -9094,8 +9150,7 @@ function animateSharedViewSwitch(targetView){
     },220);
 }
 function canRunViewTransition(){
-    if(!document.startViewTransition)return false;
-    return !(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    return false;
 }
 function switchView(v){
     const previousView=curView;
@@ -10263,6 +10318,7 @@ $('#resume-modal-close').addEventListener('click',()=>{$('#resume-modal-overlay'
 
 // ---- 复盘 ----
 let editRefId=null;
+let reflectionAiDraft=null;
 function renderRefs(){
     const l=$('#reflections-list');
     if(!store.refs.length){l.innerHTML='<div class="empty-state"><p>还没有复盘</p><span>面试后记录一下吧</span></div>';return;}
@@ -10339,6 +10395,104 @@ function renderReflectionTemplate(round){
         target.focus();
     });
 }
+function renderReflectionAiOrganizer(){
+    const box=$('#reflection-ai-organizer');
+    if(!box)return;
+    if(!reflectionAiDraft){
+        box.innerHTML=`
+            <div class="reflection-ai-empty">
+                <span>如果你写了很多口述内容，可以让 AI 先整理成清晰复盘。</span>
+                <button type="button" class="btn-secondary btn-sm" id="reflection-ai-organize">AI 整理复盘</button>
+            </div>
+        `;
+    }else{
+        const painPoints=Array.isArray(reflectionAiDraft.pain_points)?reflectionAiDraft.pain_points:[];
+        box.innerHTML=`
+            <div class="reflection-ai-draft">
+                <div class="reflection-ai-draft-head">
+                    <strong>AI 整理稿</strong>
+                    <div>
+                        <button type="button" class="btn-ghost btn-sm" id="reflection-ai-regenerate">重新整理</button>
+                        <button type="button" class="btn-primary btn-sm" id="reflection-ai-apply">应用到当前复盘</button>
+                    </div>
+                </div>
+                <p>${escapeHTML(reflectionAiDraft.review||reflectionAiDraft.reflection_text||'')}</p>
+                ${painPoints.length?`<div class="reflection-ai-tags">${painPoints.map(item=>`<span>${escapeHTML(item)}</span>`).join('')}</div>`:''}
+            </div>
+        `;
+    }
+}
+function getReflectionFormContext(){
+    const rawAppValue=$('#reflection-application')?.value||'';
+    const isDetached=rawAppValue.startsWith('manual::');
+    const app=isDetached?null:store.getApp(rawAppValue);
+    const detachedMeta=isDetached?rawAppValue.slice('manual::'.length).split('|||'):[];
+    return{
+        company_name:app?.company_name||detachedMeta[0]||'',
+        position_title:app?.position_title||detachedMeta[1]||'',
+        round:$('#reflection-round')?.value||'',
+        question:$('#reflection-question-content')?.value.trim()||'',
+        answer:$('#reflection-answer-content')?.value.trim()||'',
+        review:$('#reflection-review-content')?.value.trim()||'',
+        input_type:currentReflectionMode==='voice'?'VOICE':'TEXT'
+    };
+}
+function buildReflectionOrganizeMessages(context){
+    return[
+        {
+            role:'system',
+            content:'你是资深面试复盘教练。用户可能通过语音或长文本记录了面试问题、回答和零散复盘。请把内容整理成可直接保存的结构化复盘，但不要编造不存在的具体事实。可以做轻度润色、归纳、补全表达逻辑。输出必须是纯 JSON，不要 markdown，不要代码块。要求：1）简体中文；2）保留用户真实信息；3）复盘要具体指出做得好、没讲清、下一轮怎么改；4）如果回答很散，帮他归纳为清楚的复盘，不要写空话；5）pain_points 给 2 到 5 个短标签；6）self_rating 是 1 到 5 的整数；7）如果问题或回答为空，可根据已有内容整理，不强行补假内容。输出 schema：{"question":"string","answer":"string","review":"string","pain_points":["string"],"self_rating":1}'
+        },
+        {
+            role:'user',
+            content:`请整理这条面试复盘：\n${JSON.stringify(context,null,2)}`
+        }
+    ];
+}
+function normalizeReflectionAiOutput(output,context){
+    const safe=output&&typeof output==='object'?output:{};
+    return{
+        question:normalizePrepareText(safe.question||context.question||''),
+        answer:normalizePrepareText(safe.answer||context.answer||''),
+        review:normalizePrepareText(safe.review||safe.reflection_text||context.review||''),
+        pain_points:Array.isArray(safe.pain_points)?safe.pain_points.map(normalizePrepareText).filter(Boolean).slice(0,5):[],
+        self_rating:Math.max(1,Math.min(5,Number(safe.self_rating)||0))||null
+    };
+}
+async function generateReflectionAiDraft(button){
+    const context=getReflectionFormContext();
+    if(!context.question&&!context.answer&&!context.review){
+        toast('先写一点问题、回答或复盘内容，再让 AI 整理。','error');
+        return;
+    }
+    await withButtonBusy(button,async function(){
+        const output=await requestPrepareCustomAI(buildReflectionOrganizeMessages(context),'reflection',context);
+        reflectionAiDraft=normalizeReflectionAiOutput(output,context);
+        renderReflectionAiOrganizer();
+        bindReflectionAiOrganizerEvents();
+        toast('已生成整理稿，可以先看再应用。','success');
+    },'整理中...');
+}
+async function applyReflectionAiDraft(){
+    if(!reflectionAiDraft)return;
+    if(reflectionAiDraft.question)$('#reflection-question-content').value=reflectionAiDraft.question;
+    if(reflectionAiDraft.answer)$('#reflection-answer-content').value=reflectionAiDraft.answer;
+    if(reflectionAiDraft.review)$('#reflection-review-content').value=reflectionAiDraft.review;
+    const points=Array.isArray(reflectionAiDraft.pain_points)?reflectionAiDraft.pain_points:[];
+    for(const point of points){
+        if(point&&!store.painPoints.includes(point))await store.addPP(point);
+    }
+    renderPPTags(points);
+    if(reflectionAiDraft.self_rating){
+        $$('.star-rating .star').forEach(s=>s.classList.toggle('active',parseInt(s.dataset.val)<=reflectionAiDraft.self_rating));
+    }
+    toast('整理稿已应用到当前复盘。','success');
+}
+function bindReflectionAiOrganizerEvents(){
+    $('#reflection-ai-organize')?.addEventListener('click',function(){void generateReflectionAiDraft(this);});
+    $('#reflection-ai-regenerate')?.addEventListener('click',function(){void generateReflectionAiDraft(this);});
+    $('#reflection-ai-apply')?.addEventListener('click',function(){void applyReflectionAiDraft();});
+}
 function resetVoiceUI(){
     const btn=$('#record-btn');
     if(btn)btn.classList.remove('recording');
@@ -10351,6 +10505,7 @@ function resetVoiceUI(){
 }
 function openRefModal(refId=null,preAppId=null){
     editRefId=refId;const ref=refId?store.refs.find(r=>r.id===refId):null;
+    reflectionAiDraft=null;
     $('#reflection-modal-title').textContent=ref?'编辑复盘':'新建复盘';
     const sel=$('#reflection-application');
     sel.textContent='';
@@ -10379,6 +10534,8 @@ function openRefModal(refId=null,preAppId=null){
     $('#reflection-answer-content').value=structured.answer||'';
     $('#reflection-review-content').value=structured.review||'';
     renderReflectionTemplate($('#reflection-round').value);
+    renderReflectionAiOrganizer();
+    bindReflectionAiOrganizerEvents();
     renderPPTags(ref?.pain_points||[]);
     $$('.star-rating .star').forEach(s=>s.classList.toggle('active',parseInt(s.dataset.val)<=(ref?.self_rating||0)));
     currentReflectionMode=ref?.input_type==='VOICE'?'voice':'text';

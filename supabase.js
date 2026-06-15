@@ -679,6 +679,8 @@ function rtNormalizeAccountPayload(payload){
 
 const rtAccountService={
   currentAccount:rtReadCachedAccountSafe(),
+  accountPromise:null,
+  eventQueue:Promise.resolve(),
 
   getGuestId(){
     return rtGetGuestIdentityIdSafe();
@@ -743,15 +745,34 @@ const rtAccountService={
     return account;
   },
 
+  async ensureAccountOnce(extra){
+    const cached=this.getCachedAccount();
+    if(cached)return cached;
+    if(this.accountPromise)return this.accountPromise;
+    this.accountPromise=this.ensureAccount(extra).finally(()=>{
+      this.accountPromise=null;
+    });
+    return this.accountPromise;
+  },
+
   async logEvent(name,props){
-    const result=await rtRpcCall('rt_log_activity_event',Object.assign(this.buildIdentityBody(),{
-      input_event_name:name,
-      input_props:props||{}
-    }),this.getSessionToken());
-    if(!result.ok)throw new Error(result.error||'事件上报失败');
-    const account=rtNormalizeAccountPayload(result.data);
-    if(account)this.setCachedAccount(account);
-    return result.data;
+    const run=async ()=>{
+      try{
+        await this.ensureAccountOnce({input_source_channel:'activity_event'});
+      }catch(err){
+        console.warn('[RT account] ensure before log failed',err);
+      }
+      const result=await rtRpcCall('rt_log_activity_event',Object.assign(this.buildIdentityBody(),{
+        input_event_name:name,
+        input_props:props||{}
+      }),this.getSessionToken());
+      if(!result.ok)throw new Error(result.error||'事件上报失败');
+      const account=rtNormalizeAccountPayload(result.data);
+      if(account)this.setCachedAccount(account);
+      return result.data;
+    };
+    this.eventQueue=this.eventQueue.catch(()=>null).then(run);
+    return this.eventQueue;
   },
 
   async consumePrepareAccess(sessionKey){
