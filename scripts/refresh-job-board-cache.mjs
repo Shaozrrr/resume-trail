@@ -480,6 +480,47 @@ function extractShixisengJobsFromText(text) {
   }).filter(Boolean);
 }
 
+function isSuspiciousShixisengTitle(title) {
+  const text = cleanupDisplayText(title);
+  // 实习僧列表页偶尔会把首字包在 icon/font 节点里，title 属性只剩残缺文本。
+  // 典型表现是「生态」变成「态」、「财务/业务」变成「务」。
+  return /^(态|务)[\u4e00-\u9fffA-Za-z0-9（）()·\s-]*(实习|运营|分析|经营)/u.test(text);
+}
+
+function extractShixisengDetailTitle(text, company) {
+  const raw = String(text || '');
+  const markdownTitle = raw.match(/^#\s+(.+?)(?:实习招聘-[^-]+实习生招聘-实习僧)?\s*$/m)?.[1];
+  const htmlTitle = raw.match(/<title>([\s\S]*?)<\/title>/i)?.[1];
+  const title = cleanupDisplayText(markdownTitle || htmlTitle || '')
+    .replace(/实习招聘-[\s\S]*?实习生招聘-实习僧$/u, '')
+    .replace(/实习招聘-实习僧$/u, '')
+    .replace(new RegExp(`-${company || ''}实习生招聘-实习僧$`, 'u'), '')
+    .trim();
+  return title;
+}
+
+async function fetchShixisengDetailTitle(url, company) {
+  const direct = await fetchText(url, `实习僧详情 ${url}`, 18000).catch(() => '');
+  let title = extractShixisengDetailTitle(direct, company);
+  if (title && !isSuspiciousShixisengTitle(title)) return title;
+  const mirror = await fetchText(`https://r.jina.ai/http://${String(url).replace(/^https?:\/\//, '')}`, `实习僧详情镜像 ${url}`, 18000).catch(() => '');
+  title = extractShixisengDetailTitle(mirror, company);
+  return title && !isSuspiciousShixisengTitle(title) ? title : '';
+}
+
+async function repairShixisengJobTitles(jobs) {
+  const repaired = await mapBatched(jobs, 5, async (job) => {
+    if (!isSuspiciousShixisengTitle(job.title)) return job;
+    const title = await fetchShixisengDetailTitle(job.url, job.company);
+    if (!title) return job;
+    return normalizePosting(Object.assign({}, job, {
+      title,
+      source: '实习僧'
+    })) || Object.assign({}, job, { title });
+  });
+  return repaired.filter(Boolean);
+}
+
 async function fetchShixisengJobs() {
   const tasks = [];
   for (const keyword of MAINLAND_QUERIES.slice(0, 6)) {
@@ -493,7 +534,7 @@ async function fetchShixisengJobs() {
       );
     }
   }
-  return (await Promise.all(tasks)).flat();
+  return repairShixisengJobTitles((await Promise.all(tasks)).flat());
 }
 
 function extractByteDanceCampusJobsFromDom(text) {
