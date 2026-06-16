@@ -472,18 +472,23 @@ function renderVoiceResult(label,text){
 
 function buildReflectionCard(ref,showRating){
     const rl=ROUND_LABELS[ref.interview_round]||ref.interview_round;
+    const structured=parseReflectionStructuredContent(ref);
+    const content=structured.review||structured.answer||structured.question||ref.cleaned_content||ref.raw_content||'';
     const card=createEl('div','reflection-card');
     const header=createEl('div','reflection-card-header');
     header.appendChild(createEl('span','reflection-card-round',rl));
     const time=createEl('span');
-    time.style.cssText='font-size:10px;color:var(--text-muted)';
+    time.className='reflection-card-time';
     time.textContent=fmtDT(ref.at);
     header.appendChild(time);
     card.appendChild(header);
-    card.appendChild(createEl('div','reflection-card-content',ref.cleaned_content||ref.raw_content||''));
+    if(structured.question){
+        card.appendChild(createEl('div','reflection-card-question',structured.question));
+    }
+    card.appendChild(createEl('div','reflection-card-content',content||'这条复盘还没有正文，建议补充问题、回答或点评。'));
     const footer=createEl('div','reflection-card-footer');
     if(showRating&&ref.self_rating){
-        footer.appendChild(createEl('span','',`${'★'.repeat(ref.self_rating)}${'☆'.repeat(5-ref.self_rating)}`));
+        footer.appendChild(createEl('span','reflection-card-rating',`${ref.self_rating}/5`));
     }
     (ref.pain_points||[]).forEach(function(point){
         footer.appendChild(createEl('span','pain-tag',point));
@@ -10319,29 +10324,96 @@ $('#resume-modal-close').addEventListener('click',()=>{$('#resume-modal-overlay'
 // ---- 复盘 ----
 let editRefId=null;
 let reflectionAiDraft=null;
+function getReflectionAppMeta(ref){
+    const app=ref?.app_id?store.getApp(ref.app_id):null;
+    return{
+        app,
+        companyName:app?.company_name||ref?.company_name||'未知公司',
+        positionTitle:app?.position_title||ref?.position_title||'未知岗位'
+    };
+}
+function getReflectionActionLine(ref){
+    const structured=parseReflectionStructuredContent(ref);
+    const pain=(ref?.pain_points||[]).filter(Boolean);
+    if(pain.length)return`下一轮优先处理：${pain.slice(0,2).join('、')}`;
+    if(structured.review)return'这条复盘已沉淀，建议生成一版下次回答并加入准备素材。';
+    if(structured.answer)return'已记录回答，建议补充面试官追问和你当时卡住的位置。';
+    if(structured.question)return'已记录问题，建议补充自己的回答和下一轮改法。';
+    return'信息偏少，建议补充问题、回答和结果变化。';
+}
+function getReflectionPendingApps(refs){
+    const reflectedAppIds=new Set(refs.map(r=>r.app_id).filter(Boolean));
+    const activeRounds=new Set(['OA_TEST','ROUND_1','ROUND_2','ROUND_3','ROUND_4','GROUP','HR']);
+    return store.apps.filter(function(app){
+        return activeRounds.has(app.status)&&!reflectedAppIds.has(app.id);
+    }).sort(function(a,b){
+        return new Date(b.current_status_date||b.applied_date||b.created_at||0)-new Date(a.current_status_date||a.applied_date||a.created_at||0);
+    });
+}
+function summarizeReflectionPain(refs){
+    const counts=new Map();
+    refs.forEach(function(ref){
+        (ref.pain_points||[]).forEach(function(point){
+            const key=normalizePrepareText(point);
+            if(key)counts.set(key,(counts.get(key)||0)+1);
+        });
+    });
+    return Array.from(counts.entries()).sort(function(a,b){return b[1]-a[1]||a[0].localeCompare(b[0],'zh-CN');}).slice(0,4);
+}
+function renderReflectionWorkbench(refs){
+    const box=$('#reflection-workbench');
+    if(!box)return;
+    const sorted=refs.slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
+    const pending=getReflectionPendingApps(refs);
+    const topPain=summarizeReflectionPain(refs);
+    const latest=sorted[0]||null;
+    const latestMeta=latest?getReflectionAppMeta(latest):null;
+    const action=latest?getReflectionActionLine(latest):(pending[0]?'先把最近进入面试阶段的投递补一条复盘。':'先记录一场真实面试或模拟面试，系统会自动整理下一步。');
+    const weeklyCount=refs.filter(function(ref){
+        return Date.now()-new Date(ref.at||0).getTime()<=7*24*60*60*1000;
+    }).length;
+    box.innerHTML=`
+        <section class="reflection-focus-card">
+            <div>
+                <span class="reflection-kicker">当前最该处理</span>
+                <h3>${escapeHTML(action)}</h3>
+                <p>${latestMeta?`${escapeHTML(latestMeta.companyName)} · ${escapeHTML(latestMeta.positionTitle)}`:pending[0]?`${escapeHTML(pending[0].company_name)} · ${escapeHTML(pending[0].position_title)}`:'复盘会在后续准备和模拟面试中被优先调用。'}</p>
+            </div>
+            ${pending[0]?`<button type="button" class="btn-secondary btn-sm" id="reflection-pending-start">复盘最近面试</button>`:''}
+        </section>
+        <section class="reflection-signal-grid">
+            <div class="reflection-signal"><span>本周复盘</span><strong>${weeklyCount}</strong><small>越接近面试后记录，后续越好用</small></div>
+            <div class="reflection-signal"><span>待复盘</span><strong>${pending.length}</strong><small>${pending.length?'有面试节点还没沉淀':'当前没有遗漏面试节点'}</small></div>
+            <div class="reflection-signal reflection-signal-wide"><span>高频问题</span><strong>${topPain[0]?escapeHTML(topPain[0][0]):'暂无稳定模式'}</strong><small>${topPain.length?topPain.map(item=>`${escapeHTML(item[0])} ${item[1]}次`).join(' · '):'累计 3 条以上复盘后会更准'}</small></div>
+        </section>
+    `;
+    $('#reflection-pending-start')?.addEventListener('click',function(){
+        openRefModal(null,pending[0]?.id||null);
+    });
+}
 function renderRefs(){
     const l=$('#reflections-list');
-    if(!store.refs.length){l.innerHTML='<div class="empty-state"><p>还没有复盘</p><span>面试后记录一下吧</span></div>';return;}
+    const refs=[...store.refs].sort((a,b)=>new Date(b.at)-new Date(a.at));
+    renderReflectionWorkbench(refs);
+    if(!refs.length){l.innerHTML='<div class="empty-state reflection-empty"><p>还没有复盘</p><span>先记录一场真实面试、模拟面试或一次回答练习，后续准备会自动调用。</span></div>';return;}
     l.innerHTML='';
     // 按公司+岗位分组
     const groups={};
-    [...store.refs].sort((a,b)=>new Date(b.at)-new Date(a.at)).forEach(ref=>{
-        const app=store.getApp(ref.app_id);
-        const companyName=app?.company_name||ref.company_name||'';
-        const positionTitle=app?.position_title||ref.position_title||'';
+    refs.forEach(ref=>{
+        const meta=getReflectionAppMeta(ref);
+        const app=meta.app;
+        const companyName=meta.companyName;
+        const positionTitle=meta.positionTitle;
         const key=companyName||positionTitle?`${companyName}|||${positionTitle}`:'未知|||未知';
         if(!groups[key])groups[key]={app,companyName,positionTitle,refs:[]};
         groups[key].refs.push(ref);
     });
     Object.values(groups).forEach(g=>{
         const header=document.createElement('div');
-        header.style.cssText='font-size:13px;font-weight:600;color:var(--text-primary);padding:10px 0 6px;border-bottom:1px solid var(--border-light);margin-bottom:8px;display:flex;align-items:center;gap:8px';
-        const badge=createEl('span','',ini(g.companyName||g.app?.company_name||'?'));
-        badge.style.cssText='width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-tertiary);border:1px solid var(--border);flex-shrink:0';
-        header.appendChild(badge);
-        header.appendChild(document.createTextNode(`${g.companyName||g.app?.company_name||'未知'} · ${g.positionTitle||g.app?.position_title||'未知'}`));
-        const count=createEl('span','',`${g.refs.length}条`);
-        count.style.cssText='font-size:11px;color:var(--text-muted);font-weight:400';
+        header.className='reflection-group-header';
+        const title=createEl('div','reflection-group-title',`${g.companyName||g.app?.company_name||'未知'} · ${g.positionTitle||g.app?.position_title||'未知'}`);
+        header.appendChild(title);
+        const count=createEl('span','reflection-group-count',`${g.refs.length} 条`);
         header.appendChild(count);
         l.appendChild(header);
         g.refs.forEach(ref=>{
@@ -10387,7 +10459,7 @@ function renderReflectionTemplate(round){
     const box=$('#reflection-template');
     if(!box)return;
     const qs=REFLECTION_TEMPLATES[round]||REFLECTION_TEMPLATES.ROUND_1;
-    box.innerHTML=`<div class="reflection-template-head"><span>复盘模板</span><button type="button" id="reflection-template-apply">套用到复盘</button></div><div class="reflection-template-list">${qs.map(q=>`<span>${q}</span>`).join('')}</div>`;
+    box.innerHTML=`<div class="reflection-template-head"><span>整理线索</span><button type="button" id="reflection-template-apply">加入记录</button></div><div class="reflection-template-list">${qs.map(q=>`<span>${q}</span>`).join('')}</div>`;
     $('#reflection-template-apply').addEventListener('click',function(){
         const target=$('#reflection-review-content');
         const template=qs.map(q=>`${q}：`).join('\n');
@@ -10401,7 +10473,7 @@ function renderReflectionAiOrganizer(){
     if(!reflectionAiDraft){
         box.innerHTML=`
             <div class="reflection-ai-empty">
-                <span>如果你写了很多口述内容，可以让 AI 先整理成清晰复盘。</span>
+                <span>写得很散也没关系。AI 会保留原意，整理成问题、回答、失分点和下一步。</span>
                 <button type="button" class="btn-secondary btn-sm" id="reflection-ai-organize">AI 整理复盘</button>
             </div>
         `;
@@ -10417,7 +10489,7 @@ function renderReflectionAiOrganizer(){
                     </div>
                 </div>
                 <p>${escapeHTML(reflectionAiDraft.review||reflectionAiDraft.reflection_text||'')}</p>
-                ${painPoints.length?`<div class="reflection-ai-tags">${painPoints.map(item=>`<span>${escapeHTML(item)}</span>`).join('')}</div>`:''}
+                ${painPoints.length?`<div class="reflection-ai-tags"><strong>识别到的失分点</strong>${painPoints.map(item=>`<span>${escapeHTML(item)}</span>`).join('')}</div>`:''}
             </div>
         `;
     }
