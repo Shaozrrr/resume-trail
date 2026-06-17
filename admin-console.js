@@ -539,7 +539,7 @@
             active:'活跃',
             pending:'待激活',
             paused:'暂停',
-            history:'历史快照'
+            history:'离线记录'
         })[String(status||'active')]||String(status||'active');
     }
 
@@ -1625,15 +1625,14 @@
         state.loading=!opts.silent;
         state.error='';
         if(!opts.silent)renderAll();
+        let shouldHydrateWorkspace=false;
         try{
             if(adminDataSource&&state.canManage){
                 state.legacyAccounts=[];
                 state.legacyEvents=[];
                 state.backendAccounts=await adminDataSource.listAccounts();
                 state.backendEvents=await adminDataSource.listEvents(state.filters.rangeDays,3000);
-                if(opts.hydrateWorkspaceCache){
-                    await hydrateWorkspaceCacheForAccounts(state.backendAccounts);
-                }
+                shouldHydrateWorkspace=Boolean(opts.hydrateWorkspaceCache);
             }else{
                 state.backendAccounts=[];
                 state.backendEvents=[];
@@ -1647,6 +1646,17 @@
         }finally{
             state.loading=false;
             renderAll();
+            if(shouldHydrateWorkspace){
+                hydrateWorkspaceCacheForAccounts(state.backendAccounts).then(function(){
+                    renderAll();
+                    if(state.selectedAccountId){
+                        loadSelectedAccountDetail(state.selectedAccountId).catch(function(){});
+                    }
+                }).catch(function(error){
+                    state.error=error instanceof Error?error.message:String(error);
+                    renderAll();
+                });
+            }
             if(state.selectedAccountId){
                 loadSelectedAccountDetail(state.selectedAccountId).catch(function(){});
             }

@@ -168,7 +168,7 @@ Deno.serve(async (request) => {
 
     if (action === 'get_user_workspaces') {
       const authUserIds = Array.isArray(body.auth_user_ids)
-        ? Array.from(new Set(body.auth_user_ids.filter((id) => typeof id === 'string' && id).slice(0, 200)))
+        ? Array.from(new Set(body.auth_user_ids.filter((id) => typeof id === 'string' && id).slice(0, 500)))
         : []
       if (!authUserIds.length) return json({ ok: true, workspaces: [] })
       const { data, error } = await adminClient
