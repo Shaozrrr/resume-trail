@@ -9154,9 +9154,6 @@ function animateSharedViewSwitch(targetView){
         delete shell.dataset.sharedTransitionToken;
     },220);
 }
-function canRunViewTransition(){
-    return !!(document.startViewTransition&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-}
 function switchView(v){
     const previousView=curView;
     const applyView=function(){
@@ -9181,11 +9178,7 @@ function switchView(v){
             }));
         }
     };
-    if(previousView!==v&&canRunViewTransition()){
-        document.startViewTransition(applyView);
-    }else{
-        applyView();
-    }
+    applyView();
 }
 function renderViewModeSwitcher(view){
     const root=$('#view-mode-switcher');
