@@ -1,6 +1,6 @@
 (function(){
     const LIVE_SYNC_INTERVAL=15000;
-    const ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||{};
+    let ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||{};
     const runtimeSettings=window.rtRuntimeSettings||null;
     const EVENT_LABELS={
         rt_workspace_entered:'进入产品',
@@ -173,6 +173,7 @@
     }
 
     function hasLocalAdminConfig(){
+        ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||ADMIN_LOCAL_CONFIG||{};
         return ADMIN_LOCAL_CONFIG
             && ADMIN_LOCAL_CONFIG.mode==='local_service_role'
             && ADMIN_LOCAL_CONFIG.supabaseUrl
@@ -1826,5 +1827,5 @@
         }
     });
 
-    boot();
+    Promise.resolve(window.RT_ADMIN_LOCAL_CONFIG_READY).finally(boot);
 })();

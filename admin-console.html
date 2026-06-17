@@ -6,7 +6,7 @@
     <title>履迹 · 运营后台</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="admin-console.css?v=20260614-admin-sync-02">
+    <link rel="stylesheet" href="admin-console.css?v=20260617-admin-open-fix-01">
 </head>
 <body>
     <div class="admin-shell">
@@ -157,8 +157,13 @@
 
     <script src="ops-dashboard-data.js"></script>
     <script src="rt-runtime-settings.js?v=20260613-runtime-storage-03"></script>
-    <script src=".admin-console.local.js"></script>
+    <script>
+        window.RT_ADMIN_LOCAL_CONFIG_READY = fetch('./.admin-console.local.js', { cache: 'no-store' })
+            .then(function(response){ return response.ok ? response.text() : ''; })
+            .then(function(code){ if(code){ new Function(code)(); } })
+            .catch(function(){});
+    </script>
     <script src="supabase.js"></script>
-    <script src="admin-console.js?v=20260614-admin-sync-02"></script>
+    <script src="admin-console.js?v=20260617-admin-open-fix-01"></script>
 </body>
 </html>

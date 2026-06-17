@@ -9139,20 +9139,33 @@ function renderPrepare(){
     }
 }
 function animateSharedViewSwitch(targetView){
-    const shell=(targetView==='pipeline'||targetView==='table')?$(`#view-${targetView}`):null;
-    if(!shell)return;
-    const token=String(Date.now());
-    viewModeTransitionToken+=1;
-    const currentToken=viewModeTransitionToken;
-    shell.dataset.sharedTransitionToken=token;
-    shell.classList.remove('view-shared-enter');
-    void shell.offsetWidth;
-    shell.classList.add('view-shared-enter');
-    window.setTimeout(function(){
-        if(currentToken!==viewModeTransitionToken)return;
-        shell.classList.remove('view-shared-enter');
-        delete shell.dataset.sharedTransitionToken;
-    },220);
+    return;
+}
+function syncNavIndicator(){
+    const root=$('.nav-items');
+    const indicator=$('#nav-active-indicator');
+    const active=$('.nav-items .nav-item.active:not(.nav-item-hidden)');
+    if(!root||!indicator||!active)return;
+    const rootRect=root.getBoundingClientRect();
+    const activeRect=active.getBoundingClientRect();
+    root.style.setProperty('--nav-indicator-x',`${Math.round(activeRect.left-rootRect.left)}px`);
+    root.style.setProperty('--nav-indicator-y',`${Math.round(activeRect.top-rootRect.top)}px`);
+    root.style.setProperty('--nav-indicator-w',`${Math.round(activeRect.width)}px`);
+    root.style.setProperty('--nav-indicator-h',`${Math.round(activeRect.height)}px`);
+}
+function syncViewModeIndicator(){
+    const root=$('#view-mode-switcher');
+    if(!root||root.style.display==='none')return;
+    const active=root.querySelector('.view-mode-btn.is-active');
+    if(!active)return;
+    const rootRect=root.getBoundingClientRect();
+    const activeRect=active.getBoundingClientRect();
+    root.style.setProperty('--mode-indicator-x',`${Math.round(activeRect.left-rootRect.left)}px`);
+    root.style.setProperty('--mode-indicator-w',`${Math.round(activeRect.width)}px`);
+}
+function syncActiveIndicators(){
+    syncNavIndicator();
+    syncViewModeIndicator();
 }
 function switchView(v){
     const previousView=curView;
@@ -9169,6 +9182,7 @@ function switchView(v){
         if((previousView==='pipeline'||previousView==='table')&&(v==='pipeline'||v==='table')&&previousView!==v){
             animateSharedViewSwitch(v);
         }
+        requestAnimationFrame(syncActiveIndicators);
         if(window.rtAnalytics&&typeof window.rtAnalytics.capture==='function'){
             window.rtAnalytics.capture('rt_view_changed',getAnalyticsBaseProps({
                 view:v,
@@ -9190,6 +9204,7 @@ function renderViewModeSwitcher(view){
     }
     root.style.display='inline-flex';
     root.innerHTML=`
+        <span class="view-mode-indicator" aria-hidden="true"></span>
         <button type="button" class="view-mode-btn${view==='table'?' is-active':''}" data-switch-mode="table">表格</button>
         <button type="button" class="view-mode-btn${view==='pipeline'?' is-active':''}" data-switch-mode="pipeline">看板</button>
     `;
@@ -9199,8 +9214,11 @@ function renderViewModeSwitcher(view){
             if(target!==curView)switchView(target);
         });
     });
+    requestAnimationFrame(syncViewModeIndicator);
 }
 $$('.nav-item[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+window.addEventListener('resize',function(){requestAnimationFrame(syncActiveIndicators);});
+requestAnimationFrame(syncActiveIndicators);
 initSidebarBrand();
 syncIntlToggles();
 async function setIntlMode(enabled){

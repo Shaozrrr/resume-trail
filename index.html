@@ -27,7 +27,7 @@
         })();
     </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23090a0d'/%3E%3Cpath d='M32 8 52 19.5v25L32 56 12 44.5v-25L32 8Zm0 6.8L18 22.9v16.2l14 8.1 14-8.1V22.9l-14-8.1Zm0 7.2 7.8 4.5v9L32 40l-7.8-4.5v-9L32 22Z' fill='%23f4f1ea'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="styles.css?v=20260617-smooth-fix-01">
+    <link rel="stylesheet" href="styles.css?v=20260617-nav-slider-01">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -193,6 +193,7 @@
                 </div>
             </div>
             <div class="nav-items">
+                <span class="nav-active-indicator" id="nav-active-indicator" aria-hidden="true"></span>
                 <button class="nav-item active" data-view="table" title="投递"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M9 3v18"/></svg><span>投递</span></button>
                 <button class="nav-item nav-item-hidden" data-view="pipeline" title="投递看板" aria-hidden="true" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>看板</span></button>
                 <button class="nav-item" data-view="resumes" title="简历文件舱"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg><span>简历</span></button>
@@ -630,10 +631,10 @@
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
   <script src="assets/job-board-cache.js?v=20260615-shixiseng-title-detail-02"></script>
-    <script src="app.js?v=20260617-smooth-fix-01"></script>
+    <script src="app.js?v=20260617-nav-slider-01"></script>
     <script src="supabase.js?v=20260616-account-log-queue-01"></script>
     <script src="features.js?v=20260605-mobile-layout-01"></script>
     <script src="goal.js"></script>
-    <script src="auth.js?v=20260617-smooth-fix-01"></script>
+    <script src="auth.js?v=20260617-nav-slider-01"></script>
 </body>
 </html>
