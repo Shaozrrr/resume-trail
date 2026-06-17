@@ -9155,7 +9155,7 @@ function animateSharedViewSwitch(targetView){
     },220);
 }
 function canRunViewTransition(){
-    return false;
+    return !!(document.startViewTransition&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 function switchView(v){
     const previousView=curView;
@@ -10458,33 +10458,24 @@ function renderPPTags(sel=[]){
 function renderReflectionTemplate(round){
     const box=$('#reflection-template');
     if(!box)return;
-    const qs=REFLECTION_TEMPLATES[round]||REFLECTION_TEMPLATES.ROUND_1;
-    box.innerHTML=`<div class="reflection-template-head"><span>整理线索</span><button type="button" id="reflection-template-apply">加入记录</button></div><div class="reflection-template-list">${qs.map(q=>`<span>${q}</span>`).join('')}</div>`;
-    $('#reflection-template-apply').addEventListener('click',function(){
-        const target=$('#reflection-review-content');
-        const template=qs.map(q=>`${q}：`).join('\n');
-        target.value=target.value.trim()?`${target.value.trim()}\n\n${template}`:template;
-        target.focus();
-    });
+    box.innerHTML='';
 }
 function renderReflectionAiOrganizer(){
-    const box=$('#reflection-ai-organizer');
-    if(!box)return;
+    const actionBox=$('#reflection-ai-organizer');
+    const draftBox=$('#reflection-ai-draft-box');
+    if(!actionBox)return;
+    actionBox.innerHTML=`<button type="button" class="btn-secondary btn-sm reflection-ai-inline-btn" id="reflection-ai-organize">${reflectionAiDraft?'重新整理':'AI 整理复盘'}</button>`;
+    if(!draftBox)return;
     if(!reflectionAiDraft){
-        box.innerHTML=`
-            <div class="reflection-ai-empty">
-                <span>写得很散也没关系。AI 会保留原意，整理成问题、回答、失分点和下一步。</span>
-                <button type="button" class="btn-secondary btn-sm" id="reflection-ai-organize">AI 整理复盘</button>
-            </div>
-        `;
-    }else{
-        const painPoints=Array.isArray(reflectionAiDraft.pain_points)?reflectionAiDraft.pain_points:[];
-        box.innerHTML=`
+        draftBox.innerHTML='';
+        return;
+    }
+    const painPoints=Array.isArray(reflectionAiDraft.pain_points)?reflectionAiDraft.pain_points:[];
+    draftBox.innerHTML=`
             <div class="reflection-ai-draft">
                 <div class="reflection-ai-draft-head">
                     <strong>AI 整理稿</strong>
                     <div>
-                        <button type="button" class="btn-ghost btn-sm" id="reflection-ai-regenerate">重新整理</button>
                         <button type="button" class="btn-primary btn-sm" id="reflection-ai-apply">应用到当前复盘</button>
                     </div>
                 </div>
@@ -10492,7 +10483,6 @@ function renderReflectionAiOrganizer(){
                 ${painPoints.length?`<div class="reflection-ai-tags"><strong>识别到的失分点</strong>${painPoints.map(item=>`<span>${escapeHTML(item)}</span>`).join('')}</div>`:''}
             </div>
         `;
-    }
 }
 function getReflectionFormContext(){
     const rawAppValue=$('#reflection-application')?.value||'';
@@ -10755,8 +10745,26 @@ $$('#trend-granularity .chart-segment').forEach(function(button){
 
 // ---- 设置 ----
 document.getElementById('settings-btn')?.addEventListener('click',()=>{document.getElementById('profile-btn')?.click();});
-function openCommunityModal(){
+function setCommunityAccountId(account){
+    const value=account&&account.id?account.id:'暂未生成';
+    const idEl=$('#community-account-id-display');
+    if(idEl)idEl.textContent=value;
+}
+async function openCommunityModal(){
     $('#community-modal-overlay')?.classList.add('active');
+    try{
+        if(window.rtAccountService&&typeof window.rtAccountService.getCachedAccount==='function'){
+            setCommunityAccountId(window.rtAccountService.getCachedAccount());
+        }
+        if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
+            const account=await window.rtAccountService.ensureAccount();
+            setCommunityAccountId(account);
+        }
+    }catch(err){
+        if(window.rtAccountService&&typeof window.rtAccountService.getCachedAccount==='function'){
+            setCommunityAccountId(window.rtAccountService.getCachedAccount());
+        }
+    }
 }
 function closeCommunityModal(){
     $('#community-modal-overlay')?.classList.remove('active');

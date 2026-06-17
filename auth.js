@@ -1157,8 +1157,11 @@ async function openProfileModal(){
     if(syncDescEl)syncDescEl.textContent=isGuest?'昵称、偏好和标签会保存在当前设备，登录后才可同步到云端。':'昵称、偏好和标签都会跟随账号一起同步。';
     var emailEl=document.getElementById('profile-email-display');
     if(emailEl)emailEl.textContent=isGuest?'未登录，数据仅保存在本机':(u.email||'—');
-    var accountIdEl=document.getElementById('profile-account-id-display');
-    if(accountIdEl)accountIdEl.textContent=account&&account.id||'暂未生成';
+    var profileAccountId=account&&account.id||'暂未生成';
+    ['profile-account-id-display','profile-account-id-display-hero','community-account-id-display'].forEach(function(id){
+        var accountIdEl=document.getElementById(id);
+        if(accountIdEl)accountIdEl.textContent=profileAccountId;
+    });
     var entitlementEl=document.getElementById('profile-membership-detail');
     if(entitlementEl)entitlementEl.textContent=getProfileEntitlementText(account);
     var entitlementTitleEl=document.getElementById('profile-entitlement-title');
@@ -1186,9 +1189,11 @@ async function openProfileModal(){
 var profileBtn=document.getElementById('profile-btn');
 if(profileBtn)profileBtn.addEventListener('click',openProfileModal);
 
-var profileAccountCopy=document.getElementById('profile-account-id-copy');
-if(profileAccountCopy)profileAccountCopy.addEventListener('click',async function(){
-    var value=document.getElementById('profile-account-id-display')&&document.getElementById('profile-account-id-display').textContent||'';
+function bindAccountIdCopy(buttonId,sourceId){
+    var copyButton=document.getElementById(buttonId);
+    if(!copyButton)return;
+    copyButton.addEventListener('click',async function(){
+    var value=document.getElementById(sourceId)&&document.getElementById(sourceId).textContent||'';
     if(!value||value==='暂未生成')return;
     try{
         await navigator.clipboard.writeText(value);
@@ -1198,7 +1203,11 @@ if(profileAccountCopy)profileAccountCopy.addEventListener('click',async function
         this.textContent='复制失败';
         setTimeout(()=>{this.textContent='复制';},1200);
     }
-});
+    });
+}
+bindAccountIdCopy('profile-account-id-copy','profile-account-id-display');
+bindAccountIdCopy('profile-account-id-copy-hero','profile-account-id-display-hero');
+bindAccountIdCopy('community-account-id-copy','community-account-id-display');
 
 var profileUpgradeBtn=document.getElementById('profile-upgrade-btn');
 if(profileUpgradeBtn)profileUpgradeBtn.addEventListener('click',function(){

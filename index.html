@@ -27,7 +27,7 @@
         })();
     </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23090a0d'/%3E%3Cpath d='M32 8 52 19.5v25L32 56 12 44.5v-25L32 8Zm0 6.8L18 22.9v16.2l14 8.1 14-8.1V22.9l-14-8.1Zm0 7.2 7.8 4.5v9L32 40l-7.8-4.5v-9L32 22Z' fill='%23f4f1ea'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="styles.css?v=20260616-smooth-motion-01">
+    <link rel="stylesheet" href="styles.css?v=20260617-polish-ux-01">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -84,6 +84,7 @@
                     <div class="community-entry-copy">
                         <span class="community-entry-kicker">用户共创群</span>
                         <strong>加入用户共创群</strong>
+                        <span>发履迹账号 ID 领 1 个月会员</span>
                     </div>
                 </button>
             </div>
@@ -219,6 +220,7 @@
                         <span class="topbar-community-dot" aria-hidden="true"></span>
                         <span class="topbar-community-copy">
                             <strong>用户共创群</strong>
+                            <small>发账号 ID 领月会员</small>
                         </span>
                     </button>
                     <button id="theme-toggle-app" class="theme-toggle theme-toggle-app" type="button" aria-label="切换浅色模式">
@@ -374,7 +376,7 @@
                 <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option><option value="MOCK_INTERVIEW">模拟面试</option></select></div></div>
                 <div class="form-group"><label>面试问题</label><textarea id="reflection-question-content" rows="3" placeholder="面试官问了什么？"></textarea></div>
                 <div class="form-group"><label>你的回答</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">文本</button><button class="mode-btn" data-mode="voice">语音</button></div><textarea id="reflection-answer-content" rows="6" placeholder="你当时怎么回答的？可以先原样写，后面再让 AI 整理。"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
-                <div class="form-group"><label>复盘记录</label><textarea id="reflection-review-content" rows="5" placeholder="这轮里哪些地方做得好，哪些地方需要改？"></textarea><div id="reflection-template" class="reflection-template"></div><div id="reflection-ai-organizer" class="reflection-ai-organizer"></div></div>
+                <div class="form-group reflection-review-group"><div class="reflection-review-head"><label for="reflection-review-content">复盘记录</label><div id="reflection-ai-organizer" class="reflection-ai-organizer"></div></div><textarea id="reflection-review-content" rows="5" placeholder="这轮里哪些地方做得好，哪些地方需要改？"></textarea><div id="reflection-ai-draft-box" class="reflection-ai-draft-box"></div></div>
                 <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
                 <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
             </div>
@@ -427,6 +429,11 @@
                     <div class="account-hero-meta">
                         <div id="profile-nickname-display" class="account-hero-name">用户</div>
                         <div id="profile-login-method" class="account-hero-email"></div>
+                        <div class="account-hero-id-row">
+                            <span>履迹账号 ID</span>
+                            <strong id="profile-account-id-display-hero">-</strong>
+                            <button type="button" class="account-copy-btn account-hero-id-copy" id="profile-account-id-copy-hero">复制</button>
+                        </div>
                         <div id="profile-auth-chip" class="account-auth-chip">邮箱密码登录</div>
                         <div id="profile-membership-chip" class="account-auth-chip account-auth-chip-membership">试用中</div>
                     </div>
@@ -458,13 +465,6 @@
                         <div class="account-readonly-field">
                             <span class="account-readonly-label">登录邮箱</span>
                             <strong id="profile-email-display">-</strong>
-                        </div>
-                        <div class="account-readonly-field">
-                            <span class="account-readonly-label">履迹账号 ID</span>
-                            <div class="account-inline-id">
-                                <strong id="profile-account-id-display">-</strong>
-                                <button type="button" class="account-copy-btn" id="profile-account-id-copy">复制</button>
-                            </div>
                         </div>
                         <div class="account-readonly-field">
                             <span class="account-readonly-label">准备权益</span>
@@ -558,7 +558,7 @@
             <div class="modal-header">
                 <div>
                     <h2>加入用户共创群</h2>
-                    <p>欢迎在群里提改进建议、反馈使用感受，也可以看看大家怎么一起把产品越磨越好。</p>
+                    <p>扫码进群后，把自己的履迹账号 ID 发到群里，即可领取 1 个月会员。</p>
                 </div>
                 <button class="modal-close" id="community-modal-close">&times;</button>
             </div>
@@ -570,7 +570,14 @@
               <span class="community-scan-line" aria-hidden="true"></span>
               <img src="assets/user-cocreation-group-qr.jpg" alt="用户共创群二维码" class="community-modal-qr" data-runtime-qr="modal">
             </div>
-                <div class="community-modal-caption">微信扫码加入用户共创群。需求、问题、想法，都可以直接放进群里。</div>
+                <div class="community-account-id-card">
+                    <span>你的履迹账号 ID</span>
+                    <div>
+                        <strong id="community-account-id-display">-</strong>
+                        <button type="button" class="account-copy-btn" id="community-account-id-copy">复制</button>
+                    </div>
+                </div>
+                <div class="community-modal-caption">进群后发送这个 ID，管理员会按账号开通 1 个月会员。</div>
             </div>
         </div>
     </div>
@@ -625,10 +632,10 @@
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
   <script src="assets/job-board-cache.js?v=20260615-shixiseng-title-detail-02"></script>
-    <script src="app.js?v=20260616-smooth-motion-01"></script>
+    <script src="app.js?v=20260617-polish-ux-01"></script>
     <script src="supabase.js?v=20260616-account-log-queue-01"></script>
     <script src="features.js?v=20260605-mobile-layout-01"></script>
     <script src="goal.js"></script>
-    <script src="auth.js?v=20260602-account-scope-01"></script>
+    <script src="auth.js?v=20260617-polish-ux-01"></script>
 </body>
 </html>
