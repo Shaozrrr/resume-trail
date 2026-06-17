@@ -11,14 +11,14 @@
 </head>
 <body>
     <section class="admin-lock" id="admin-lock">
-        <form class="admin-lock-card" id="admin-lock-form" autocomplete="off">
+        <form class="admin-lock-card" id="admin-lock-form" autocomplete="on">
             <div class="admin-kicker">Admin</div>
             <h1>运营后台</h1>
             <p>后台与主产品保持独立入口。输入管理密码后进入，只在本次标签页内生效。</p>
             <label class="admin-lock-field">
                 <span>管理密码</span>
                 <input type="hidden" name="username" autocomplete="username" value="resume-trail-admin">
-                <input id="admin-password-input" type="password" placeholder="输入后台密码" autocomplete="current-password">
+                <input id="admin-password-input" name="password" type="password" placeholder="输入后台密码" autocomplete="current-password">
             </label>
             <div class="admin-lock-error" id="admin-lock-error" role="alert" aria-live="polite"></div>
             <div class="admin-lock-actions">
@@ -177,10 +177,18 @@
     <script src="ops-dashboard-data.js"></script>
     <script src="rt-runtime-settings.js?v=20260613-runtime-storage-03"></script>
     <script>
-        window.RT_ADMIN_LOCAL_CONFIG_READY = fetch('./.admin-console.local.js', { cache: 'no-store' })
-            .then(function(response){ return response.ok ? response.text() : ''; })
-            .then(function(code){ if(code){ new Function(code)(); } })
-            .catch(function(){});
+        (function(){
+            var isLocalAdminHost = location.protocol === 'file:'
+                || location.hostname === 'localhost'
+                || location.hostname === '127.0.0.1'
+                || location.hostname === '';
+            window.RT_ADMIN_LOCAL_CONFIG_READY = isLocalAdminHost
+                ? fetch('./.admin-console.local.js', { cache: 'no-store' })
+                    .then(function(response){ return response.ok ? response.text() : ''; })
+                    .then(function(code){ if(code){ new Function(code)(); } })
+                    .catch(function(){})
+                : Promise.resolve();
+        })();
     </script>
     <script src="supabase.js"></script>
     <script src="admin-console.js?v=20260617-admin-cloud-lock-01"></script>
