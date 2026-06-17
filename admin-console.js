@@ -1,6 +1,6 @@
 (function(){
     const LIVE_SYNC_INTERVAL=15000;
-    const ADMIN_PASSWORD_HASH='0ab576a5c09535d9123a312114705d7b6cad8fcfa3bb4420fb37409c8b16b711';
+    const ADMIN_PASSWORD_HASH='a90b56891a1f24b151448cc3bf78466735d06108b780e017fac4872e8ca3f741';
     const ADMIN_API_FUNCTION='admin-console-api';
     let ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||{};
     let adminAccessPassword='';
@@ -57,7 +57,7 @@
         lastSyncAt:'',
         liveSync:true,
         canManage:false,
-        accessMode:'snapshot',
+        accessMode:'locked',
         syncTimer:null,
         selectedIds:new Set(),
         selectedAccountId:'',
@@ -199,7 +199,7 @@
             pill.textContent=state.liveSync?'云端后台实时同步已开启':'云端后台实时同步已暂停';
             return;
         }
-        pill.textContent='当前为历史快照模式';
+        pill.textContent='实时后台未连接';
     }
 
     function hasLocalAdminConfig(){
@@ -1083,7 +1083,7 @@
             node.textContent=state.liveSync?'云端实时可写':'云端手动同步';
             return;
         }
-        node.textContent='只读快照';
+        node.textContent='等待实时后台';
     }
 
     function renderQrManager(){
@@ -1585,7 +1585,7 @@
                 workspace:null,
                 note:account.auth_mode==='guest'
                     ? '体验账号当前只会同步账号层级信息，投递表和简历大多仍停留在本地设备。'
-                    : '当前模式下还不能读取这个用户的云端投递表和简历详情。'
+                    : '实时后台还没有返回这个用户的云端投递表和简历详情。'
             });
             renderUserDetail();
             return;
@@ -1626,10 +1626,9 @@
         state.error='';
         if(!opts.silent)renderAll();
         try{
-            const legacy=buildLegacySnapshotEntries();
-            state.legacyAccounts=legacy.accounts;
-            state.legacyEvents=legacy.events;
             if(adminDataSource&&state.canManage){
+                state.legacyAccounts=[];
+                state.legacyEvents=[];
                 state.backendAccounts=await adminDataSource.listAccounts();
                 state.backendEvents=await adminDataSource.listEvents(state.filters.rangeDays,3000);
                 if(opts.hydrateWorkspaceCache){
@@ -1638,6 +1637,9 @@
             }else{
                 state.backendAccounts=[];
                 state.backendEvents=[];
+                state.legacyAccounts=[];
+                state.legacyEvents=[];
+                throw new Error('实时后台未连接，请重新输入管理密码。');
             }
             state.lastSyncAt=new Date().toISOString();
         }catch(error){
@@ -1723,11 +1725,17 @@
             await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:true});
         }catch(error){
             state.canManage=false;
-            state.accessMode='snapshot';
-            showStatus('后台初始化失败',error instanceof Error?error.message:String(error));
+            state.accessMode='locked';
+            adminDataSource=null;
+            showStatus('实时后台连接失败',error instanceof Error?error.message:String(error));
             setStatusVisible(true);
             updateSyncPill();
-            await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:false});
+            state.backendAccounts=[];
+            state.backendEvents=[];
+            state.legacyAccounts=[];
+            state.legacyEvents=[];
+            state.error=error instanceof Error?error.message:String(error);
+            renderAll();
         }
     }
 
