@@ -1,6 +1,9 @@
 (function(){
     const LIVE_SYNC_INTERVAL=15000;
+    const ADMIN_PASSWORD_HASH='0ab576a5c09535d9123a312114705d7b6cad8fcfa3bb4420fb37409c8b16b711';
+    const ADMIN_API_FUNCTION='admin-console-api';
     let ADMIN_LOCAL_CONFIG=window.RT_ADMIN_CONSOLE_CONFIG||{};
+    let adminAccessPassword='';
     const runtimeSettings=window.rtRuntimeSettings||null;
     const EVENT_LABELS={
         rt_workspace_entered:'进入产品',
@@ -162,11 +165,38 @@
         if(main)main.hidden=!visible;
     }
 
+    function setShellVisible(visible){
+        const shell=$('admin-shell');
+        if(shell)shell.hidden=!visible;
+    }
+
+    function setLockVisible(visible){
+        const lock=$('admin-lock');
+        if(lock)lock.hidden=!visible;
+    }
+
+    async function sha256Hex(value){
+        const encoder=new TextEncoder();
+        const digest=await crypto.subtle.digest('SHA-256',encoder.encode(String(value||'')));
+        return Array.from(new Uint8Array(digest)).map(function(byte){
+            return byte.toString(16).padStart(2,'0');
+        }).join('');
+    }
+
+    async function verifyAdminPassword(password){
+        if(!window.crypto||!crypto.subtle)throw new Error('当前浏览器不支持安全校验，请换 Chrome 或 Safari 重新打开后台。');
+        return await sha256Hex(password)===ADMIN_PASSWORD_HASH;
+    }
+
     function updateSyncPill(){
         const pill=$('admin-sync-pill');
         if(!pill)return;
         if(state.accessMode==='local_service_role'){
             pill.textContent=state.liveSync?'本地后台实时同步已开启':'本地后台实时同步已暂停';
+            return;
+        }
+        if(state.accessMode==='cloud_edge'){
+            pill.textContent=state.liveSync?'云端后台实时同步已开启':'云端后台实时同步已暂停';
             return;
         }
         pill.textContent='当前为历史快照模式';
@@ -426,6 +456,65 @@
                 const src=`${buildPublicObjectUrl(imagePath)}?v=${stamp}`;
                 await this.writeSharedCommunityQrConfig(src);
                 return src;
+            }
+        };
+    }
+
+    function createCloudAdminDataSource(password){
+        async function invoke(action,payload){
+            if(!window.rtAccountService||typeof window.rtAccountService.invokeFunction!=='function'){
+                throw new Error('云端后台接口还没加载，请刷新页面后再试。');
+            }
+            if(!password)throw new Error('后台密码已失效，请重新打开后台输入密码。');
+            return await window.rtAccountService.invokeFunction(ADMIN_API_FUNCTION,Object.assign({
+                action:action,
+                password:password
+            },payload||{}));
+        }
+
+        return {
+            async listAccounts(){
+                const payload=await invoke('list_accounts');
+                return Array.isArray(payload&&payload.accounts)?payload.accounts:[];
+            },
+            async listEvents(days,limit){
+                const payload=await invoke('list_events',{
+                    days:days||30,
+                    limit:limit||3000
+                });
+                return Array.isArray(payload&&payload.events)?payload.events:[];
+            },
+            async updateAccount(patch){
+                const payload=await invoke('update_account',{patch:patch||{}});
+                return payload&&payload.account||null;
+            },
+            async getUserWorkspace(authUserId){
+                const payload=await invoke('get_user_workspace',{auth_user_id:authUserId||''});
+                return decodeUserWorkspaceRow(payload&&payload.workspace||null);
+            },
+            async getUserWorkspaces(authUserIds){
+                const payload=await invoke('get_user_workspaces',{auth_user_ids:Array.isArray(authUserIds)?authUserIds:[]});
+                const workspaceMap=new Map();
+                (Array.isArray(payload&&payload.workspaces)?payload.workspaces:[]).forEach(function(row){
+                    const decoded=decodeUserWorkspaceRow(row);
+                    if(decoded&&decoded.user_id)workspaceMap.set(decoded.user_id,decoded);
+                });
+                return workspaceMap;
+            },
+            async upsertRuntimeSetting(settingKey,settingValue){
+                const payload=await invoke('upsert_runtime_setting',{
+                    setting_key:settingKey,
+                    setting_value:settingValue||{}
+                });
+                return payload&&payload.setting||null;
+            },
+            async writeSharedCommunityQrConfig(src){
+                const payload=await invoke('write_shared_community_qr_config',{src:src||''});
+                return payload&&payload.setting||null;
+            },
+            async uploadSharedCommunityQr(dataUrl){
+                const payload=await invoke('upload_shared_community_qr',{data_url:dataUrl||''});
+                return payload&&payload.src||'';
             }
         };
     }
@@ -986,9 +1075,15 @@
     function renderModeBoard(){
         const node=$('admin-mode-note');
         if(!node)return;
-        node.textContent=state.accessMode==='local_service_role'
-            ? (state.liveSync?'实时可写':'手动同步')
-            : '只读快照';
+        if(state.accessMode==='local_service_role'){
+            node.textContent=state.liveSync?'本地实时可写':'本地手动同步';
+            return;
+        }
+        if(state.accessMode==='cloud_edge'){
+            node.textContent=state.liveSync?'云端实时可写':'云端手动同步';
+            return;
+        }
+        node.textContent='只读快照';
     }
 
     function renderQrManager(){
@@ -1617,13 +1712,15 @@
                 await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:true});
                 return;
             }
-            state.canManage=false;
-            state.accessMode='snapshot';
-            showStatus('当前为快照模式','还没连本地 key，所以先展示历史快照。');
-            setStatusVisible(true);
+            adminDataSource=createCloudAdminDataSource(adminAccessPassword);
+            state.canManage=true;
+            state.accessMode='cloud_edge';
+            showStatus('云端后台已连接','正式环境通过独立后台函数读取和写入数据。');
+            setStatusVisible(false);
             updateSyncPill();
+            await syncSharedCommunityQrFromRemote();
             startLiveSync();
-            await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:false});
+            await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:true});
         }catch(error){
             state.canManage=false;
             state.accessMode='snapshot';
@@ -1632,6 +1729,48 @@
             updateSyncPill();
             await refreshData({preserveScroll:true,silent:false,hydrateWorkspaceCache:false});
         }
+    }
+
+    function initAdminLock(){
+        const lock=$('admin-lock');
+        const form=$('admin-lock-form');
+        const input=$('admin-password-input');
+        const errorNode=$('admin-lock-error');
+        setShellVisible(false);
+        setLockVisible(true);
+        if(!lock||!form||!input){
+            setShellVisible(true);
+            setLockVisible(false);
+            boot();
+            return;
+        }
+        window.requestAnimationFrame(function(){input.focus();});
+        form.addEventListener('submit',function(event){
+            event.preventDefault();
+            const password=input.value||'';
+            if(errorNode)errorNode.textContent='';
+            form.classList.add('is-checking');
+            Promise.resolve()
+                .then(function(){return verifyAdminPassword(password);})
+                .then(function(ok){
+                    if(!ok){
+                        if(errorNode)errorNode.textContent='密码不对，请重新输入。';
+                        input.select();
+                        return;
+                    }
+                    adminAccessPassword=password;
+                    input.value='';
+                    setLockVisible(false);
+                    setShellVisible(true);
+                    boot();
+                })
+                .catch(function(error){
+                    if(errorNode)errorNode.textContent=error instanceof Error?error.message:String(error);
+                })
+                .finally(function(){
+                    form.classList.remove('is-checking');
+                });
+        });
     }
 
     $('admin-refresh-btn')?.addEventListener('click',function(){
@@ -1827,5 +1966,5 @@
         }
     });
 
-    Promise.resolve(window.RT_ADMIN_LOCAL_CONFIG_READY).finally(boot);
+    Promise.resolve(window.RT_ADMIN_LOCAL_CONFIG_READY).finally(initAdminLock);
 })();

@@ -33,6 +33,96 @@ html,body{
 
 body{padding:26px}
 
+[hidden]{display:none!important}
+
+.admin-lock{
+    min-height:calc(100vh - 52px);
+    display:grid;
+    place-items:center;
+}
+
+.admin-lock-card{
+    width:min(520px,100%);
+    margin:0;
+    padding:34px;
+    border:1px solid var(--border);
+    border-radius:34px;
+    background:
+        radial-gradient(circle at 86% 10%,rgba(232,195,158,.14),transparent 30%),
+        linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));
+    box-shadow:var(--shadow);
+}
+
+.admin-lock-card h1{
+    margin:18px 0 10px;
+    font-size:42px;
+    line-height:1;
+    letter-spacing:-.055em;
+}
+
+.admin-lock-card p{
+    margin:0 0 26px;
+    color:var(--text-secondary);
+    font-size:14px;
+    line-height:1.8;
+}
+
+.admin-lock-field{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+.admin-lock-field span{
+    font-size:12px;
+    font-weight:800;
+    letter-spacing:.12em;
+    color:var(--text-muted);
+}
+
+.admin-lock-field input{
+    width:100%;
+    min-height:56px;
+    border-radius:18px;
+    border:1px solid var(--border-strong);
+    background:rgba(255,255,255,.045);
+    color:var(--text);
+    padding:0 16px;
+    font:700 18px/1 var(--font);
+    outline:none;
+    transition:border-color .2s ease,box-shadow .2s ease,background .2s ease;
+}
+
+.admin-hidden-username{
+    position:absolute!important;
+    width:1px!important;
+    height:1px!important;
+    opacity:0!important;
+    pointer-events:none!important;
+}
+
+.admin-lock-field input:focus{
+    border-color:rgba(232,195,158,.52);
+    box-shadow:0 0 0 4px rgba(232,195,158,.1);
+    background:rgba(255,255,255,.065);
+}
+
+.admin-lock-error{
+    min-height:22px;
+    margin-top:10px;
+    color:#fecaca;
+    font-size:13px;
+    line-height:1.6;
+}
+
+.admin-lock-actions{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-top:18px;
+}
+
 .admin-shell{
     max-width:1620px;
     margin:0 auto;

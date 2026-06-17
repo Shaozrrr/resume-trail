@@ -4,12 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>履迹 · 运营后台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2307090f'/%3E%3Cpath d='M18 20h28v24H18z' fill='none' stroke='%23e8c39e' stroke-width='4'/%3E%3Cpath d='M24 30h16M24 38h10' stroke='%23f6f8fc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="admin-console.css?v=20260617-admin-open-fix-01">
+    <link rel="stylesheet" href="admin-console.css?v=20260617-admin-cloud-lock-01">
 </head>
 <body>
-    <div class="admin-shell">
+    <section class="admin-lock" id="admin-lock">
+        <form class="admin-lock-card" id="admin-lock-form" autocomplete="off">
+            <div class="admin-kicker">Admin</div>
+            <h1>运营后台</h1>
+            <p>后台与主产品保持独立入口。输入管理密码后进入，只在本次标签页内生效。</p>
+            <label class="admin-lock-field">
+                <span>管理密码</span>
+                <input type="hidden" name="username" autocomplete="username" value="resume-trail-admin">
+                <input id="admin-password-input" type="password" placeholder="输入后台密码" autocomplete="current-password">
+            </label>
+            <div class="admin-lock-error" id="admin-lock-error" role="alert" aria-live="polite"></div>
+            <div class="admin-lock-actions">
+                <a class="admin-link-btn" href="./index.html">打开主产品</a>
+                <button type="submit" class="admin-primary-btn">进入后台</button>
+            </div>
+        </form>
+    </section>
+
+    <div class="admin-shell" id="admin-shell" hidden>
         <header class="admin-header">
             <div>
                 <div class="admin-kicker">Admin</div>
@@ -25,7 +44,7 @@
 
         <section class="admin-status-card" id="admin-status-card">
             <h2 id="admin-status-title">正在连接独立后台…</h2>
-            <p id="admin-status-desc">本地连上就实时可写；没连上时先看快照。</p>
+            <p id="admin-status-desc">正在验证后台数据源。</p>
         </section>
 
         <main class="admin-main" id="admin-main" hidden>
@@ -164,6 +183,6 @@
             .catch(function(){});
     </script>
     <script src="supabase.js"></script>
-    <script src="admin-console.js?v=20260617-admin-open-fix-01"></script>
+    <script src="admin-console.js?v=20260617-admin-cloud-lock-01"></script>
 </body>
 </html>
