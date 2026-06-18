@@ -1700,8 +1700,11 @@ const jobBoardState={
     regionCounts:{},
     filteredCacheKey:'',
     filteredJobs:[],
-    bodyAnimationToken:0,
-    backgroundRefreshPromise:null
+    backgroundRefreshPromise:null,
+    scrollTop:0,
+    viewportHeight:0,
+    rowHeight:92,
+    virtualFrame:0
 };
 const PREPARE_SPEECH_RECOGNITION_CTOR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
 const PREP_MIN_JD_LENGTH=60;
@@ -3410,7 +3413,6 @@ function refreshJobBoardCacheInBackground(seedPayload){
         });
         const best=pickBestJobBoardCachePayload(payloads);
         if(best&&best!==seedPayload&&applyJobBoardCachePayload(best,{preservePage:true})&&curView==='jobs'){
-            jobBoardState.bodyAnimationToken=Date.now();
             renderJobsView(jobBoardState.query||'');
         }
         return best;
@@ -8011,19 +8013,62 @@ function renderPrepareWorkbench(session){
         </div>
     `;
 }
+function getJobBoardVirtualMetrics(jobs){
+    const rowHeight=jobBoardState.rowHeight||92;
+    const viewportHeight=Math.max(360,jobBoardState.viewportHeight||620);
+    const totalHeight=Math.max(1,jobs.length*rowHeight);
+    const maxScroll=Math.max(0,totalHeight-viewportHeight);
+    const scrollTop=Math.min(Math.max(jobBoardState.scrollTop||0,0),maxScroll);
+    if(scrollTop!==jobBoardState.scrollTop)jobBoardState.scrollTop=scrollTop;
+    const overscan=8;
+    const startIndex=Math.max(0,Math.floor(scrollTop/rowHeight)-overscan);
+    const visibleCount=Math.min(
+        Math.max(0,jobs.length-startIndex),
+        Math.ceil(viewportHeight/rowHeight)+(overscan*2)
+    );
+    const visibleJobs=jobs.slice(startIndex,startIndex+visibleCount);
+    return {
+        rowHeight,
+        viewportHeight,
+        totalHeight,
+        startIndex,
+        visibleJobs,
+        offsetY:startIndex*rowHeight
+    };
+}
+function bindJobImportButtons(scope){
+    (scope||document).querySelectorAll('[data-job-import]').forEach(function(button){
+        button.addEventListener('click',function(event){
+            event.preventDefault();
+            event.stopPropagation();
+            openJobPostingInAppModal(this.dataset.jobImport||'');
+        });
+    });
+}
+function renderJobsVirtualWindow(){
+    const root=$('#jobs-root');
+    if(!root)return;
+    const q=normalizePrepareText(jobBoardState.query);
+    const jobs=getVisibleJobBoardJobs(q);
+    const virtual=getJobBoardVirtualMetrics(jobs);
+    const spacer=root.querySelector('.jobs-virtual-spacer');
+    const windowEl=root.querySelector('.jobs-virtual-window');
+    if(!spacer||!windowEl)return;
+    spacer.style.height=`${virtual.totalHeight}px`;
+    windowEl.style.transform=`translate3d(0, ${virtual.offsetY}px, 0)`;
+    windowEl.innerHTML=virtual.visibleJobs.map(function(job,index){
+        return renderJobRow(job,virtual.startIndex+index);
+    }).join('');
+    bindJobImportButtons(windowEl);
+}
 function renderJobsView(filterText){
     const root=$('#jobs-root');
     if(!root)return;
     const q=normalizePrepareText(filterText||jobBoardState.query);
     const jobs=getVisibleJobBoardJobs(q);
-    const totalPages=Math.max(1,Math.ceil(jobs.length/(jobBoardState.pageSize||80)));
-    const currentPage=Math.min(Math.max(jobBoardState.page||1,1),totalPages);
-    jobBoardState.page=currentPage;
-    const startIndex=(currentPage-1)*(jobBoardState.pageSize||80);
-    const pageJobs=jobs.slice(startIndex,startIndex+(jobBoardState.pageSize||80));
+    const virtual=getJobBoardVirtualMetrics(jobs);
     const regionCounts=jobBoardState.regionCounts||{};
     const metaLabel=q?`当前匹配 ${jobs.length} 个岗位`:`当前收录 ${jobs.length} 个岗位`;
-    const bodyTransitionClass=jobBoardState.bodyAnimationToken?' jobs-results-panel--enter':'';
     root.innerHTML=`
         <section class="jobs-shell">
             <div class="jobs-hero">
@@ -8049,9 +8094,9 @@ function renderJobsView(filterText){
                 </div>
                 <div class="jobs-meta-row">
                     <span>${escapeHTML(metaLabel)}</span>
-                    <span>第 ${currentPage} / ${totalPages} 页</span>
+                    <span>${jobs.length?'连续滚动浏览':'等待职位数据'}</span>
                 </div>
-                <div class="jobs-results-panel${bodyTransitionClass}">
+                <div class="jobs-results-panel">
                 ${jobBoardState.error?`<div class="jobs-error">${escapeHTML(jobBoardState.error)}</div>`:''}
                 ${jobBoardState.loading?`
                     <div class="jobs-loading">
@@ -8074,14 +8119,13 @@ function renderJobsView(filterText){
                                 <span>来源</span>
                                 <span></span>
                             </div>
-                            <div class="jobs-table-body">
-                                ${pageJobs.map(function(job,index){return renderJobRow(job,index);}).join('')}
+                            <div class="jobs-table-body" data-jobs-scroll>
+                                <div class="jobs-virtual-spacer" style="height:${virtual.totalHeight}px">
+                                    <div class="jobs-virtual-window" style="transform:translate3d(0, ${virtual.offsetY}px, 0)">
+                                        ${virtual.visibleJobs.map(function(job,index){return renderJobRow(job,virtual.startIndex+index);}).join('')}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="jobs-pagination">
-                            <button type="button" class="btn-secondary btn-sm" data-jobs-page="prev" ${currentPage<=1?'disabled':''}>上一页</button>
-                            <span class="jobs-pagination-meta">显示 ${jobs.length?startIndex+1:0}-${Math.min(startIndex+pageJobs.length,jobs.length)} / ${jobs.length}</span>
-                            <button type="button" class="btn-secondary btn-sm" data-jobs-page="next" ${currentPage>=totalPages?'disabled':''}>下一页</button>
                         </div>
                     </div>
                 `:`
@@ -8107,36 +8151,31 @@ function renderJobsView(filterText){
         button.addEventListener('click',function(){
             jobBoardState.activeRegion=this.dataset.jobsRegion||'all';
             jobBoardState.page=1;
-            jobBoardState.bodyAnimationToken=Date.now();
+            jobBoardState.scrollTop=0;
+            jobBoardState.viewportHeight=0;
             renderJobsView();
         });
     });
-    $$('[data-jobs-page]').forEach(function(button){
-        button.addEventListener('click',function(){
-            const direction=this.dataset.jobsPage;
-            if(direction==='prev'&&jobBoardState.page>1)jobBoardState.page-=1;
-            if(direction==='next'&&jobBoardState.page<totalPages)jobBoardState.page+=1;
-            jobBoardState.bodyAnimationToken=Date.now();
-            renderJobsView();
-        });
-    });
-    $$('[data-job-import]').forEach(function(button){
-        button.addEventListener('click',function(event){
-            event.preventDefault();
-            event.stopPropagation();
-            openJobPostingInAppModal(this.dataset.jobImport||'');
-        });
-    });
+    const jobsScroll=root.querySelector('[data-jobs-scroll]');
+    if(jobsScroll){
+        jobsScroll.scrollTop=jobBoardState.scrollTop||0;
+        jobBoardState.viewportHeight=jobsScroll.clientHeight||jobBoardState.viewportHeight||0;
+        jobsScroll.addEventListener('scroll',function(){
+            jobBoardState.scrollTop=this.scrollTop;
+            jobBoardState.viewportHeight=this.clientHeight||jobBoardState.viewportHeight||0;
+            if(jobBoardState.virtualFrame)return;
+            jobBoardState.virtualFrame=window.requestAnimationFrame(function(){
+                jobBoardState.virtualFrame=0;
+                renderJobsVirtualWindow();
+            });
+        },{passive:true});
+    }
+    bindJobImportButtons(root);
     if(!jobBoardState.bootstrapped&&!jobBoardState.loading&&!jobBoardState.searched&&curView==='jobs'){
         jobBoardState.bootstrapped=true;
         setTimeout(function(){
             if(curView==='jobs')void runJobBoardSearch({query:'',forceReload:false});
         },0);
-    }
-    if(jobBoardState.bodyAnimationToken){
-        window.requestAnimationFrame(function(){
-            jobBoardState.bodyAnimationToken=0;
-        });
     }
 }
 function renderJobRow(job,index){
@@ -8166,6 +8205,8 @@ async function runJobBoardSearch(options){
     const query=normalizePrepareText(rawQuery);
     jobBoardState.query=query;
     jobBoardState.page=1;
+    jobBoardState.scrollTop=0;
+    jobBoardState.viewportHeight=0;
     jobBoardState.error='';
     jobBoardState.searched=true;
     jobBoardState.bootstrapped=true;
