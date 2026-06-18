@@ -754,12 +754,39 @@
         return EVENT_SIGNAL_SCORES[eventName]||30;
     }
 
+    function getRelatedEventsForAccount(account,events){
+        const currentAccount=account||{};
+        const accountId=currentAccount.id||'';
+        const guestId=currentAccount.guest_id||'';
+        const authUserId=currentAccount.auth_user_id||'';
+        const email=String(currentAccount.email||'').toLowerCase();
+        const eventList=Array.isArray(events)?events:getFilteredEvents();
+        return eventList.filter(function(event){
+            if(!isMeaningfulEvent(event))return false;
+            if(accountId&&event.account_id===accountId)return true;
+            if(guestId&&event.guest_id===guestId)return true;
+            const props=event.props||{};
+            const propUser=String(props.user_id||props.email||props.auth_user_id||'').toLowerCase();
+            return !!((email&&propUser===email)||(authUserId&&propUser===String(authUserId).toLowerCase()));
+        });
+    }
+
+    function getEventAssetFallbackStats(account,events){
+        const eventNames=new Set(getRelatedEventsForAccount(account,events).map(function(item){return item.event_name;}));
+        return {
+            resumeCount:(eventNames.has('rt_resume_uploaded')||eventNames.has('rt_resume_created'))?1:0,
+            appCount:eventNames.has('rt_application_created')?1:0,
+            prepareCount:(eventNames.has('rt_prepare_access_consumed')||eventNames.has('rt_prepare_session_created'))?1:0
+        };
+    }
+
     function getFilteredAccounts(){
         const query=state.filters.query.trim().toLowerCase();
+        const events=getFilteredEvents();
         return getCombinedAccounts().filter(function(entry){
             const account=entry.account||{};
             const membership=getMembershipKey(account);
-            const assetStats=getWorkspaceStatsFromCache(account);
+            const assetStats=getAccountAssetStats(account,events);
             const searchable=[
                 account.id,
                 account.email,
@@ -911,14 +938,11 @@
                 if(scoreDiff!==0)return scoreDiff;
                 return new Date(b&&b.created_at||0).getTime()-new Date(a&&a.created_at||0).getTime();
             });
-            const eventNames=new Set(relatedEvents.map(function(item){return item.event_name;}));
-            const fallbackResumeCount=(eventNames.has('rt_resume_uploaded')||eventNames.has('rt_resume_created'))?1:0;
-            const fallbackAppCount=eventNames.has('rt_application_created')?1:0;
-            const fallbackPrepareCount=(eventNames.has('rt_prepare_access_consumed')||eventNames.has('rt_prepare_session_created'))?1:0;
+            const fallbackStats=getEventAssetFallbackStats(account,relatedEvents);
             const stats={
-                resumeCount:Math.max(workspaceResumes.length,fallbackResumeCount),
-                appCount:Math.max(workspaceApps.length,fallbackAppCount),
-                prepareCount:Math.max(workspacePrepare.length,fallbackPrepareCount),
+                resumeCount:Math.max(workspaceResumes.length,fallbackStats.resumeCount),
+                appCount:Math.max(workspaceApps.length,fallbackStats.appCount),
+                prepareCount:Math.max(workspacePrepare.length,fallbackStats.prepareCount),
                 reflectionCount:workspaceRefs.length
             };
             const latestEvent=prioritizedEvents[0]||null;
@@ -1223,6 +1247,16 @@
             resumeCount:Array.isArray(workspace&&workspace.resumes)?workspace.resumes.length:0,
             appCount:getMeaningfulApplications(workspace&&workspace.apps).length,
             prepareCount:Array.isArray(workspace&&workspace.prepare_sessions)?workspace.prepare_sessions.length:0
+        };
+    }
+
+    function getAccountAssetStats(account,events){
+        const workspaceStats=getWorkspaceStatsFromCache(account);
+        const fallbackStats=getEventAssetFallbackStats(account,events);
+        return {
+            resumeCount:Math.max(workspaceStats.resumeCount,fallbackStats.resumeCount),
+            appCount:Math.max(workspaceStats.appCount,fallbackStats.appCount),
+            prepareCount:Math.max(workspaceStats.prepareCount,fallbackStats.prepareCount)
         };
     }
 
@@ -1533,7 +1567,8 @@
         state.filters.rangeDays=Number($('admin-range-filter')?.value||30);
     }
 
-    function renderAll(){
+    function renderAll(options){
+        const opts=options&&typeof options==='object'?options:{};
         const accounts=getFilteredAccounts();
         state.summaryMap=buildAccountSummaryMap(accounts,getFilteredEvents());
         ensureSelectedAccount(accounts);
@@ -1541,7 +1576,7 @@
         renderModeBoard();
         renderQrManager();
         renderAccounts(accounts,state.summaryMap);
-        renderUserDetail();
+        if(!opts.skipUserDetail)renderUserDetail();
     }
 
     async function hydrateWorkspaceCacheForAccounts(accountEntries){
@@ -1590,6 +1625,7 @@
             renderUserDetail();
             return;
         }
+        const scrollTop=window.scrollY;
         state.detailLoadingId=accountId;
         renderUserDetail();
         try{
@@ -1606,6 +1642,9 @@
         }finally{
             state.detailLoadingId='';
             renderAll();
+            window.requestAnimationFrame(function(){
+                window.scrollTo({top:scrollTop,left:0,behavior:'auto'});
+            });
         }
     }
 
@@ -1645,19 +1684,19 @@
             state.error=error instanceof Error?error.message:String(error);
         }finally{
             state.loading=false;
-            renderAll();
+            renderAll({skipUserDetail:opts.silent});
             if(shouldHydrateWorkspace){
                 hydrateWorkspaceCacheForAccounts(state.backendAccounts).then(function(){
-                    renderAll();
-                    if(state.selectedAccountId){
+                    renderAll({skipUserDetail:opts.silent});
+                    if(state.selectedAccountId&&!opts.silent){
                         loadSelectedAccountDetail(state.selectedAccountId).catch(function(){});
                     }
                 }).catch(function(error){
                     state.error=error instanceof Error?error.message:String(error);
-                    renderAll();
+                    renderAll({skipUserDetail:opts.silent});
                 });
             }
-            if(state.selectedAccountId){
+            if(state.selectedAccountId&&!opts.silent){
                 loadSelectedAccountDetail(state.selectedAccountId).catch(function(){});
             }
             if(opts.preserveScroll){
