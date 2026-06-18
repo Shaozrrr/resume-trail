@@ -1686,7 +1686,7 @@ const jobBoardState={
     query:'',
     activeRegion:'all',
     page:1,
-    pageSize:60,
+    pageSize:36,
     loading:false,
     error:'',
     jobs:[],

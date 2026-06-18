@@ -142,8 +142,8 @@ function enterGuestMode(){
     if(typeof updIntl==='function')updIntl();
     if(typeof refresh==='function')refresh();
     if(typeof switchView==='function')switchView('table');
-    if(window.rtAccountService&&typeof window.rtAccountService.ensureAccount==='function'){
-        window.rtAccountService.ensureAccount({input_source_channel:'guest_mode'}).catch(function(err){
+    if(window.rtAccountService&&typeof window.rtAccountService.ensureAccountOnce==='function'){
+        window.rtAccountService.ensureAccountOnce({input_source_channel:'guest_mode'}).catch(function(err){
             console.warn('[RT auth] guest ensure account failed',err);
         });
     }

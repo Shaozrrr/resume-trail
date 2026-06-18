@@ -649,6 +649,22 @@ function rtGetGuestIdentityIdSafe(){
   return '';
 }
 
+function rtResetGuestIdentityIdSafe(){
+  if(typeof window!=='undefined'&&typeof window.rtResetGuestIdentityId==='function'){
+    window.rtResetGuestIdentityId();
+  }
+  return rtGetGuestIdentityIdSafe();
+}
+
+function rtIsUniqueGuestConflict(result){
+  if(!result||result.status!==409)return false;
+  const errorText=String(result.error||'').toLowerCase();
+  const dataText=typeof result.data==='string'
+    ? result.data.toLowerCase()
+    : JSON.stringify(result.data||{}).toLowerCase();
+  return (errorText+dataText).includes('guest_id')||(errorText+dataText).includes('rt_accounts_guest_id_unique');
+}
+
 function rtReadCachedAccountSafe(){
   if(typeof window!=='undefined'&&typeof window.rtReadCachedAccount==='function')return window.rtReadCachedAccount();
   return null;
@@ -736,7 +752,16 @@ const rtAccountService={
   },
 
   async ensureAccount(extra){
-    const result=await rtRpcCall('rt_get_my_account',this.buildIdentityBody(extra),this.getSessionToken());
+    let result=await rtRpcCall('rt_get_my_account',this.buildIdentityBody(extra),this.getSessionToken());
+    const session=sb.getSession();
+    const isGuestMode=!(session&&session.user&&session.user.id);
+    if(isGuestMode&&rtIsUniqueGuestConflict(result)){
+      rtResetGuestIdentityIdSafe();
+      this.setCachedAccount(null);
+      result=await rtRpcCall('rt_get_my_account',this.buildIdentityBody(Object.assign({},extra||{},{
+        input_source_channel:(extra&&extra.input_source_channel)||'guest_retry_unique'
+      })),this.getSessionToken());
+    }
     if(!result.ok){
       throw new Error(result.error||'账号初始化失败');
     }
