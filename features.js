@@ -29,6 +29,7 @@ function isMobileCalendar(){
 }
 function syncCalendarViewButtons(){
     featureSelectAll('.cal-view-btn').forEach(b=>b.classList.toggle('active',b.dataset.calview===calView));
+    if(typeof window.rtSyncSegmentSlider==='function')window.rtSyncSegmentSlider('#calendar-view-toggle');
 }
 function normalizeCalendarViewForViewport(){
     if(isMobileCalendar()&&calView!=='week')calView='week';
@@ -104,7 +105,7 @@ function renderUpcoming(){
 const cp=featureSelect('#cal-prev'),cn=featureSelect('#cal-next');
 if(cp)cp.addEventListener('click',()=>{if(calView==='month')calDate.setMonth(calDate.getMonth()-1);else calDate.setDate(calDate.getDate()-7);renderCalendar();});
 if(cn)cn.addEventListener('click',()=>{if(calView==='month')calDate.setMonth(calDate.getMonth()+1);else calDate.setDate(calDate.getDate()+7);renderCalendar();});
-featureSelectAll('.cal-view-btn').forEach(b=>{b.addEventListener('click',()=>{calView=isMobileCalendar()?'week':b.dataset.calview;renderCalendar();});});
+featureSelectAll('.cal-view-btn').forEach(b=>{b.addEventListener('click',()=>{calView=isMobileCalendar()?'week':b.dataset.calview;renderCalendar();if(typeof window.rtSyncSegmentSlider==='function')window.rtSyncSegmentSlider('#calendar-view-toggle');});});
 let calendarWasMobile=isMobileCalendar();
 window.addEventListener('resize',()=>{
     const mobile=isMobileCalendar();

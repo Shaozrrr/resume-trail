@@ -569,9 +569,32 @@ function clearLocalBusinessData(){
     store.resetState();
 }
 
+function isMigratableGuestApp(app){
+    if(!app)return false;
+    if(app.is_starter_placeholder===true)return false;
+    if(app.seeded_demo===true||app.placeholder_seed===true)return false;
+    if(app.starter_placeholder_source)return false;
+    return true;
+}
+
+function getMigratableGuestApps(apps){
+    return (Array.isArray(apps)?apps:[]).filter(isMigratableGuestApp);
+}
+
+function getMigratableGuestLogs(logs,apps){
+    var blockedIds=new Set((Array.isArray(apps)?apps:[]).filter(function(app){
+        return app&&!isMigratableGuestApp(app)&&app.id;
+    }).map(function(app){return app.id;}));
+    return (Array.isArray(logs)?logs:[]).filter(function(log){
+        return log&&(!log.app_id||!blockedIds.has(log.app_id));
+    });
+}
+
 function hasGuestBusinessData(data){
     if(!data)return false;
-    return !!((data.apps&&data.apps.length)||(data.resumes&&data.resumes.length)||(data.prepare_sessions&&data.prepare_sessions.length)||(data.refs&&data.refs.length)||(data.logs&&data.logs.length));
+    var migratableApps=getMigratableGuestApps(data.apps);
+    var migratableLogs=getMigratableGuestLogs(data.logs,data.apps);
+    return !!(migratableApps.length||(data.resumes&&data.resumes.length)||(data.prepare_sessions&&data.prepare_sessions.length)||(data.refs&&data.refs.length)||migratableLogs.length);
 }
 
 function mergeUniqueRecords(primary,secondary){
@@ -679,12 +702,14 @@ async function migrateGuestStateToAccount(session){
             input_email:session.user.email||'',
             input_source_channel:'guest_upgrade'
         });
+        const migratableGuestApps=getMigratableGuestApps(guestData.apps);
+        const migratableGuestLogs=getMigratableGuestLogs(guestData.logs,guestData.apps);
         const mergedSnapshot={
-            apps:mergeUniqueRecords(store.apps,guestData.apps),
+            apps:mergeUniqueRecords(store.apps,migratableGuestApps),
             resumes:mergeUniqueRecords(store.resumes,guestData.resumes),
             prepareSessions:mergeUniqueRecords(store.prepareSessions,guestData.prepare_sessions),
             refs:mergeUniqueRecords(store.refs,guestData.refs),
-            logs:mergeUniqueRecords(store.logs,guestData.logs),
+            logs:mergeUniqueRecords(store.logs,migratableGuestLogs),
             categories:mergeStringCollections(store.categories,guestData.categories),
             painPoints:mergeStringCollections(store.painPoints,guestData.pain_points),
             tableCols:normalizeTableColumns((store.tableCols||[]).concat(guestData.table_cols||[])),

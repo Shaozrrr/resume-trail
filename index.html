@@ -27,7 +27,7 @@
         })();
     </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23090a0d'/%3E%3Cpath d='M32 8 52 19.5v25L32 56 12 44.5v-25L32 8Zm0 6.8L18 22.9v16.2l14 8.1 14-8.1V22.9l-14-8.1Zm0 7.2 7.8 4.5v9L32 40l-7.8-4.5v-9L32 22Z' fill='%23f4f1ea'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="styles.css?v=20260617-nav-slider-01">
+    <link rel="stylesheet" href="styles.css?v=20260618-profile-slider-inherit-01">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -303,8 +303,10 @@
                     <span id="cal-title" style="font-size:15px;font-weight:600;min-width:140px;text-align:center"></span>
                     <button class="btn-ghost btn-sm" id="cal-next">▶</button>
                     <div style="flex:1"></div>
-                    <button class="btn-ghost btn-sm cal-view-btn active" data-calview="month">月</button>
-                    <button class="btn-ghost btn-sm cal-view-btn" data-calview="week">周</button>
+                    <div class="calendar-view-toggle rt-segmented-slider" id="calendar-view-toggle">
+                        <button class="btn-ghost btn-sm cal-view-btn active" data-calview="month">月</button>
+                        <button class="btn-ghost btn-sm cal-view-btn" data-calview="week">周</button>
+                    </div>
                 </div>
                 <div id="calendar-grid" class="calendar-grid"></div>
                 <div id="cal-upcoming" style="padding:16px 24px"><h3 style="font-size:13px;color:var(--text-tertiary);margin-bottom:10px">即将到来</h3><div id="cal-upcoming-list"></div></div>
@@ -314,7 +316,7 @@
                 <div class="analytics-grid">
                     <div class="stat-cards" id="stat-cards"></div>
                     <div class="chart-card" style="padding:14px 18px" id="goal-card"><h3 style="font-size:12px;font-weight:600;color:var(--text-tertiary);margin-bottom:8px">本周投递目标</h3><div id="goal-body"></div></div>
-                    <div class="chart-row"><div class="chart-card"><div class="chart-card-head"><h3>投递趋势</h3><div class="chart-segmented" id="trend-granularity"><button type="button" class="chart-segment is-active" data-granularity="day">按天</button><button type="button" class="chart-segment" data-granularity="week">按周</button><button type="button" class="chart-segment" data-granularity="month">按月</button></div></div><div class="chart-body" id="trend-chart"></div></div><div class="chart-card chart-card-stack"><h3>Offer 转化漏斗</h3><div class="chart-body" id="funnel-chart"></div></div></div>
+                    <div class="chart-row"><div class="chart-card"><div class="chart-card-head"><h3>投递趋势</h3><div class="chart-segmented rt-segmented-slider" id="trend-granularity"><button type="button" class="chart-segment is-active" data-granularity="day">按天</button><button type="button" class="chart-segment" data-granularity="week">按周</button><button type="button" class="chart-segment" data-granularity="month">按月</button></div></div><div class="chart-body" id="trend-chart"></div></div><div class="chart-card chart-card-stack"><h3>Offer 转化漏斗</h3><div class="chart-body" id="funnel-chart"></div></div></div>
                     <div class="chart-row"><div class="chart-card"><h3>岗位类别转化率</h3><div class="chart-body" id="category-chart"></div></div><div class="chart-card"><h3>城市分布</h3><div class="chart-body" id="city-chart"></div></div></div>
                     <div class="chart-row chart-row-insight"><div class="chart-card"><h3>渠道表现</h3><div class="chart-body" id="source-chart"></div></div><div class="chart-card chart-card-insight"><h3>数据解读</h3><div class="chart-body" id="insight-content"></div></div></div>
                 </div>
@@ -374,7 +376,7 @@
             <div class="modal-body">
                 <div class="form-row"><div class="form-group"><label>关联投递 <span class="required">*</span></label><select id="reflection-application"></select></div><div class="form-group"><label>面试轮次 <span class="required">*</span></label><select id="reflection-round"><option value="OA_TEST">笔试/OA</option><option value="ROUND_1">一面</option><option value="ROUND_2">二面</option><option value="ROUND_3">三面</option><option value="ROUND_4">四面</option><option value="GROUP">群面</option><option value="HR">HR面</option><option value="MOCK_INTERVIEW">模拟面试</option></select></div></div>
                 <div class="form-group"><label>面试问题</label><textarea id="reflection-question-content" rows="3" placeholder="面试官问了什么？"></textarea></div>
-                <div class="form-group"><label>你的回答</label><div class="input-mode-toggle"><button class="mode-btn active" data-mode="text">文本</button><button class="mode-btn" data-mode="voice">语音</button></div><textarea id="reflection-answer-content" rows="6" placeholder="你当时怎么回答的？可以先原样写，后面再让 AI 整理。"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
+                <div class="form-group"><label>你的回答</label><div class="input-mode-toggle rt-segmented-slider" id="reflection-mode-toggle"><button class="mode-btn active" data-mode="text">文本</button><button class="mode-btn" data-mode="voice">语音</button></div><textarea id="reflection-answer-content" rows="6" placeholder="你当时怎么回答的？可以先原样写，后面再让 AI 整理。"></textarea><div id="voice-recorder" style="display:none"><button class="record-btn" id="record-btn"><span class="record-icon"></span><span id="record-label">点击开始转写</span></button><div id="record-timer" class="record-timer">00:00</div><div id="voice-result" class="voice-result" style="display:none"></div></div></div>
                 <div class="form-group reflection-review-group"><div class="reflection-review-head"><label for="reflection-review-content">复盘记录</label><div id="reflection-ai-organizer" class="reflection-ai-organizer"></div></div><textarea id="reflection-review-content" rows="5" placeholder="这轮里哪些地方做得好，哪些地方需要改？"></textarea><div id="reflection-ai-draft-box" class="reflection-ai-draft-box"></div></div>
                 <div class="form-group"><label>失分点 <span style="font-weight:normal;color:var(--text-muted)">可自定义</span></label><div class="tag-selector" id="pain-points-selector"></div><div class="add-tag-row"><input type="text" id="new-pain-point-input" placeholder="自定义失分点..." class="add-tag-input"><button class="btn-ghost btn-sm" id="add-pain-point-btn">+ 添加</button></div></div>
                 <div class="form-group"><label>自评</label><div class="star-rating" id="self-rating"><span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span></div></div>
@@ -439,19 +441,6 @@
                 </section>
 
                 <section class="account-section">
-                    <div class="account-entitlement-banner" id="profile-entitlement-banner">
-                        <div class="account-entitlement-copy">
-                            <strong id="profile-entitlement-title">准备权益载入中…</strong>
-                            <p id="profile-entitlement-desc">正在同步你的履迹账号权益与准备次数。</p>
-                        </div>
-                        <div class="account-entitlement-actions">
-                            <button class="btn-secondary" id="profile-register-upgrade" type="button">先注册账号</button>
-                            <button class="btn-primary" id="profile-upgrade-btn" type="button">开通会员</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="account-section">
                     <div class="account-section-head">
                         <div class="account-section-title">账户资料</div>
                         <div id="profile-sync-desc" class="account-section-desc">昵称、偏好和标签都会跟随账号一起同步。</div>
@@ -469,18 +458,8 @@
                             <span class="account-readonly-label">准备权益</span>
                             <strong id="profile-membership-detail">试用权益载入中…</strong>
                         </div>
-                    </div>
-                </section>
-
-                <section class="account-section">
-                    <div class="account-section-head">
-                        <div class="account-section-title">偏好与节奏</div>
-                        <div class="account-section-desc">你在这里调整分析口径和求职节奏。</div>
-                    </div>
-                    <div class="account-inline-settings">
-                        <label class="account-inline-setting">
-                            <span class="account-inline-label">每周投递目标</span>
-                            <span class="account-inline-help">用于数据看板的节奏追踪</span>
+                        <label class="account-input-card account-field account-goal-field">
+                            <span class="account-input-label">每周投递目标</span>
                             <input type="number" id="settings-weekly-goal" value="10" min="1" max="100">
                         </label>
                     </div>
@@ -631,10 +610,10 @@
     <script src="analytics.js"></script>
     <script src="particles.js"></script>
   <script src="assets/job-board-cache.js?v=20260615-shixiseng-title-detail-02"></script>
-    <script src="app.js?v=20260617-nav-slider-01"></script>
+    <script src="app.js?v=20260618-profile-slider-inherit-01"></script>
     <script src="supabase.js?v=20260616-account-log-queue-01"></script>
-    <script src="features.js?v=20260605-mobile-layout-01"></script>
+    <script src="features.js?v=20260618-calendar-slider-01"></script>
     <script src="goal.js"></script>
-    <script src="auth.js?v=20260617-nav-slider-01"></script>
+    <script src="auth.js?v=20260618-profile-slider-inherit-01"></script>
 </body>
 </html>
